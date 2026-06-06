@@ -148,9 +148,11 @@ function http_header_get(headers_raw, name,    lines, n, i, k, lname) {
 }
 
 function http_send(sock, res, req, start_ms,    wire, dur, ts) {
+  if (res["sent"]) return    # 二重送信防止 (send() 明示呼出 後)
   wire = response_wire(res)
   printf "%s", wire |& sock
   fflush(sock)
+  res["sent"] = 1
 
   dur = now_ms() - start_ms
   ts  = strftime("%Y-%m-%dT%H:%M:%S%z")

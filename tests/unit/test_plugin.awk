@@ -80,6 +80,8 @@ function test_plugin_missing_config(   meta) {
   meta["config_keys"] = "__HAWK_TEST_ENV_THAT_NEVER_EXISTS__"
 
   PLUGIN_REGISTER_ERROR = 0
+  PLUGIN_QUIET = 1
   plugin_register("needs_env", meta)
+  PLUGIN_QUIET = 0
   assert_eq(PLUGIN_REGISTER_ERROR, 1, "plugin: config missing flagged")
 }

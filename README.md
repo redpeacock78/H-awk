@@ -11,7 +11,7 @@
 - GNU make
 - (E2E テスト時のみ) curl
 
-検証済み OS: Linux、macOS (Darwin)。Windows は WSL 経由のみ。
+検証済み環境: gawk 5.3.1 / macOS Darwin 21。Linux は API 互換のため動作見込み。Windows は WSL 経由のみ。
 
 ## Quickstart
 

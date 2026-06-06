@@ -100,6 +100,13 @@ function response_wire(res,    out, k, name, code_text, np, i, lines) {
   return out
 }
 
+# send(res) -- 明示送信マーカー。実際の wire 送出は http.awk が行う。
+# 二重送信防止用に res["sent"]=1 を立てる。ハンドラ内で `send(res); return`
+# としても良いが、通常はハンドラ戻りで http.awk が自動送出する。
+function send(res) {
+  res["sent"] = 1
+}
+
 function response_header_case(name,    parts, n, i, out, c) {
   n = split(name, parts, "-")
   out = ""
