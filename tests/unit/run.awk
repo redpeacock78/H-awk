@@ -55,6 +55,10 @@ BEGIN {
   test_plugin_call_hooks_abort()
   test_plugin_missing_config()
 
+  test_libs_binary_length()
+  test_libs_binary_read_text()
+  test_libs_binary_read_missing()
+
   printf "\n%d passed, %d failed, %d skipped\n", TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED
   exit (TESTS_FAILED > 0)
 }
@@ -81,3 +85,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_response.awk"
 @include "tests/unit/test_router.awk"
 @include "tests/unit/test_plugin.awk"
+@include "tests/unit/test_libs.awk"

@@ -24,7 +24,13 @@ END {
     }
     call_hooks("init")
 
-    log_info(sprintf("H-awk listening on http://0.0.0.0:%d", HAWK_PORT))
+    libs_list = ""
+    for (lib in LIBS_LOADED) {
+      libs_list = libs_list (libs_list == "" ? "" : ", ") lib
+    }
+    log_info(sprintf("H-awk listening on http://0.0.0.0:%d%s", \
+      HAWK_PORT, \
+      libs_list == "" ? "" : " [libs: " libs_list "]"))
 
     HAWK_SHUTDOWN = 0
     http_serve()
@@ -147,11 +153,25 @@ function http_header_get(headers_raw, name,    lines, n, i, k, lname) {
   return ""
 }
 
-function http_send(sock, res, req, start_ms,    wire, dur, ts) {
+function http_send(sock, res, req, start_ms,    wire, content, dur, ts) {
   if (res["sent"]) return    # 二重送信防止 (send() 明示呼出 後)
-  wire = response_wire(res)
-  printf "%s", wire |& sock
-  fflush(sock)
+
+  if (res["_binary_path"] != "" && LIBS_LOADED["binary"]) {
+    content = hawk_bin_read(res["_binary_path"])
+    res["body"] = ""
+    res["header:content-length"] = hawk_bin_length(content)
+    wire = response_wire(res)
+    # response_wire は body を末尾に付与する仕様 → 末尾は "\r\n\r\n" のみ
+    printf "%s", wire |& sock
+    fflush(sock)
+    # binary content を直接 socket に書く
+    printf "%s", content |& sock
+    fflush(sock)
+  } else {
+    wire = response_wire(res)
+    printf "%s", wire |& sock
+    fflush(sock)
+  }
   res["sent"] = 1
 
   dur = now_ms() - start_ms
