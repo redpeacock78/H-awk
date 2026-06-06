@@ -6,3 +6,4 @@
 @include "core/tsv.awk"
 @include "core/template.awk"
 @include "core/static.awk"
+@include "core/request.awk"

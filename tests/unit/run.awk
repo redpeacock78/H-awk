@@ -26,6 +26,11 @@ BEGIN {
   test_static_safe_path()
   test_static_read()
 
+  test_request_parse_get()
+  test_request_parse_form()
+  test_request_parse_json()
+  test_request_bad_line()
+
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)
 }
@@ -48,3 +53,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_tsv.awk"
 @include "tests/unit/test_template.awk"
 @include "tests/unit/test_static.awk"
+@include "tests/unit/test_request.awk"
