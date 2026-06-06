@@ -41,6 +41,8 @@ BEGIN {
   test_response_text()
   test_response_html()
   test_response_wire()
+  test_response_header_crlf_strip()
+  test_response_redirect_crlf_strip()
 
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)

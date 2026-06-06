@@ -65,3 +65,15 @@ function test_response_wire(   wire) {
   assert_true(index(wire, "Connection: close\r\n") > 0, "res: connection close")
   assert_true(index(wire, "\r\n\r\nok") > 0, "res: body separator")
 }
+
+function test_response_header_crlf_strip() {
+  delete res
+  header(res, "Location", "/safe\r\nX-Injected: yes")
+  assert_eq(res["header:location"], "/safeX-Injected: yes", "res: header strips CRLF")
+}
+
+function test_response_redirect_crlf_strip() {
+  delete res
+  redirect(res, "/foo\r\nSet-Cookie: evil=1")
+  assert_eq(res["header:location"], "/fooSet-Cookie: evil=1", "res: redirect strips CRLF")
+}

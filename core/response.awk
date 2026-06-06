@@ -16,10 +16,12 @@ function status(res, code) {
 }
 
 function header(res, name, value) {
+  gsub(/[\r\n]/, "", value)
   res["header:" to_lower(name)] = value
 }
 
 function header_append(res, name, value,    key) {
+  gsub(/[\r\n]/, "", value)
   key = "header:" to_lower(name)
   if (key in res && res[key] != "") {
     res[key] = res[key] "\n" value
@@ -29,6 +31,7 @@ function header_append(res, name, value,    key) {
 }
 
 function redirect(res, location, code) {
+  gsub(/[\r\n]/, "", location)
   res["status"] = (code != "" && code != 0) ? code : 302
   res["header:location"] = location
   res["body"] = ""
