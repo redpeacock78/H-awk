@@ -1,0 +1,14 @@
+# H-awk runtime artifacts
+data/*.tsv
+data/*.tmp
+tests/e2e/*.log
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
