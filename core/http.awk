@@ -17,8 +17,6 @@ END {
     HAWK_REQUEST_TIMEOUT  = ENVIRON["HAWK_REQUEST_TIMEOUT"]  ? ENVIRON["HAWK_REQUEST_TIMEOUT"]  + 0 : 30
     HAWK_DEV              = (ENVIRON["DEV"] == "1")
 
-    PROCINFO["sleep|timeout"] = HAWK_REQUEST_TIMEOUT * 1000
-
     plugin_discover()
     if (PLUGIN_REGISTER_ERROR) {
       log_error("plugin registration failed, exiting.")
@@ -38,6 +36,7 @@ END {
 
 function http_serve(    sock, line, headers_raw, body, content_length, raw, hdr_size, req, res, dispatch_ok, start_ms, ok) {
   sock = "/inet/tcp/" HAWK_PORT "/0/0"
+  PROCINFO[sock, "READ_TIMEOUT"] = HAWK_REQUEST_TIMEOUT * 1000
 
   while (!HAWK_SHUTDOWN) {
     # 1. ヘッダ部読込 (空行 = CRLF CRLF まで)
@@ -55,6 +54,7 @@ function http_serve(    sock, line, headers_raw, body, content_length, raw, hdr_
       hdr_size += length(line) + 2
       if (hdr_size > HAWK_MAX_HEADER_SIZE) {
         http_send_simple(sock, 431, "Request Header Fields Too Large")
+        close(sock)
         headers_raw = ""
         break
       }
@@ -151,7 +151,7 @@ function http_send(sock, res, req, start_ms,    wire, dur, ts) {
 
   dur = now_ms() - start_ms
   ts  = strftime("%Y-%m-%dT%H:%M:%S%z")
-  printf "%s\tINFO\t%s\t%s\t%d\t%dms\n", ts, req["method"], req["path"], res["status"], dur
+  printf "%s\tINFO\t%s\t%s\t%d\t%d\n", ts, req["method"], req["path"], res["status"], dur
   fflush()
 }
 
