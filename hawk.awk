@@ -2,3 +2,4 @@
 # This file is loaded by gawk before app.awk, plugins, and tests.
 
 @include "core/util.awk"
+@include "core/json.awk"

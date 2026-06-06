@@ -10,6 +10,11 @@ BEGIN {
   test_util_escape_html()
   test_util_to_lower()
 
+  test_json_encode_flat()
+  test_json_encode_type_suffix()
+  test_json_encode_escape()
+  test_json_decode_flat()
+
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)
 }
@@ -28,3 +33,4 @@ function assert_true(cond, msg) {
 }
 
 @include "tests/unit/test_util.awk"
+@include "tests/unit/test_json.awk"
