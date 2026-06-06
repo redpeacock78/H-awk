@@ -7,7 +7,7 @@
 set -e
 
 PORT=18180
-HAWK_PORT=$PORT \
+PORT=$PORT \
 HAWK_MAX_HEADER_SIZE=1024 \
 HAWK_MAX_BODY_SIZE=128 \
   ./bin/hawk tests/e2e/fixtures/app.awk > tests/e2e/server.log 2>&1 &
