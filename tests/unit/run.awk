@@ -33,6 +33,15 @@ BEGIN {
   test_request_parse_array()
   test_request_parse_eq_in_value()
 
+  test_response_status()
+  test_response_header()
+  test_response_header_append()
+  test_response_redirect()
+  test_response_json()
+  test_response_text()
+  test_response_html()
+  test_response_wire()
+
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)
 }
@@ -56,3 +65,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_template.awk"
 @include "tests/unit/test_static.awk"
 @include "tests/unit/test_request.awk"
+@include "tests/unit/test_response.awk"

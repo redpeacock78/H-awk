@@ -7,3 +7,4 @@
 @include "core/template.awk"
 @include "core/static.awk"
 @include "core/request.awk"
+@include "core/response.awk"
