@@ -1,5 +1,5 @@
 #!/bin/sh
-# H-awk entry: .env load → plugin glob → gawk supervisor loop
+# H-awk entry: .env load → plugin glob → libs glob → gawk supervisor loop
 set -e
 
 APP="${1:-app.awk}"
@@ -29,6 +29,32 @@ for d in plugins/*/; do
   [ -f "$impl" ]     && PLUGIN_FILES="$PLUGIN_FILES -f $impl"
 done
 
+# Libs glob (v0.2): libs/<name>/zig-out/lib/libhawk_<name>.{so,dylib} を検出
+LIBS_ARGS=""
+LIBS_VARS=""
+case "$(uname -s)" in
+  Darwin) SO_EXT=dylib ;;
+  *)      SO_EXT=so ;;
+esac
+
+for d in libs/*/; do
+  [ -d "$d" ] || continue
+  name=$(basename "$d")
+  [ "$name" = "_common" ] && continue
+  so="${d}zig-out/lib/libhawk_${name}.${SO_EXT}"
+  if [ -f "$so" ]; then
+    LIBS_ARGS="$LIBS_ARGS -l hawk_${name}"
+    LIBS_VARS="$LIBS_VARS -v HAWK_LIBS_${name}=1"
+    abspath=$(cd "$(dirname "$so")" && pwd)
+    AWKLIBPATH="${abspath}${AWKLIBPATH:+:}${AWKLIBPATH:-}"
+  else
+    if [ -f "${d}build.zig" ]; then
+      echo "[WARN] libs/${name} 未ビルド ($so 不在)。機能 fallback 動作" >&2
+    fi
+  fi
+done
+export AWKLIBPATH
+
 # シグナル受信時に gawk を kill して supervisor も終了
 HAWK_PID=""
 shutdown() {
@@ -43,7 +69,7 @@ trap shutdown INT TERM
 # Supervisor loop: gawk が異常終了した場合のみ再起動
 while true; do
   # shellcheck disable=SC2086
-  gawk -b -f hawk.awk $PLUGIN_FILES -f "$APP" &
+  gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP" &
   HAWK_PID=$!
   wait "$HAWK_PID"
   status=$?
