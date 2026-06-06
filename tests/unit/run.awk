@@ -15,6 +15,10 @@ BEGIN {
   test_json_encode_escape()
   test_json_decode_flat()
 
+  test_tsv_append_and_read()
+  test_tsv_find()
+  test_tsv_delete_update()
+
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)
 }
@@ -34,3 +38,4 @@ function assert_true(cond, msg) {
 
 @include "tests/unit/test_util.awk"
 @include "tests/unit/test_json.awk"
+@include "tests/unit/test_tsv.awk"
