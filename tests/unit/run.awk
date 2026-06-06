@@ -30,6 +30,8 @@ BEGIN {
   test_request_parse_form()
   test_request_parse_json()
   test_request_bad_line()
+  test_request_parse_array()
+  test_request_parse_eq_in_value()
 
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)

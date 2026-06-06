@@ -72,13 +72,14 @@ function request_parse(raw, req,    parts, headers_raw, body, lines, n, i, line,
   return 1
 }
 
-function _request_parse_kv(s, req, prefix,    pairs, np, i, kv, k, v) {
+function _request_parse_kv(s, req, prefix,    pairs, np, i, eq, k, v) {
   np = split(s, pairs, "&")
   for (i = 1; i <= np; i++) {
     if (pairs[i] == "") continue
-    if (split(pairs[i], kv, "=") == 2) {
-      k = url_decode(kv[1])
-      v = url_decode(kv[2])
+    eq = index(pairs[i], "=")
+    if (eq > 0) {
+      k = url_decode(substr(pairs[i], 1, eq - 1))
+      v = url_decode(substr(pairs[i], eq + 1))
     } else {
       k = url_decode(pairs[i])
       v = ""

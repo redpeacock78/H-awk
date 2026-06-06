@@ -34,3 +34,20 @@ function test_request_bad_line(   raw, req, ok) {
   ok = request_parse(raw, req)
   assert_eq(ok, 0, "req: bad request-line rejected")
 }
+
+function test_request_parse_array(   raw, req) {
+  delete _ARR_COUNT
+  raw = "POST /tags HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\ntags[]=shop&tags[]=urgent"
+  delete req
+  request_parse(raw, req)
+  assert_eq(req["form:tags[]", 1], "shop",   "req: array index 1")
+  assert_eq(req["form:tags[]", 2], "urgent", "req: array index 2")
+}
+
+function test_request_parse_eq_in_value(   raw, req) {
+  raw = "POST /api HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 28\r\n\r\ntoken=YWJj%3D%3D&other=ok"
+  delete req
+  request_parse(raw, req)
+  assert_eq(req["form:token"], "YWJj==", "req: encoded = in value (url-decoded)")
+  assert_eq(req["form:other"], "ok",     "req: another pair after eq value")
+}
