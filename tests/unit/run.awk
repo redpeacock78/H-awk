@@ -19,6 +19,9 @@ BEGIN {
   test_tsv_find()
   test_tsv_delete_update()
 
+  test_template_read()
+  test_template_read_missing()
+
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)
 }
@@ -39,3 +42,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_util.awk"
 @include "tests/unit/test_json.awk"
 @include "tests/unit/test_tsv.awk"
+@include "tests/unit/test_template.awk"

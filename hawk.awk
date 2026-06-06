@@ -4,3 +4,4 @@
 @include "core/util.awk"
 @include "core/json.awk"
 @include "core/tsv.awk"
+@include "core/template.awk"
