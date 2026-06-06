@@ -4,6 +4,10 @@ data/*.tmp
 tests/e2e/*.log
 .env
 
+# Local tool state (Claude Code, memsearch)
+.memsearch/
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

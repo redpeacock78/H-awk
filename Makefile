@@ -6,7 +6,7 @@ APP ?= app.awk
 PLUGIN_FILES := $(foreach d,$(wildcard plugins/*/),$(if $(wildcard $(d).disabled),,-f $(d)manifest.awk -f $(d)$(notdir $(patsubst %/,%,$(d))).awk))
 
 help: ## 利用可能なターゲット一覧
-	@awk -F':.*##' '/^[a-z_-]+:.*##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk -F':.*##' '/^[a-z0-9_-]+:.*##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 run: ## サーバー起動
 	./bin/hawk $(APP)
