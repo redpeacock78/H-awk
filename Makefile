@@ -17,7 +17,7 @@ dev: ## DEV=1 でログ詳細
 test: test-unit test-e2e ## 全テスト
 
 test-unit: ## awk 内 assert
-	HAWK_NO_SERVE=1 gawk -f hawk.awk $(PLUGIN_FILES) -f tests/unit/run.awk
+	HAWK_NO_SERVE=1 gawk -b -f hawk.awk $(PLUGIN_FILES) -f tests/unit/run.awk
 
 test-e2e: ## サーバー起動 + curl
 	./tests/e2e/run.sh

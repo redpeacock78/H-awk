@@ -43,7 +43,7 @@ trap shutdown INT TERM
 # Supervisor loop: gawk が異常終了した場合のみ再起動
 while true; do
   # shellcheck disable=SC2086
-  gawk -f hawk.awk $PLUGIN_FILES -f "$APP" &
+  gawk -b -f hawk.awk $PLUGIN_FILES -f "$APP" &
   HAWK_PID=$!
   wait "$HAWK_PID"
   status=$?
