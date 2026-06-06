@@ -1,0 +1,56 @@
+#!/bin/sh
+# H-awk entry: .env load → plugin glob → gawk supervisor loop
+set -e
+
+APP="${1:-app.awk}"
+if [ ! -f "$APP" ]; then
+  echo "[hawk] app file not found: $APP" >&2
+  exit 1
+fi
+
+# .env を export (値内スペース安全)
+if [ -f .env ]; then
+  set -a
+  # shellcheck source=/dev/null
+  . ./.env
+  set +a
+fi
+
+# Collect plugin files: plugins/<name>/{manifest.awk,<name>.awk}
+# .disabled マーカーがあるディレクトリはスキップ
+PLUGIN_FILES=""
+for d in plugins/*/; do
+  [ -d "$d" ] || continue
+  [ -f "${d}.disabled" ] && continue
+  name=$(basename "$d")
+  manifest="${d}manifest.awk"
+  impl="${d}${name}.awk"
+  [ -f "$manifest" ] && PLUGIN_FILES="$PLUGIN_FILES -f $manifest"
+  [ -f "$impl" ]     && PLUGIN_FILES="$PLUGIN_FILES -f $impl"
+done
+
+# シグナル受信時に gawk を kill して supervisor も終了
+HAWK_PID=""
+shutdown() {
+  if [ -n "$HAWK_PID" ]; then
+    kill -TERM "$HAWK_PID" 2>/dev/null || true
+    wait "$HAWK_PID" 2>/dev/null || true
+  fi
+  exit 0
+}
+trap shutdown INT TERM
+
+# Supervisor loop: gawk が異常終了した場合のみ再起動
+while true; do
+  # shellcheck disable=SC2086
+  gawk -f hawk.awk $PLUGIN_FILES -f "$APP" &
+  HAWK_PID=$!
+  wait "$HAWK_PID"
+  status=$?
+  HAWK_PID=""
+  if [ "$status" = 0 ]; then
+    break
+  fi
+  echo "[hawk] gawk exited $status, restart in 1s" >&2
+  sleep 1
+done
