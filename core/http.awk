@@ -119,15 +119,18 @@ function http_serve(    sock, line, headers_raw, body, content_length, raw, hdr_
   close(sock)
 }
 
-function http_read_body(sock, n,    rec, line, ok) {
-  rec = ""
-  while (length(rec) < n) {
-    ok = (sock |& getline line)
-    if (ok <= 0) break
-    rec = rec line "\n"
-    if (length(rec) >= n) break
-  }
-  return substr(rec, 1, n)
+function http_read_body(sock, n,    line, ok, prev_rs) {
+  if (n <= 0) return ""
+  # Use RS = ".{n}" so gawk reads exactly n bytes as the record separator.
+  # gawk's RT variable then holds the matched bytes (the body content).
+  # This avoids blocking on getline when the body has no trailing newline
+  # (e.g. application/x-www-form-urlencoded sent by curl -d).
+  prev_rs = RS
+  RS = sprintf(".{%d}", n)
+  ok = (sock |& getline line)
+  line = RT   # RT holds the text that matched RS
+  RS = prev_rs
+  return substr(line, 1, n)
 }
 
 function http_header_get(headers_raw, name,    lines, n, i, k, lname) {
