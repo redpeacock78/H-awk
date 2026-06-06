@@ -2,6 +2,7 @@
 #
 # 依存順:
 #   util       -- 共通ユーティリティ (他全てが依存)
+#   libs       -- libs (gawk extension) 読込状態の集約 (v0.2 追加)
 #   json       -- request.awk の json body parse が依存
 #   tsv        -- ハンドラから使う組込みヘルパー
 #   template   -- response.awk の render() が依存
@@ -13,6 +14,7 @@
 #   http       -- END でリッスンループ起動
 
 @include "core/util.awk"
+@include "core/libs.awk"
 @include "core/json.awk"
 @include "core/tsv.awk"
 @include "core/template.awk"

@@ -4,6 +4,7 @@
 BEGIN {
   TESTS_PASSED = 0
   TESTS_FAILED = 0
+  TESTS_SKIPPED = 0
 
   # 各 test_* 関数の呼出はモジュールごとに追加していく
   test_util_url_decode()
@@ -54,7 +55,7 @@ BEGIN {
   test_plugin_call_hooks_abort()
   test_plugin_missing_config()
 
-  printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
+  printf "\n%d passed, %d failed, %d skipped\n", TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED
   exit (TESTS_FAILED > 0)
 }
 
