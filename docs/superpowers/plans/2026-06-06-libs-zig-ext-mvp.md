@@ -70,7 +70,14 @@ git checkout -b task-LZ-1-scaffold
 zig version
 ```
 
-Expected: `0.14.x` (またはそれ以上)。0.14 未満なら **BLOCKED** で報告 (`mlugg/setup-zig@v1` の version 引数で固定するため、対応版より低い場合は CI も走らない)。
+Expected: `0.15.x` または `0.16.x` (またはそれ以上)。0.14 以下なら **BLOCKED** で報告。
+
+**重要**: Zig は 0.14 → 0.15 → 0.16 で build.zig API に破壊的変更がある (`root_source_file: LazyPath` → `root_module: *Module` への移行など)。Task 2 で `build_helper.zig` を書く時は subagent が **現環境の `zig version` を確認し、その版の API に合わせる**こと。本 plan のコード例は 0.14 ベースで書いてあるが、subagent は実装時に以下のテクニックで吸収する:
+
+- 0.15+: `b.addModule(.{ .root_source_file = b.path(...) })` で module 作成 → `b.addSharedLibrary(.{ .name = ..., .root_module = mod })` に渡す
+- 0.16+: さらに type 名変更があれば公式 release notes (https://ziglang.org/download/) を参照
+
+CI の `mlugg/setup-zig@v1` も同様に `version` を環境に合わせる (Task 8 で必要なら matrix も更新)。
 
 - [ ] **Step 1.3: gawk 版確認 (extension API API_MAJOR=4)**
 
@@ -1466,7 +1473,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v1
         with:
-          version: 0.14.0
+          # NOTE: 実装時に Task 1 Step 1.2 で確認した zig version に合わせる
+          # (本 plan 作成時は 0.16 系を想定。0.15 / 0.14 にダウングレードしないこと)
+          version: 0.16.0
       - name: Build libs
         run: |
           set -e
