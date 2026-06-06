@@ -1,5 +1,16 @@
-# H-awk core entry. Aggregates core/*.awk via @include in dependency order.
-# This file is loaded by gawk before app.awk, plugins, and tests.
+# H-awk core entry point.
+#
+# 依存順:
+#   util       -- 共通ユーティリティ (他全てが依存)
+#   json       -- request.awk の json body parse が依存
+#   tsv        -- ハンドラから使う組込みヘルパー
+#   template   -- response.awk の render() が依存
+#   static     -- router の 404 fallback が呼ぶ
+#   request    -- raw → req[]
+#   response   -- res[] + wire format
+#   router     -- ROUTES + dispatch
+#   plugin     -- hook 登録 + call_hooks
+#   http       -- END でリッスンループ起動
 
 @include "core/util.awk"
 @include "core/json.awk"
