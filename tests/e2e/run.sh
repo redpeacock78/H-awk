@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # H-awk E2E runner
 # 起動 → curl リクエスト → assert → 終了。
 # 失敗があれば exit 1。

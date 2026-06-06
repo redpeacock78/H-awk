@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/router.awk -- ルート登録 + マッチング + ハンドラ呼出
 #
 # 戻り値:

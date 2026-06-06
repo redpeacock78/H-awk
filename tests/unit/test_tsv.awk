@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 function test_tsv_append_and_read(   row, out, n, tmpfile) {
   tmpfile = "/tmp/hawk_tsv_test_" PROCINFO["pid"] ".tsv"
   system("rm -f " tmpfile)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/plugin.awk -- プラグイン管理 (設定ドリブン関数)
 #
 # 起動時に bin/hawk が plugins/<name>/manifest.awk と plugins/<name>/<name>.awk を

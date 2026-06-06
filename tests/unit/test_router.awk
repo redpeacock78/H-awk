@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # テスト用ハンドラ
 function _t_hello(req, res) { text(res, "hello") }
 function _t_show(req, res)  { text(res, "id=" req["params:id"]) }

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tests/unit/test_template.awk -- template.awk ユニットテスト
 
 function test_template_read(   tmpfile, content) {

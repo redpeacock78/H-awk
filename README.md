@@ -95,6 +95,88 @@ make lint          # gawk --lint の構文チェック
 make ci            # lint + 全テスト
 ```
 
+## バイナリ配信と native 拡張 (libs)
+
+H-awk は標準で **PNG / JPG / アイコン等のバイナリファイル配信** に対応するが、これは内部的に `libs/binary/` (Zig 製 gawk extension) を使う。**ユーザーは Zig の存在を意識する必要はない**。`make build-libs` で一度ビルドすれば、以降は通常通り `./bin/hawk app.awk` で起動するだけでバイナリ配信が透過的に有効になる。
+
+### libs のセットアップ (3 通り)
+
+#### 方法 A: Zig からビルド (推奨)
+
+```sh
+make build-libs    # libs/*/zig-out/lib/libhawk_*.{so,dylib}
+```
+
+要件: Zig 0.15+ (`zig version` で確認)
+
+#### 方法 B: precompiled をダウンロード (Zig 不要)
+
+```sh
+HAWK_REPO=<owner>/<repo> make fetch-libs
+```
+
+GitHub Release から OS / アーキ対応の .so / .dylib を取得して `libs/<name>/zig-out/lib/` に展開する。
+
+#### 方法 C: libs を使わない
+
+何もしない。サーバーは起動するが、PNG / JPG 等のバイナリ配信時に内容が壊れる (text mode 読込で `\n` が混入する)。CSS / JS / HTML / JSON / プレーンテキストは libs 不要で正常配信される。
+
+### 状態確認
+
+起動時のログに有効な libs が表示される:
+
+```
+[INFO]  H-awk listening on http://0.0.0.0:8080 [libs: binary]
+```
+
+### 提供 libs (v0.2 時点)
+
+- **`libs/binary`** — バイナリ-safe file I/O。PNG/JPG/ICO/WebP/font 等の正確な読込・送信に必須
+
+### 今後追加予定 (ロードマップ)
+
+- v0.3: `libs/multipart` (ファイルアップロード) / `libs/crypto` (sha256/hmac)
+- v0.4: `libs/gzip` / `libs/url` (高速 url_decode)
+
+## プラグイン (plugins/) — git submodule で管理
+
+H-awk のプラグインは **island plugin** 方式: 各プラグインは独立した git リポジトリで配布され、本リポジトリでは `git submodule` として取り込む。core は `plugins/<name>/manifest.awk` の存在のみで discover するため、submodule 未初期化 (= ディレクトリ空) の場合は自動的に無効化される。
+
+### プラグインの追加
+
+```sh
+git submodule add https://github.com/<owner>/hawk-plugin-csrf plugins/csrf
+git submodule update --init plugins/csrf
+```
+
+`plugins/csrf/manifest.awk` + `plugins/csrf/csrf.awk` が配置され、次の起動から自動有効化される。
+
+### プラグインの一時無効化
+
+```sh
+touch plugins/csrf/.disabled
+```
+
+`.disabled` マーカーがあれば bin/hawk は当該 plugin を gawk -f 集約から外す。
+
+### プラグインの完全削除
+
+```sh
+git submodule deinit plugins/csrf
+git rm plugins/csrf
+```
+
+### 公式 plugin 命名規約
+
+- リポジトリ名: `hawk-plugin-<name>`
+- マウント先: `plugins/<name>/`
+- 関数命名: `plugin_<name>_<hook>` (フック) / `<name>_<api>` (公開 API)
+
+### 提供予定 (公式 plugin、ロードマップ)
+
+- v0.3: `hawk-plugin-csrf` / `hawk-plugin-postgres` / `hawk-plugin-s3`
+- v0.4: `hawk-plugin-session` / `hawk-plugin-cors` / `hawk-plugin-logger-json`
+
 ## ライセンス
 
 (プロジェクトのライセンスに合わせて記載)

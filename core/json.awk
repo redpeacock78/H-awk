@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/json.awk -- 最小 JSON encode / decode
 #
 # json_encode(data) は data[] 連想配列を JSON 文字列に変換する。

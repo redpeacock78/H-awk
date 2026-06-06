@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # 仮プラグイン (テスト中のみ)
 function plugin_demo_manifest(meta) {
   meta["name"]        = "demo"

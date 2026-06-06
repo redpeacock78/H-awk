@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 function test_response_status() {
   delete res
   status(res, 404)

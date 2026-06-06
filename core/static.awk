@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/static.awk -- 静的ファイル配信 + mime 判定 + パストラバーサル拒否
 #
 # API:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 .PHONY: run dev test test-unit test-e2e lint clean help ci build-libs fetch-libs test-libs libs-clean ci-full
 
 APP ?= app.awk

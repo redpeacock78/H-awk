@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 function test_json_encode_flat(   data, out) {
   delete data
   data["foo"] = "bar"

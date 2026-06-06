@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 function test_request_parse_get(   raw, req) {
   raw = "GET /users/42?page=1 HTTP/1.1\r\nHost: x\r\nUser-Agent: curl/8.0\r\n\r\n"
   delete req

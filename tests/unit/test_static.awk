@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 function test_static_mime() {
   assert_eq(static_mime("a.html"), "text/html; charset=utf-8",       "mime: html")
   assert_eq(static_mime("b.css"),  "text/css; charset=utf-8",        "mime: css")

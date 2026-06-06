@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tests/unit/run.awk -- H-awk ユニットテストランナー
 # hawk.awk (core/*.awk を @include) と一緒に gawk に渡す。
 

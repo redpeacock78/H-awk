@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/util.awk -- 共通ユーティリティ
 #
 # 提供関数:

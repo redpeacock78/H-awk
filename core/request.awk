@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/request.awk -- raw HTTP 文字列 → req[] 連想配列
 #
 # 入力: raw 文字列 (CRLF 区切り、Content-Length 分の body を含む完全なリクエスト)

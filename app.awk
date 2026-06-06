@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # app.awk -- H-awk サンプル todo アプリ
 #
 # ルート:

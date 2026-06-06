@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # H-awk entry: .env load → plugin glob → libs glob → gawk supervisor loop
 set -e
 

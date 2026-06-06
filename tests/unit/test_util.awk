@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 function test_util_url_decode() {
   assert_eq(url_decode("hello%20world"), "hello world", "util: url_decode space")
   assert_eq(url_decode("a+b"),            "a b",         "util: url_decode plus")

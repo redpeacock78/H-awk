@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/http.awk -- /inet/tcp listener + request ループ
 #
 # bin/hawk が gawk -f hawk.awk -f <plugins...> -f app.awk として起動する。

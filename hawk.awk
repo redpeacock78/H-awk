@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # H-awk core entry point.
 #
 # 依存順:

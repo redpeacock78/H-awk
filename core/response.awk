@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/response.awk -- res[] 操作 API + HTTP wire format
 #
 # API:

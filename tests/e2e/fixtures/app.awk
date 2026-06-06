@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # E2E fixture app: 最小ルートで HTTP/router/static/parse を網羅
 BEGIN {
   GET("/",            "e_index")

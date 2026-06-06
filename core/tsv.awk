@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # core/tsv.awk -- TSV ヘルパー
 #
 # データモデル: 1 行目はヘッダ (列名 TSV)、2 行目以降がレコード。
