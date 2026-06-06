@@ -9,3 +9,4 @@
 @include "core/request.awk"
 @include "core/response.awk"
 @include "core/router.awk"
+@include "core/plugin.awk"

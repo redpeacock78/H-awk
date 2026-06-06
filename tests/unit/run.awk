@@ -49,6 +49,11 @@ BEGIN {
   test_router_405()
   test_router_static_priority()
 
+  test_plugin_register_one()
+  test_plugin_call_hooks_normal()
+  test_plugin_call_hooks_abort()
+  test_plugin_missing_config()
+
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)
 }
@@ -74,3 +79,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_request.awk"
 @include "tests/unit/test_response.awk"
 @include "tests/unit/test_router.awk"
+@include "tests/unit/test_plugin.awk"
