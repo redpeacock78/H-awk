@@ -25,7 +25,7 @@ test-e2e: ## サーバー起動 + curl
 lint: ## awk 構文チェック
 	@set -e; for f in core/*.awk hawk.awk; do \
 	  [ -f "$$f" ] || continue; \
-	  gawk --lint -f "$$f" -e 'BEGIN{exit 0}' >/dev/null 2>&1 \
+	  HAWK_NO_SERVE=1 gawk --lint -f "$$f" -e 'BEGIN{exit 0}' >/dev/null 2>&1 \
 	    || (echo "lint FAIL: $$f"; exit 1); \
 	done
 	@echo "lint OK"

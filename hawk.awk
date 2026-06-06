@@ -10,3 +10,4 @@
 @include "core/response.awk"
 @include "core/router.awk"
 @include "core/plugin.awk"
+@include "core/http.awk"
