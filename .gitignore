@@ -16,3 +16,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Zig (libs/)
+libs/*/zig-out/
+libs/*/zig-cache/
+libs/*/.zig-cache/
