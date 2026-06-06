@@ -44,6 +44,11 @@ BEGIN {
   test_response_header_crlf_strip()
   test_response_redirect_crlf_strip()
 
+  test_router_register_and_match()
+  test_router_404()
+  test_router_405()
+  test_router_static_priority()
+
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)
 }
@@ -68,3 +73,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_static.awk"
 @include "tests/unit/test_request.awk"
 @include "tests/unit/test_response.awk"
+@include "tests/unit/test_router.awk"

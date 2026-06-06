@@ -8,3 +8,4 @@
 @include "core/static.awk"
 @include "core/request.awk"
 @include "core/response.awk"
+@include "core/router.awk"

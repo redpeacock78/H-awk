@@ -39,19 +39,22 @@ function redirect(res, location, code) {
 
 function json(res, data, code,    body) {
   body = json_encode(data)
-  res["status"] = (code != "" && code != 0) ? code : 200
+  if (code != "" && code != 0) res["status"] = code
+  else if (!("status" in res)) res["status"] = 200
   res["header:content-type"] = "application/json; charset=utf-8"
   res["body"] = body
 }
 
 function text(res, body, code) {
-  res["status"] = (code != "" && code != 0) ? code : 200
+  if (code != "" && code != 0) res["status"] = code
+  else if (!("status" in res)) res["status"] = 200
   res["header:content-type"] = "text/plain; charset=utf-8"
   res["body"] = body
 }
 
 function html(res, body, code) {
-  res["status"] = (code != "" && code != 0) ? code : 200
+  if (code != "" && code != 0) res["status"] = code
+  else if (!("status" in res)) res["status"] = 200
   res["header:content-type"] = "text/html; charset=utf-8"
   res["body"] = body
 }
