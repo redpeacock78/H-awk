@@ -22,6 +22,10 @@ BEGIN {
   test_template_read()
   test_template_read_missing()
 
+  test_static_mime()
+  test_static_safe_path()
+  test_static_read()
+
   printf "\n%d passed, %d failed\n", TESTS_PASSED, TESTS_FAILED
   exit (TESTS_FAILED > 0)
 }
@@ -43,3 +47,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_json.awk"
 @include "tests/unit/test_tsv.awk"
 @include "tests/unit/test_template.awk"
+@include "tests/unit/test_static.awk"
