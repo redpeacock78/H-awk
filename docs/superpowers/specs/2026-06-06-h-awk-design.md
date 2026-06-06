@@ -398,9 +398,9 @@ update_tsv(path, key, val, update)
 ### 5.6 JSON encode の制約 (MVP)
 
 - `data["foo"] = "bar"` → `{"foo":"bar"}` (フラット object)
-- `data["users", 1, "name"] = "alice"` (多次元) → `{"users":[{"name":"alice"}]}` (ネスト復元)
 - 型ヒント: `data["foo:int"] = 30` → `{"foo":30}`。サフィックスは `:int` `:bool` `:null` を MVP でサポート
-- 複雑構造は手動で文字列を組み立てる運用も許容する
+- 多次元キー (`data["users", 1, "name"]`) のネスト復元は **v0.2 以降**。MVP では SUBSEP 連結のフラットキーとして出力される
+- 複雑構造 (リスト・ネスト) は手動で文字列を組み立てる運用 (`sprintf`, `json_encode` 連結) を許容する
 
 ## 6. プラグインシステム
 

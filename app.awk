@@ -32,16 +32,20 @@ function todo_add(req, res,    row, title) {
   render(res, "views/todo_added.html")
 }
 
-function todo_list_json(req, res,    rows, n, i, out) {
+function todo_list_json(req, res,    rows, n, i, item, items_json, body) {
   delete rows
   n = read_tsv("data/todos.tsv", rows)
-  delete out
-  out["count:int"] = n
+  items_json = ""
   for (i = 1; i <= n; i++) {
-    out["items", i, "id"]    = rows[i, "id"]
-    out["items", i, "title"] = rows[i, "title"]
+    delete item
+    item["id"]    = rows[i, "id"]
+    item["title"] = rows[i, "title"]
+    items_json = items_json (i > 1 ? "," : "") json_encode(item)
   }
-  json(res, out)
+  body = sprintf("{\"count\":%d,\"items\":[%s]}", n, items_json)
+  res["status"] = 200
+  res["header:content-type"] = "application/json; charset=utf-8"
+  res["body"] = body
 }
 
 function todo_delete(req, res,    deleted) {
