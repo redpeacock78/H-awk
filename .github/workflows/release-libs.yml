@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MIT
+name: Release libs
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-macos
+          - os: macos-13
+            target: x86_64-macos
+          - os: ubuntu-latest
+            target: x86_64-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v1
+        with:
+          # NOTE: 実装時に Task 1 Step 1.2 で確認した zig version に合わせる
+          version: 0.16.0
+      - name: Build libs
+        run: |
+          set -e
+          for d in libs/*/; do
+            [ "$d" = "libs/_common/" ] && continue
+            [ -f "${d}build.zig" ] || continue
+            echo "Building $d"
+            (cd "$d" && zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe)
+          done
+      - name: Package
+        run: |
+          mkdir -p dist
+          UNAME_S=$(uname -s)
+          UNAME_M=$(uname -m)
+          tar czf dist/hawk-libs-${UNAME_S}-${UNAME_M}.tar.gz libs/*/zig-out/lib/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hawk-libs-${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Flatten
+        run: |
+          mkdir -p out
+          find dist -name '*.tar.gz' -exec mv {} out/ \;
+          ls out/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.tar.gz
