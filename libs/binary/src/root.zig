@@ -32,12 +32,12 @@ fn binRead(nargs: c_int, result: [*c]c.awk_value_t, _: [*c]c.awk_ext_func_t) cal
     }
     const path = path_val.u.s.str[0..path_val.u.s.len];
 
-    const max_bytes_env = std.process.getEnvVarOwned(std.heap.c_allocator, "HAWK_MAX_BODY_SIZE") catch "";
-    defer if (max_bytes_env.len > 0) std.heap.c_allocator.free(max_bytes_env);
-    const max_bytes: usize = if (max_bytes_env.len > 0)
-        std.fmt.parseInt(usize, max_bytes_env, 10) catch 1048576
-    else
-        1048576;
+    const max_bytes: usize = blk: {
+        const env = std.c.getenv("HAWK_MAX_BODY_SIZE");
+        if (env == null) break :blk 1048576;
+        const s = std.mem.span(env.?);
+        break :blk std.fmt.parseInt(usize, s, 10) catch 1048576;
+    };
 
     const allocator = std.heap.c_allocator;
     const content = binary.readAll(allocator, path, max_bytes) catch {
@@ -117,7 +117,7 @@ export fn dl_load(api_p: [*c]const c.gawk_api_t, id: c.awk_ext_id_t) c_int {
 
     // Version check
     if (api.*.major_version != c.GAWK_API_MAJOR_VERSION) {
-        _ = std.io.getStdErr().write("hawk_binary: gawk API version mismatch\n") catch {};
+        std.debug.print("hawk_binary: gawk API version mismatch\n", .{});
         return 0;
     }
 
