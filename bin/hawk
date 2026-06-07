@@ -38,6 +38,7 @@ case "$(uname -s)" in
   *)      SO_EXT=so ;;
 esac
 
+if [ -z "$HAWK_NO_LIBS" ]; then
 for d in libs/*/; do
   [ -d "$d" ] || continue
   name=$(basename "$d")
