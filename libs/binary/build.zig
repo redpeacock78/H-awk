@@ -47,6 +47,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    const src_mod = b.createModule(.{
+        .root_source_file = b.path("src/binary.zig"),
+    });
+    test_mod.addImport("binary", src_mod);
     const unit_tests = b.addTest(.{
         .root_module = test_mod,
     });

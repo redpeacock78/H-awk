@@ -27,7 +27,6 @@ pub fn readAll(allocator: std.mem.Allocator, path: []const u8, max_bytes: usize)
 
     const usize_size = @as(usize, @intCast(size));
     if (usize_size > max_bytes) {
-        std.debug.print("hawk_bin_read: file size {d} exceeds max {d}: {s}\n", .{ usize_size, max_bytes, path });
         return error.FileTooLarge;
     }
 
