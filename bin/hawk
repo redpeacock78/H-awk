@@ -44,10 +44,8 @@ for d in libs/*/; do
   [ "$name" = "_common" ] && continue
   so="${d}zig-out/lib/libhawk_${name}.${SO_EXT}"
   if [ -f "$so" ]; then
-    LIBS_ARGS="$LIBS_ARGS -l hawk_${name}"
+    LIBS_ARGS="$LIBS_ARGS -l $so"
     LIBS_VARS="$LIBS_VARS -v HAWK_LIBS_${name}=1"
-    abspath=$(cd "$(dirname "$so")" && pwd)
-    AWKLIBPATH="${abspath}${AWKLIBPATH:+:}${AWKLIBPATH:-}"
   else
     if [ -f "${d}build.zig" ]; then
       echo "[WARN] libs/${name} 未ビルド ($so 不在)。機能 fallback 動作" >&2

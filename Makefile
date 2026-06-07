@@ -18,7 +18,17 @@ dev: ## DEV=1 でログ詳細
 test: test-unit test-e2e ## 全テスト
 
 test-unit: ## awk 内 assert
-	HAWK_NO_SERVE=1 gawk -b -f hawk.awk $(PLUGIN_FILES) -f tests/unit/run.awk
+	@libs_args=""; libs_vars=""; \
+	so_ext="$(if $(filter Darwin,$(shell uname -s)),dylib,so)"; \
+	for d in libs/*/; do \
+	  [ "$$d" = "libs/_common/" ] && continue; \
+	  name=$$(basename "$$d"); \
+	  so="$$d/zig-out/lib/libhawk_$$name.$$so_ext"; \
+	  [ -f "$$so" ] || continue; \
+	  libs_args="$$libs_args -l $$so"; \
+	  libs_vars="$$libs_vars -v HAWK_LIBS_$$name=1"; \
+	done; \
+	HAWK_NO_SERVE=1 gawk -b $$libs_args $$libs_vars -f hawk.awk $(PLUGIN_FILES) -f tests/unit/run.awk
 
 test-e2e: ## サーバー起動 + curl
 	./tests/e2e/run.sh
@@ -43,7 +53,7 @@ build-libs: ## libs/* を全ビルド (Zig 必要)
 	  [ "$$d" = "libs/_common/" ] && continue; \
 	  [ -f "$${d}build.zig" ] || continue; \
 	  echo "Building $$d"; \
-	  (cd "$$d" && zig build -Doptimize=ReleaseSafe); \
+	  (cd "$$d" && zig build); \
 	done
 
 fetch-libs: ## GitHub Release から precompiled 取得 (Zig 不要)

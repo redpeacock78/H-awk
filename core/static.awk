@@ -70,7 +70,7 @@ function serve_static(req, res,    safe, full, mime, cmd) {
   res["status"] = 200
   res["header:content-type"] = mime
 
-  if (LIBS_LOADED["binary"] && _static_is_binary_mime(mime)) {
+  if (LIBS_LOADED["binary"]) {
     res["_binary_path"] = full
     res["body"] = ""
   } else {

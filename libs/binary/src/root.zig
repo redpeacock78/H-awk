@@ -25,10 +25,7 @@ fn binRead(nargs: c_int, result: [*c]c.awk_value_t, _: [*c]c.awk_ext_func_t) cal
 
     var path_val: c.awk_value_t = undefined;
     if (api.*.api_get_argument.?(ext_id, 0, c.AWK_STRING, &path_val) == c.awk_false) {
-        result.*.val_type = c.AWK_STRING;
-        result.*.u.s.str = @ptrCast(@constCast(""));
-        result.*.u.s.len = 0;
-        return result;
+        return c.r_make_string(api, ext_id, "", 0, c.awk_true, result);
     }
     const path = path_val.u.s.str[0..path_val.u.s.len];
 
@@ -41,15 +38,14 @@ fn binRead(nargs: c_int, result: [*c]c.awk_value_t, _: [*c]c.awk_ext_func_t) cal
 
     const allocator = std.heap.c_allocator;
     const content = binary.readAll(allocator, path, max_bytes) catch {
-        result.*.val_type = c.AWK_STRING;
-        result.*.u.s.str = @ptrCast(@constCast(""));
-        result.*.u.s.len = 0;
-        return result;
+        return c.r_make_string(api, ext_id, "", 0, c.awk_true, result);
     };
     defer allocator.free(content);
 
-    // Pass awk_false so gawk copies the string (caller frees our copy after return)
-    return c.r_make_string(api, ext_id, content.ptr, content.len, c.awk_false, result);
+    // Pass awk_true so gawk copies the string (we free our copy after return)
+    const ret = c.r_make_string(api, ext_id, content.ptr, content.len, c.awk_true, result);
+    allocator.free(content);
+    return ret;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +105,8 @@ var funcs = [_]c.awk_ext_func_t{
 // ---------------------------------------------------------------------------
 // dl_load -- gawk calls this when the shared library is loaded
 // ---------------------------------------------------------------------------
+export var plugin_is_GPL_compatible: c_int = 1;
+
 export fn dl_load(api_p: [*c]const c.gawk_api_t, id: c.awk_ext_id_t) c_int {
     if (api_p == null) return 0;
 
@@ -122,7 +120,7 @@ export fn dl_load(api_p: [*c]const c.gawk_api_t, id: c.awk_ext_id_t) c_int {
     }
 
     for (&funcs) |*f| {
-        _ = api.*.api_add_ext_func.?(id, "hawk_binary", f);
+        _ = api.*.api_add_ext_func.?(id, "", f);
     }
 
     return 1;
