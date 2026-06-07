@@ -40,8 +40,6 @@ fn binRead(nargs: c_int, result: [*c]c.awk_value_t, _: [*c]c.awk_ext_func_t) cal
     const content = binary.readAll(allocator, path, max_bytes) catch {
         return c.r_make_string(api, ext_id, "", 0, c.awk_true, result);
     };
-    defer allocator.free(content);
-
     // Pass awk_true so gawk copies the string (we free our copy after return)
     const ret = c.r_make_string(api, ext_id, content.ptr, content.len, c.awk_true, result);
     allocator.free(content);

@@ -54,6 +54,7 @@ for d in libs/*/; do
   fi
 done
 export AWKLIBPATH
+fi
 
 # シグナル受信時に gawk を kill して supervisor も終了
 HAWK_PID=""
