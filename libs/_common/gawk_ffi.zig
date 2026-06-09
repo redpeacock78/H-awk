@@ -1,88 +1,48 @@
 // SPDX-License-Identifier: MIT
-// libs/_common/gawk_ffi.zig -- gawk extension C ABI wrapper
-//
-// Pure Zig types and utilities. Actual C ABI calls (dl_load, make_builtin)
-// live in each lib's root.zig using @cImport of gawkapi.h.
-
 const std = @import("std");
 
-// ---------------------------------------------------------------------------
-// gawk value type constants (match gawkapi.h)
-// ---------------------------------------------------------------------------
+const c = @cImport({
+    @cInclude("stdio.h");
+    @cInclude("stddef.h");
+    @cInclude("string.h");
+    @cInclude("sys/types.h");
+    @cInclude("sys/stat.h");
+    @cInclude("gawkapi.h");
+});
 
-pub const AWK_UNDEFINED: c_int = 0;
-pub const AWK_NUMBER: c_int = 1;
-pub const AWK_STRING: c_int = 2;
-pub const AWK_REGEX: c_int = 3;
-pub const AWK_STRNUM: c_int = 4;
-pub const AWK_ARRAY: c_int = 5;
-pub const AWK_SCALAR: c_int = 6;
-pub const AWK_VALUE_COOKIE: c_int = 7;
-pub const AWK_BOOL: c_int = 8;
+// Initialized in dl_load; gawk guarantees single-threaded, no calls before dl_load succeeds.
+var _api: *const c.gawk_api_t = undefined;
+var _ext_id: c.awk_ext_id_t = undefined;
 
-pub const AwkFalse: c_int = 0;
-pub const AwkTrue: c_int = 1;
-
-// ---------------------------------------------------------------------------
-// gawk C types
-// ---------------------------------------------------------------------------
-
-pub const awk_string_t = extern struct {
-    str: [*c]u8,
-    len: usize,
-};
-
-pub const awk_value_t = extern struct {
-    val_type: c_int,
-    u: extern union {
-        d: f64,
-        s: awk_string_t,
-    },
-};
-
-// ---------------------------------------------------------------------------
-// gawk memory functions (called from extensions)
-// ---------------------------------------------------------------------------
-
-extern fn gawk_malloc(size: usize) ?*anyopaque;
-extern fn gawk_realloc(ptr: ?*anyopaque, size: usize) ?*anyopaque;
-extern fn gawk_free(ptr: ?*anyopaque) void;
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Argument list passed to a gawk extension function.
 pub const Args = struct {
-    _argv: [*c]awk_value_t,
     _argc: c_int,
 
-    /// Get i-th argument as string slice (empty on type mismatch).
+    /// Get argument i as a string slice. Returns "" on index out of range or type mismatch.
     pub fn getString(self: Args, i: usize) []const u8 {
         if (i >= @as(usize, @intCast(self._argc))) return "";
-        const v = self._argv[i];
-        if (v.val_type != AWK_STRING and v.val_type != AWK_STRNUM) return "";
+        var v: c.awk_value_t = undefined;
+        if (_api.*.api_get_argument.?(_ext_id, @intCast(i), c.AWK_STRING, &v) == c.awk_false) return "";
         return v.u.s.str[0..v.u.s.len];
     }
 
-    /// Get i-th argument as i64 (0 on type mismatch).
+    /// Get argument i as i64. Returns 0 on index out of range or type mismatch.
     pub fn getInt(self: Args, i: usize) i64 {
         if (i >= @as(usize, @intCast(self._argc))) return 0;
-        const v = self._argv[i];
-        if (v.val_type != AWK_NUMBER) return 0;
-        return @intFromFloat(v.u.d);
+        var v: c.awk_value_t = undefined;
+        if (_api.*.api_get_argument.?(_ext_id, @intCast(i), c.AWK_NUMBER, &v) == c.awk_false) return 0;
+        return @intFromFloat(v.u.n.d);
     }
 
-    /// Get i-th argument as f64 (0.0 on type mismatch).
+    /// Get argument i as f64. Returns 0.0 on index out of range or type mismatch.
     pub fn getDouble(self: Args, i: usize) f64 {
         if (i >= @as(usize, @intCast(self._argc))) return 0.0;
-        const v = self._argv[i];
-        if (v.val_type != AWK_NUMBER) return 0.0;
-        return v.u.d;
+        var v: c.awk_value_t = undefined;
+        if (_api.*.api_get_argument.?(_ext_id, @intCast(i), c.AWK_NUMBER, &v) == c.awk_false) return 0.0;
+        return v.u.n.d;
     }
 };
 
-/// Return value of a gawk extension function.
+/// Return value from a gawk extension function.
 pub const Result = union(enum) {
     string: []const u8,
     int: i64,
@@ -90,25 +50,19 @@ pub const Result = union(enum) {
     none,
 };
 
-/// Definition of one gawk extension function.
 pub const FuncDef = struct {
     name: []const u8,
     impl: *const fn (Args) Result,
     args: usize,
 };
 
-/// Configuration for makeDlLoad.
 pub const DlLoadConfig = struct {
     name: []const u8,
-    api_major: u32 = 4,
-    api_minor: u32 = 0,
     functions: []const FuncDef,
 };
 
-// ---------------------------------------------------------------------------
-// gawk_malloc-based allocator
-// ---------------------------------------------------------------------------
-
+/// Returns a gawk allocator backed by api_malloc/api_free.
+/// Safe to use after dl_load initializes _api/_ext_id.
 pub fn gawkAllocator() std.mem.Allocator {
     return .{
         .ptr = undefined,
@@ -119,20 +73,91 @@ pub fn gawkAllocator() std.mem.Allocator {
 const gawk_allocator_vtable = std.mem.Allocator.VTable{
     .alloc = gawkAlloc,
     .resize = gawkResize,
-    .free = gawkFreeSlice,
+    .remap = gawkRemap,
+    .free = gawkFree,
 };
 
 fn gawkAlloc(_: *anyopaque, n: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
-    const ptr = gawk_malloc(n) orelse return null;
-    return @ptrCast(ptr);
+    const p = _api.*.api_malloc.?(n);
+    return if (p != null) @ptrCast(p) else null;
 }
 
-fn gawkResize(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
-    _ = buf;
-    _ = new_len;
+fn gawkResize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
     return false;
 }
 
-fn gawkFreeSlice(_: *anyopaque, slice: []u8, _: std.mem.Alignment, _: usize) void {
-    gawk_free(slice.ptr);
+fn gawkRemap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+    // gawk has no realloc; signal caller to alloc+copy
+    return null;
+}
+
+fn gawkFree(_: *anyopaque, buf: []u8, _: std.mem.Alignment, _: usize) void {
+    _api.*.api_free.?(buf.ptr);
+}
+
+/// Generate a gawk extension entry point.
+/// IMPORTANT: Use in exactly one translation unit per shared library.
+/// `dl_load` and `plugin_is_GPL_compatible` are global C symbols;
+/// multiple instances in one .so will cause link-time name collision.
+///
+/// In Zig 0.16+, `usingnamespace` at file scope is not supported.
+/// Use the comptime force-emit pattern instead:
+///
+///   const _ffi_entry = ffi.makeDlLoad(.{ .name = "myplugin", .functions = &.{ ... } });
+///   comptime { _ = &_ffi_entry.dl_load; _ = &_ffi_entry.plugin_is_GPL_compatible; }
+pub fn makeDlLoad(comptime cfg: DlLoadConfig) type {
+    return struct {
+        var _funcs: [cfg.functions.len]c.awk_ext_func_t = undefined;
+
+        export var plugin_is_GPL_compatible: c_int = 1;
+
+        export fn dl_load(api_p: [*c]const c.gawk_api_t, id: c.awk_ext_id_t) c_int {
+            if (api_p == null) return 0;
+            _api = api_p.?;
+            _ext_id = id;
+
+            if (_api.*.major_version != c.GAWK_API_MAJOR_VERSION or
+                _api.*.minor_version < c.GAWK_API_MINOR_VERSION)
+            {
+                std.debug.print("{s}: gawk API version mismatch (want {d}.{d}, got {d}.{d})\n", .{
+                    cfg.name,
+                    c.GAWK_API_MAJOR_VERSION,
+                    c.GAWK_API_MINOR_VERSION,
+                    _api.*.major_version,
+                    _api.*.minor_version,
+                });
+                return 0;
+            }
+
+            inline for (cfg.functions, 0..) |fdef, i| {
+                _funcs[i] = .{
+                    .name = @as([*c]const u8, @ptrCast(fdef.name.ptr)),
+                    .function = makeAdapter(fdef.impl),
+                    .max_expected_args = @intCast(fdef.args),
+                    .min_required_args = @intCast(fdef.args),
+                    .suppress_lint = c.awk_false,
+                    .data = null,
+                };
+                if (_api.*.api_add_ext_func.?(_ext_id, "", &_funcs[i]) == c.awk_false) {
+                    std.debug.print("{s}: failed to register {s}\n", .{ cfg.name, fdef.name });
+                    return 0;
+                }
+            }
+            return 1;
+        }
+    };
+}
+
+fn makeAdapter(comptime impl: *const fn (Args) Result) fn (c_int, [*c]c.awk_value_t, [*c]c.awk_ext_func_t) callconv(.c) [*c]c.awk_value_t {
+    return struct {
+        fn adapter(nargs: c_int, result: [*c]c.awk_value_t, _: [*c]c.awk_ext_func_t) callconv(.c) [*c]c.awk_value_t {
+            const r = impl(.{ ._argc = nargs });
+            return switch (r) {
+                .string => |s| c.r_make_string(_api, _ext_id, s.ptr, s.len, c.awk_true, result),
+                .int => |n| c.make_number(@floatFromInt(n), result),
+                .bool => |b| c.make_number(if (b) 1.0 else 0.0, result),
+                .none => c.make_number(0.0, result),
+            };
+        }
+    }.adapter;
 }
