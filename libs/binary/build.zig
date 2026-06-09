@@ -32,6 +32,16 @@ pub fn build(b: *std.Build) void {
         @panic("gawkapi.h not found. Set -Dgawk-include=/path/to/gawk/include or GAWK_INCLUDE_PATH");
     }
 
+    // ffi module: gawk_ffi.zig with gawkapi.h include path
+    const ffi_mod = b.createModule(.{
+        .root_source_file = b.path("../_common/gawk_ffi.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    ffi_mod.addIncludePath(.{ .cwd_relative = gawk_include });
+    root_mod.addImport("gawk_ffi", ffi_mod);
+
     b.installArtifact(lib);
 
     // Zig unit tests (binary.zig only, no gawk needed)
