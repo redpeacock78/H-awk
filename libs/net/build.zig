@@ -9,12 +9,18 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/http_parser.zig"),
     });
 
+    const pool_mod = b.createModule(.{
+        .root_source_file = b.path("src/conn_pool.zig"),
+    });
+
     const test_mod = b.createModule(.{
         .root_source_file = b.path("tests/net_test.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     test_mod.addImport("http_parser", parser_mod);
+    test_mod.addImport("conn_pool", pool_mod);
 
     const unit_tests = b.addTest(.{ .root_module = test_mod });
     const run_tests = b.addRunArtifact(unit_tests);

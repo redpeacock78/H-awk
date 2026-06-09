@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 const std = @import("std");
 const http_parser = @import("http_parser");
+const conn_pool = @import("conn_pool");
 
 test "parse simple GET" {
     const alloc = std.testing.allocator;
@@ -50,4 +51,47 @@ test "formatPollResult" {
         "42" ++ RS ++ "GET" ++ RS ++ "/foo" ++ RS ++ "Host: example.com\r\n" ++ RS ++ "0" ++ RS,
         poll,
     );
+}
+
+test "add and get conn" {
+    var pool = conn_pool.ConnPool.init(std.testing.allocator);
+    defer pool.deinit();
+    const id = try pool.add(99);  // fd=99 (dummy, won't be closed in test)
+    try std.testing.expectEqual(@as(u64, 1), id);
+    {
+        pool.mu.lock();
+        defer pool.mu.unlock();
+        const conn = pool.conns.getPtr(id);
+        try std.testing.expect(conn != null);
+        try std.testing.expectEqual(conn_pool.ConnState.reading, conn.?.state);
+    }
+    // Remove without closing (fd=99 is not real in test)
+    pool.mu.lock();
+    if (pool.conns.fetchRemove(id)) |kv| {
+        var c = kv.value;
+        c.read_buf.deinit(std.testing.allocator);
+        // don't close fd=99 in test
+    }
+    pool.mu.unlock();
+}
+
+test "next_id increments" {
+    var pool = conn_pool.ConnPool.init(std.testing.allocator);
+    defer pool.deinit();
+    const id1 = try pool.add(0);
+    const id2 = try pool.add(0);
+    try std.testing.expect(id2 > id1);
+    // Clean up without closing dummy fds
+    pool.mu.lock();
+    pool.conns.clearAndFree();
+    pool.mu.unlock();
+}
+
+test "get returns null for unknown id" {
+    var pool = conn_pool.ConnPool.init(std.testing.allocator);
+    defer pool.deinit();
+    pool.mu.lock();
+    const result = pool.conns.getPtr(9999);
+    pool.mu.unlock();
+    try std.testing.expect(result == null);
 }
