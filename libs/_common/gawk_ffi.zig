@@ -153,10 +153,13 @@ fn makeAdapter(comptime impl: *const fn (Args) Result) fn (c_int, [*c]c.awk_valu
         fn adapter(nargs: c_int, result: [*c]c.awk_value_t, _: [*c]c.awk_ext_func_t) callconv(.c) [*c]c.awk_value_t {
             const r = impl(.{ ._argc = nargs });
             return switch (r) {
-                .string => |s| c.r_make_string(_api, _ext_id, s.ptr, s.len, c.awk_true, result),
+                .string => |s| c.r_make_string(_api, _ext_id, s.ptr, s.len, c.awk_false, result),
                 .int => |n| c.make_number(@floatFromInt(n), result),
                 .bool => |b| c.make_number(if (b) 1.0 else 0.0, result),
-                .none => c.make_number(0.0, result),
+                .none => {
+                    // Return empty string (not 0, which would stringify to "0")
+                    return c.r_make_string(_api, _ext_id, "", 0, c.awk_true, result);
+                },
             };
         }
     }.adapter;
