@@ -10,6 +10,7 @@ const c = @cImport({
     @cInclude("gawkapi.h");
 });
 
+// Initialized in dl_load; gawk guarantees single-threaded, no calls before dl_load succeeds.
 var _api: *const c.gawk_api_t = undefined;
 var _ext_id: c.awk_ext_id_t = undefined;
 
@@ -86,6 +87,7 @@ fn gawkResize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) 
 }
 
 fn gawkRemap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+    // gawk has no realloc; signal caller to alloc+copy
     return null;
 }
 
@@ -93,8 +95,16 @@ fn gawkFree(_: *anyopaque, buf: []u8, _: std.mem.Alignment, _: usize) void {
     _api.*.api_free.?(buf.ptr);
 }
 
-/// Generate a gawk extension entry point. Use as:
-///   usingnamespace ffi.makeDlLoad(.{ .name = "myplugin", .functions = &.{ ... } });
+/// Generate a gawk extension entry point.
+/// IMPORTANT: Use in exactly one translation unit per shared library.
+/// `dl_load` and `plugin_is_GPL_compatible` are global C symbols;
+/// multiple instances in one .so will cause link-time name collision.
+///
+/// In Zig 0.16+, `usingnamespace` at file scope is not supported.
+/// Use the comptime force-emit pattern instead:
+///
+///   const _ffi_entry = ffi.makeDlLoad(.{ .name = "myplugin", .functions = &.{ ... } });
+///   comptime { _ = &_ffi_entry.dl_load; _ = &_ffi_entry.plugin_is_GPL_compatible; }
 pub fn makeDlLoad(comptime cfg: DlLoadConfig) type {
     return struct {
         var _funcs: [cfg.functions.len]c.awk_ext_func_t = undefined;
@@ -106,11 +116,15 @@ pub fn makeDlLoad(comptime cfg: DlLoadConfig) type {
             _api = api_p.?;
             _ext_id = id;
 
-            if (_api.*.major_version != c.GAWK_API_MAJOR_VERSION) {
-                std.debug.print("{s}: gawk API major version mismatch (want {d}, got {d})\n", .{
+            if (_api.*.major_version != c.GAWK_API_MAJOR_VERSION or
+                _api.*.minor_version < c.GAWK_API_MINOR_VERSION)
+            {
+                std.debug.print("{s}: gawk API version mismatch (want {d}.{d}, got {d}.{d})\n", .{
                     cfg.name,
                     c.GAWK_API_MAJOR_VERSION,
+                    c.GAWK_API_MINOR_VERSION,
                     _api.*.major_version,
+                    _api.*.minor_version,
                 });
                 return 0;
             }
@@ -124,7 +138,10 @@ pub fn makeDlLoad(comptime cfg: DlLoadConfig) type {
                     .suppress_lint = c.awk_false,
                     .data = null,
                 };
-                _ = _api.*.api_add_ext_func.?(_ext_id, "", &_funcs[i]);
+                if (_api.*.api_add_ext_func.?(_ext_id, "", &_funcs[i]) == c.awk_false) {
+                    std.debug.print("{s}: failed to register {s}\n", .{ cfg.name, fdef.name });
+                    return 0;
+                }
             }
             return 1;
         }
