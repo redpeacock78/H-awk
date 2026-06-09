@@ -35,11 +35,11 @@ pub fn build(b: *std.Build) void {
     // ffi module: gawk_ffi.zig with gawkapi.h include path
     const ffi_mod = b.createModule(.{
         .root_source_file = b.path("../_common/gawk_ffi.zig"),
+        .target = target,
+        .optimize = optimize,
         .link_libc = true,
     });
-    if (gawk_include.len > 0) {
-        ffi_mod.addIncludePath(.{ .cwd_relative = gawk_include });
-    }
+    ffi_mod.addIncludePath(.{ .cwd_relative = gawk_include });
     root_mod.addImport("gawk_ffi", ffi_mod);
 
     b.installArtifact(lib);
