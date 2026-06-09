@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: MIT
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
+
+    const parser_mod = b.createModule(.{
+        .root_source_file = b.path("src/http_parser.zig"),
+    });
+
+    const test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/net_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_mod.addImport("http_parser", parser_mod);
+
+    const unit_tests = b.addTest(.{ .root_module = test_mod });
+    const run_tests = b.addRunArtifact(unit_tests);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_tests.step);
+}
