@@ -56,8 +56,8 @@ pub const Args = struct {
 pub fn arraySet(arr: c.awk_array_t, key: []const u8, val: []const u8) void {
     var k: c.awk_value_t = undefined;
     var v: c.awk_value_t = undefined;
-    _ = c.r_make_string(_api, _ext_id, key.ptr, key.len, c.awk_false, &k);
-    _ = c.r_make_string(_api, _ext_id, val.ptr, val.len, c.awk_false, &v);
+    if (c.r_make_string(_api, _ext_id, key.ptr, key.len, c.awk_false, &k) == null) return;
+    if (c.r_make_string(_api, _ext_id, val.ptr, val.len, c.awk_false, &v) == null) return;
     _ = _api.*.api_set_array_element.?(_ext_id, arr, &k, &v);
 }
 
