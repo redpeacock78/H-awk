@@ -5,10 +5,13 @@
 # LIBS_LOADED["<name>"] = 1 を立てる。
 # core/*.awk はこれをチェックして分岐する。
 #
-# v0.1 サポート対象 libs:
-#   binary -- binary-safe file I/O
+# サポート対象 libs:
+#   net      -- Zig TCP transport
+#   binary   -- binary-safe file I/O
+#   multipart, crypto, gzip, url
 
 BEGIN {
+  if (HAWK_LIBS_net)       LIBS_LOADED["net"]       = 1
   if (HAWK_LIBS_binary)    LIBS_LOADED["binary"]    = 1
   if (HAWK_LIBS_multipart) LIBS_LOADED["multipart"] = 1
   if (HAWK_LIBS_crypto)    LIBS_LOADED["crypto"]    = 1
