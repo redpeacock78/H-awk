@@ -20,5 +20,5 @@ function test_util_to_lower() {
 function test_util_log_warn() {
   # log_warn must exist and not crash — output goes to stderr, not testable here
   log_warn("test warn message")
-  TESTS_PASSED++
+  TESTS_SKIPPED++
 }
