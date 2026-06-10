@@ -103,3 +103,59 @@ function _request_parse_json_body(body, req,    flat, key) {
     }
   }
 }
+
+# parse_request_zig(poll_result, req)
+# hawk_net_poll() 出力を req[] に分解する。
+# poll_result format: conn_id RS method RS path RS headers_block RS body_len RS body
+# RS = \x1e (ASCII Record Separator 0x1E)
+# Returns 1 on success, 0 on failure.
+function parse_request_zig(poll_result, req,    RS_CHAR, parts, n, i, j, k, v, colon, hlines, hn, body, q) {
+  RS_CHAR = "\x1e"
+  delete req
+  n = split(poll_result, parts, RS_CHAR)
+  if (n < 5) return 0
+
+  req["_conn_id"]     = parts[1]
+  req["method"]       = parts[2]
+  req["full_path"]    = parts[3]
+  req["http_version"] = "HTTP/1.1"
+
+  hn = split(parts[4], hlines, "\r\n")
+  for (j = 1; j <= hn; j++) {
+    if (hlines[j] == "") continue
+    colon = index(hlines[j], ":")
+    if (colon == 0) continue
+    k = to_lower(trim(substr(hlines[j], 1, colon - 1)))
+    v = trim(substr(hlines[j], colon + 1))
+    req["header:" k] = v
+  }
+
+  # parts[5] = body_len; parts[6..n] = body (joined with RS_CHAR to handle body containing RS)
+  body = ""
+  for (i = 6; i <= n; i++) {
+    body = body (i > 6 ? RS_CHAR : "") parts[i]
+  }
+  req["body"] = body
+  req["raw"]  = poll_result
+
+  q = index(req["full_path"], "?")
+  if (q > 0) {
+    req["path"]         = substr(req["full_path"], 1, q - 1)
+    req["query_string"] = substr(req["full_path"], q + 1)
+    _request_parse_kv(req["query_string"], req, "query:")
+  } else {
+    req["path"]         = req["full_path"]
+    req["query_string"] = ""
+  }
+
+  if (length(req["body"]) > 0) {
+    if (index(req["header:content-type"], "application/x-www-form-urlencoded") == 1)
+      _request_parse_kv(req["body"], req, "form:")
+    else if (index(req["header:content-type"], "application/json") == 1)
+      _request_parse_json_body(req["body"], req)
+  }
+
+  if (req["method"] !~ /^[A-Z]+$/) return 0
+  if (req["path"] == "") return 0
+  return 1
+}

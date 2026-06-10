@@ -52,3 +52,43 @@ function test_request_parse_eq_in_value(   raw, req) {
   assert_eq(req["form:token"], "YWJj==", "req: encoded = in value (url-decoded)")
   assert_eq(req["form:other"], "ok",     "req: another pair after eq value")
 }
+
+function test_request_parse_zig_get(   poll, req) {
+  poll = "42\x1eGET\x1e/users/1\x1eHost: localhost\r\nAccept: */*\r\n\x1e0\x1e"
+  delete req
+  delete _ARR_COUNT
+  assert_eq(parse_request_zig(poll, req), 1, "zig req: parse returns 1")
+  assert_eq(req["_conn_id"],      "42",        "zig req: conn_id")
+  assert_eq(req["method"],        "GET",       "zig req: method")
+  assert_eq(req["path"],          "/users/1",  "zig req: path")
+  assert_eq(req["header:host"],   "localhost", "zig req: host header")
+  assert_eq(req["header:accept"], "*/*",       "zig req: accept header")
+  assert_eq(req["body"],          "",          "zig req: empty body")
+}
+
+function test_request_parse_zig_post_form(   poll, req) {
+  poll = "7\x1ePOST\x1e/todos\x1eContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 9\r\n\x1e9\x1etitle=buy"
+  delete req
+  delete _ARR_COUNT
+  assert_eq(parse_request_zig(poll, req), 1, "zig post: parse ok")
+  assert_eq(req["method"],     "POST", "zig post: method")
+  assert_eq(req["form:title"], "buy",  "zig post: form field")
+}
+
+function test_request_parse_zig_query(   poll, req) {
+  poll = "3\x1eGET\x1e/search?q=hello&page=2\x1eHost: x\r\n\x1e0\x1e"
+  delete req
+  delete _ARR_COUNT
+  parse_request_zig(poll, req)
+  assert_eq(req["path"],         "/search",        "zig query: path without qs")
+  assert_eq(req["query_string"], "q=hello&page=2", "zig query: query_string")
+  assert_eq(req["query:q"],      "hello",          "zig query: q param")
+  assert_eq(req["query:page"],   "2",              "zig query: page param")
+}
+
+function test_request_parse_zig_bad(   poll, req, ok) {
+  poll = "only_one_field"
+  delete req
+  ok = parse_request_zig(poll, req)
+  assert_eq(ok, 0, "zig req: too few fields rejected")
+}
