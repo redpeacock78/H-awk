@@ -41,20 +41,24 @@ END {
   }
 }
 
-function http_serve(    sock, line, headers_raw, body, content_length, raw, hdr_size, req, res, dispatch_ok, start_ms, ok) {
+function http_serve() {
+  if (LIBS_LOADED["net"]) {
+    _http_serve_zig()
+  } else {
+    _http_serve_inet()
+  }
+}
+
+function _http_serve_inet(    sock, line, headers_raw, body, content_length, raw, hdr_size, req, res, dispatch_ok, start_ms, ok) {
   sock = "/inet/tcp/" HAWK_PORT "/0/0"
   PROCINFO[sock, "READ_TIMEOUT"] = HAWK_REQUEST_TIMEOUT * 1000
 
   while (!HAWK_SHUTDOWN) {
-    # 1. ヘッダ部読込 (空行 = CRLF CRLF まで)
     headers_raw = ""
     hdr_size = 0
     while (1) {
       ok = (sock |& getline line)
-      if (ok <= 0) {
-        # ピア閉鎖 / シグナル / タイムアウト
-        break
-      }
+      if (ok <= 0) break
       sub(/\r$/, "", line)
       if (line == "") break
       headers_raw = headers_raw line "\r\n"
@@ -73,8 +77,6 @@ function http_serve(    sock, line, headers_raw, body, content_length, raw, hdr_
     }
 
     start_ms = now_ms()
-
-    # 2. Content-Length 確認 → body 読込
     body = ""
     content_length = http_header_get(headers_raw, "Content-Length") + 0
     if (content_length > HAWK_MAX_BODY_SIZE) {
@@ -86,7 +88,6 @@ function http_serve(    sock, line, headers_raw, body, content_length, raw, hdr_
       body = http_read_body(sock, content_length)
     }
 
-    # 3. 完成 raw → request_parse
     raw = headers_raw "\r\n" body
     delete req
     delete res
@@ -98,14 +99,12 @@ function http_serve(    sock, line, headers_raw, body, content_length, raw, hdr_
       continue
     }
 
-    # 4. pre_request hook
     if (call_hooks("pre_request", req, res) == 1) {
       http_send(sock, res, req, start_ms)
       close(sock)
       continue
     }
 
-    # 5. ルーティング → 静的 → 404 / 405
     dispatch_ok = router_dispatch(req, res)
     if (dispatch_ok == 0) {
       if (!serve_static(req, res)) {
@@ -113,17 +112,99 @@ function http_serve(    sock, line, headers_raw, body, content_length, raw, hdr_
         text(res, "Not Found")
       }
     }
-    # dispatch_ok == -1 (405) と 1 (ハンドラ実行済) は何もしない
 
-    # 6. post_request hook
     call_hooks("post_request", req, res)
-
-    # 7. 送信
     http_send(sock, res, req, start_ms)
     close(sock)
   }
 
   close(sock)
+}
+
+function _http_serve_zig(    poll_result, req, res, conn_id, dispatch_ok, start_ms, parts, n) {
+  if (!hawk_net_listen(HAWK_PORT)) {
+    log_warn(sprintf("libs/net: failed to bind port %d, falling back to /inet/tcp/", HAWK_PORT))
+    _http_serve_inet()
+    return
+  }
+
+  while (!HAWK_SHUTDOWN) {
+    poll_result = hawk_net_poll()
+    if (poll_result == "") {
+      log_error("libs/net: event loop stopped unexpectedly")
+      break
+    }
+
+    start_ms = now_ms()
+    delete req
+    delete res
+    delete _ARR_COUNT
+    res["status"] = 200
+
+    if (!parse_request_zig(poll_result, req)) {
+      n = split(poll_result, parts, "\x1e")
+      conn_id = (n >= 1) ? parts[1] : "0"
+      _zig_http_send_simple(conn_id, 400, "Bad Request")
+      continue
+    }
+
+    conn_id = req["_conn_id"]
+
+    if (call_hooks("pre_request", req, res) == 1) {
+      _zig_http_send(conn_id, res, req, start_ms)
+      continue
+    }
+
+    dispatch_ok = router_dispatch(req, res)
+    if (dispatch_ok == 0) {
+      if (!serve_static(req, res)) {
+        status(res, 404)
+        text(res, "Not Found")
+      }
+    }
+
+    call_hooks("post_request", req, res)
+    _zig_http_send(conn_id, res, req, start_ms)
+  }
+}
+
+function _zig_http_send(conn_id, res, req, start_ms,    wire, split_pos, head_part, body_part, first_crlf, status_line, headers, content, dur, ts) {
+  if (res["sent"]) return
+
+  if (res["_binary_path"] != "" && LIBS_LOADED["binary"]) {
+    content = hawk_bin_read(res["_binary_path"])
+    res["body"] = ""
+    res["header:content-length"] = hawk_bin_length(content)
+    wire = response_wire(res)
+    split_pos = index(wire, "\r\n\r\n")
+    head_part = substr(wire, 1, split_pos - 1)
+    first_crlf = index(head_part, "\r\n")
+    status_line = substr(head_part, 1, first_crlf - 1)
+    headers = substr(head_part, first_crlf + 2) "\r\n"
+    hawk_net_respond(conn_id, status_line, headers, content)
+  } else {
+    wire = response_wire(res)
+    split_pos = index(wire, "\r\n\r\n")
+    head_part = substr(wire, 1, split_pos - 1)
+    body_part = substr(wire, split_pos + 4)
+    first_crlf = index(head_part, "\r\n")
+    status_line = substr(head_part, 1, first_crlf - 1)
+    headers = substr(head_part, first_crlf + 2) "\r\n"
+    hawk_net_respond(conn_id, status_line, headers, body_part)
+  }
+  res["sent"] = 1
+
+  dur = now_ms() - start_ms
+  ts  = strftime("%Y-%m-%dT%H:%M:%S%z")
+  printf "%s\tINFO\t%s\t%s\t%d\t%d\n", ts, req["method"], req["path"], res["status"], dur
+  fflush()
+}
+
+function _zig_http_send_simple(conn_id, code, body) {
+  hawk_net_respond(conn_id,
+    "HTTP/1.1 " code " " response_status_text(code),
+    "Content-Type: text/plain; charset=utf-8\r\nContent-Length: " length(body) "\r\n",
+    body)
 }
 
 function http_read_body(sock, n,    line, ok, prev_rs) {

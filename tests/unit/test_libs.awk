@@ -30,3 +30,11 @@ function test_libs_binary_read_missing(   content) {
   content = hawk_bin_read("/tmp/this_does_not_exist_hawk_libs")
   assert_eq(content, "", "libs/binary: read missing -> empty")
 }
+
+function test_libs_net_listen_skip() {
+  if (!LIBS_LOADED["net"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  assert_eq((hawk_net_listen(19999) == 1 || hawk_net_listen(19999) == 0), 1, "libs/net: listen callable")
+}
