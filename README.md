@@ -36,33 +36,7 @@ curl http://localhost:8080/todos.json
 
 ## Routing
 
-### Classic style
-
-Handlers receive `req` and `res` arrays directly.
-
-```awk
-BEGIN {
-  GET("/users/:id", "show_user")
-  POST("/todos",    "add_todo")
-}
-
-function show_user(req, res) {
-  text(res, "user=" req["params:id"])
-}
-
-function add_todo(req, res,    row) {
-  delete row
-  row["id"]    = systime()
-  row["title"] = req["form:title"]
-  append_tsv("data/todos.tsv", row)
-  status(res, 201)
-  json(res, "{\"ok\":true}")
-}
-```
-
-### Context style (v0.4+)
-
-Use `ctx::` helpers instead of `req`/`res` arguments. Call `listen(port)` explicitly from `BEGIN`.
+Use `ctx::` helpers to read requests and write responses. All declared function parameters are true local variables — no `req`/`res` noise. Call `listen(port)` from `BEGIN`.
 
 ```awk
 BEGIN {
@@ -72,27 +46,30 @@ BEGIN {
   listen(8080)
 }
 
-function list_todos(    n, rows) {
+function list_todos(n, rows) {
   delete rows
   n = read_tsv("data/todos.tsv", rows)
-  ctx::json(sprintf("[%d items]", n))
+  return ctx::json(sprintf("[%d items]", n))
 }
 
-function add_todo(    title) {
+function add_todo(title) {
   title = ctx::req["form:title"]
-  if (title == "") { ctx::status(400); ctx::text("title required"); return }
+  if (title == "") {
+    ctx::status(400)
+    return ctx::text("title required")
+  }
   ctx::status(201)
-  ctx::text("added: " title)
+  return ctx::text("added: " title)
 }
 
 function delete_todo() {
   delete_tsv("data/todos.tsv", "id", ctx::param("id"))
   ctx::status(200)
-  ctx::html("")
+  return ctx::html("")
 }
 ```
 
-#### Context API reference
+### Context API reference
 
 | Function | Description |
 |---|---|
@@ -124,9 +101,9 @@ function routes() {
 
 function index() { ctx::json("[]") }
 
-function show(    id) {
+function show(id) {
   id = ctx::param("id")
-  ctx::json("{\"id\":\"" id "\"}")
+  return ctx::json("{\"id\":\"" id "\"}")
 }
 ```
 
@@ -139,8 +116,6 @@ BEGIN {
   listen(8080)
 }
 ```
-
-Both old-style and ctx-style handlers can coexist in the same application.
 
 ## Plugins
 

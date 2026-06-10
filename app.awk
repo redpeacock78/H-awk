@@ -21,7 +21,7 @@ function todo_index() {
   ctx::render("views/index.html")
 }
 
-function todo_list_html(    rows, n, i, out) {
+function todo_list_html(rows, n, i, out) {
   delete rows
   n = read_tsv("data/todos.tsv", rows)
   out = ""
@@ -31,7 +31,7 @@ function todo_list_html(    rows, n, i, out) {
   return ctx::html(out)
 }
 
-function todo_add(    title, row) {
+function todo_add(title, row) {
   title = ctx::req["form:title"]
   if (title == "") title = ctx::query("title")
   if (title == "") {
@@ -46,7 +46,7 @@ function todo_add(    title, row) {
   return ctx::html(_todo_li(row["id"], row["title"]))
 }
 
-function todo_delete(    deleted) {
+function todo_delete(deleted) {
   deleted = delete_tsv("data/todos.tsv", "id", ctx::param("id"))
   if (deleted == 0) {
     ctx::status(404)
@@ -56,7 +56,7 @@ function todo_delete(    deleted) {
   return ctx::html("")
 }
 
-function todo_list_json(    rows, n, i, item, items_json) {
+function todo_list_json(rows, n, i, item, items_json) {
   delete rows
   n = read_tsv("data/todos.tsv", rows)
   items_json = ""
