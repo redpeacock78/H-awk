@@ -34,6 +34,10 @@ BEGIN {
   test_request_bad_line()
   test_request_parse_array()
   test_request_parse_eq_in_value()
+  test_request_parse_zig_get()
+  test_request_parse_zig_post_form()
+  test_request_parse_zig_query()
+  test_request_parse_zig_bad()
 
   test_response_status()
   test_response_header()
