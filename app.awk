@@ -3,8 +3,8 @@
 #
 # Routes:
 #   GET    /              landing page (static shell)
-#   GET    /todos         todo list HTML fragment (HTMX)
-#   POST   /todos         add todo, return new <li> (HTMX)
+#   GET    /todos         todo list HTML fragment (HTMX) — <tr> rows
+#   POST   /todos         add todo, return new <tr> (HTMX)
 #   DELETE /todos/:id     delete todo, return empty (HTMX outerHTML swap)
 #   GET    /todos.json    JSON API
 
@@ -26,7 +26,7 @@ function todo_list_html(rows, n, i, out) {
   n = read_tsv("data/todos.tsv", rows)
   out = ""
   for (i = 1; i <= n; i++) {
-    out = out _todo_li(rows[i, "id"], rows[i, "title"])
+    out = out _todo_tr(rows[i, "id"], rows[i, "title"])
   }
   return ctx::html(out)
 }
@@ -43,7 +43,7 @@ function todo_add(title, row) {
   row["title"] = title
   append_tsv("data/todos.tsv", row)
   ctx::status(201)
-  return ctx::html(_todo_li(row["id"], row["title"]))
+  return ctx::html(_todo_tr(row["id"], row["title"]))
 }
 
 function todo_delete(deleted) {
@@ -70,17 +70,19 @@ function todo_list_json(rows, n, i, item, items_json) {
   ctx::res["body"] = sprintf("{\"count\":%d,\"items\":[%s]}", n, items_json)
 }
 
-function _todo_li(id, title) {
+function _todo_tr(id, title) {
   return sprintf( \
-    "<li class=\"flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0 group\">" \
-      "<span class=\"text-sm text-zinc-200\">%s</span>" \
-      "<button" \
-        " hx-delete=\"/todos/%s\"" \
-        " hx-target=\"closest li\"" \
-        " hx-swap=\"outerHTML\"" \
-        " class=\"text-zinc-600 hover:text-red-400 text-base leading-none" \
-          " opacity-0 group-hover:opacity-100 transition-all duration-150 cursor-pointer\"" \
-      ">&#x2715;</button>" \
-    "</li>", \
+    "<tr class=\"group border-b border-zinc-800/60 last:border-0\">" \
+      "<td class=\"py-3 pr-4 text-sm text-zinc-200\">%s</td>" \
+      "<td class=\"py-3 text-right\">" \
+        "<button" \
+          " hx-delete=\"/todos/%s\"" \
+          " hx-target=\"closest tr\"" \
+          " hx-swap=\"outerHTML\"" \
+          " class=\"text-zinc-600 hover:text-red-400 text-base leading-none" \
+            " opacity-0 group-hover:opacity-100 transition-all duration-150 cursor-pointer\"" \
+        ">&#x2715;</button>" \
+      "</td>" \
+    "</tr>", \
     title, id)
 }

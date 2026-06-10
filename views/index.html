@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 </head>
 <body class="min-h-screen text-zinc-100 flex items-start justify-center pt-20 px-4">
-  <div class="w-full max-w-md">
+  <div class="w-full max-w-xl">
 
     <div class="mb-8">
       <div class="flex items-center gap-2 mb-1">
@@ -24,7 +24,7 @@
           hx-target="#todo-list"
           hx-swap="afterbegin"
           hx-on::after-request="this.reset()"
-          class="flex gap-2 mb-4">
+          class="flex gap-2 mb-6">
       <input name="title"
              type="text"
              placeholder="Add a task…"
@@ -40,12 +40,19 @@
       </button>
     </form>
 
-    <ul id="todo-list"
-        hx-get="/todos"
-        hx-trigger="load"
-        hx-swap="innerHTML"
-        class="divide-y-0">
-    </ul>
+    <table class="w-full">
+      <thead>
+        <tr class="border-b border-zinc-800">
+          <th class="text-left pb-2.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">Task</th>
+          <th class="pb-2.5 w-10"></th>
+        </tr>
+      </thead>
+      <tbody id="todo-list"
+             hx-get="/todos"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+      </tbody>
+    </table>
 
   </div>
 </body>
