@@ -39,6 +39,7 @@ pub const ConnPool = struct {
     }
 
     pub fn deinit(self: *ConnPool) void {
+        // Caller must ensure no concurrent access during teardown.
         var it = self.conns.valueIterator();
         while (it.next()) |conn| {
             conn.read_buf.deinit(self.alloc);
@@ -52,13 +53,13 @@ pub const ConnPool = struct {
         self.mu.lock();
         defer self.mu.unlock();
         const id = self.next_id;
-        self.next_id += 1;
         try self.conns.put(id, .{
             .fd = fd,
             .state = .reading,
             .read_buf = try std.ArrayList(u8).initCapacity(self.alloc, 0),
             .keep_alive = false,
         });
+        self.next_id += 1;
         return id;
     }
 
