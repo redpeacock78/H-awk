@@ -57,7 +57,7 @@ function test_libs_crypto_sha256(    result) {
     return
   }
   result = hawk_sha256("abc")
-  assert_eq(result, "ba7816bf8f01cfea414140de5dae2ec73b00361bbef0469348423f656b1b6e33", "libs/crypto: sha256(abc)")
+  assert_eq(result, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "libs/crypto: sha256(abc)")
 }
 
 function test_libs_crypto_hmac_sha256(    result) {
