@@ -3,8 +3,6 @@ const std = @import("std");
 const crypto = @import("crypto");
 
 test "sha256 known vector" {
-    const alloc = std.testing.allocator;
-    _ = alloc;
     const hex = crypto.sha256("abc");
     // SHA256("abc") = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
     try std.testing.expectEqualStrings(
