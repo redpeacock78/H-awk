@@ -95,3 +95,59 @@ test "get returns null for unknown id" {
     pool.mu.unlock();
     try std.testing.expect(result == null);
 }
+
+const event_loop = @import("event_loop");
+
+test "event_loop: listen, send request, dequeue, respond" {
+    const alloc = std.testing.allocator;
+
+    const port: u16 = 18765;
+
+    var loop = try event_loop.EventLoop.init(alloc, port);
+    defer loop.deinit();
+
+    const thread = try std.Thread.spawn(.{}, event_loop.EventLoop.run, .{&loop});
+
+    {
+        const ts = std.c.timespec{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
+        _ = std.c.nanosleep(&ts, null);
+    }
+
+    const client_fd = blk: {
+        const fd_rc = std.posix.system.socket(std.posix.AF.INET, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
+        if (std.posix.errno(fd_rc) != .SUCCESS) return error.Socket;
+        break :blk @as(std.posix.socket_t, @intCast(fd_rc));
+    };
+    defer _ = std.posix.system.close(client_fd);
+
+    const addr = std.posix.sockaddr.in{
+        .port = std.mem.nativeToBig(u16, port),
+        .addr = std.mem.nativeToBig(u32, 0x7F000001), // 127.0.0.1
+    };
+    const conn_rc = std.posix.system.connect(client_fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.in));
+    if (std.posix.errno(conn_rc) != .SUCCESS) return error.Connect;
+
+    const req_bytes = "GET /test HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+    _ = std.posix.system.write(client_fd, req_bytes.ptr, req_bytes.len);
+
+    const poll_str = loop.dequeue(alloc);
+    try std.testing.expect(poll_str != null);
+    defer alloc.free(poll_str.?);
+
+    try std.testing.expect(std.mem.indexOf(u8, poll_str.?, "\x1e") != null);
+    try std.testing.expect(std.mem.indexOf(u8, poll_str.?, "GET") != null);
+
+    const first_sep = std.mem.indexOf(u8, poll_str.?, "\x1e").?;
+    const conn_id = try std.fmt.parseInt(u64, poll_str.?[0..first_sep], 10);
+
+    const ok = loop.respond(conn_id, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain\r\n\r\nOK");
+    try std.testing.expect(ok);
+
+    {
+        const ts = std.c.timespec{ .sec = 0, .nsec = 20 * std.time.ns_per_ms };
+        _ = std.c.nanosleep(&ts, null);
+    }
+
+    loop.stop();
+    thread.join();
+}
