@@ -264,21 +264,49 @@ BEGIN {
 
 ---
 
-## 9. libs/net トランスポートの graceful fallback
+## 9. libs/net トランスポート修正 (要調査・実装)
 
-### 背景
+### 経緯
 
-`core/libs.awk` への `net` 登録追加 (`HAWK_LIBS_net` → `LIBS_LOADED["net"]`) により、`libs/net` がビルド済みの場合 `_http_serve_zig()` が呼ばれるようになる。しかし Zig transport で `hawk_net_poll()` が即座に空文字を返す (イベントループ即終了) ケースで、既存コードは単に `break` するだけでサーバーが落ちる:
+`core/libs.awk` に `net` を登録したことで `_http_serve_zig()` が実際に呼ばれるようになり、これまで潜在していた複数の問題が顕在化した。`_http_serve_zig` はこれまで一度も本番コードパスを通っておらず、デッドコード状態だった。
+
+### 確認済み問題
+
+**問題1: `log_warn` 未定義**
+
+`core/util.awk` には `log_info` / `log_error` のみ定義。`log_warn` は存在しない。
+`_http_serve_zig` 内の `log_warn` (line 126, 134) が `fatal: function 'log_warn' not defined` でクラッシュ。
 
 ```
-[INFO]  H-awk listening on http://0.0.0.0:8080 [libs: net, crypto, multipart, binary]
+gawk: core/http.awk:134: fatal: function 'log_warn' not defined
+```
+
+**問題2: Zig event loop が即終了**
+
+`log_warn` を仮に修正しても、`hawk_net_poll()` が即座に `""` を返してループが終了する:
+
+```
+[INFO]  H-awk listening on http://0.0.0.0:8080 [libs: net, ...]
 [ERROR] libs/net: event loop stopped unexpectedly
 [INFO]  shutting down
 ```
 
+`hawk_net_poll()` の Zig 実装または `hawk_net_listen()` の初期化フローに問題がある可能性がある。要 Zig 側デバッグ。
+
 ### 修正方針
 
-`_http_serve_zig()` の poll ループで空返却を受けたとき、`break` の代わりに `/inet/tcp/` フォールバックを試みる:
+**Step 1: `log_warn` を `core/util.awk` に追加**
+
+```awk
+function log_warn(msg) {
+  printf "[WARN]  %s\n", msg > "/dev/stderr"
+  fflush("/dev/stderr")
+}
+```
+
+`core/util.awk` のコメント (`log_info` / `log_error` 一覧) も更新。
+
+**Step 2: `_http_serve_zig` の poll 失敗を fallback に変更**
 
 ```awk
 # 変更前
@@ -295,11 +323,21 @@ if (poll_result == "") {
 }
 ```
 
+**Step 3: Zig 側の `hawk_net_listen` / `hawk_net_poll` デバッグ**
+
+`libs/net/src/root.zig` の `hawk_net_listen` → `hawk_net_poll` フローを確認。
+- `hawk_net_listen` の返値が正しいか (成功時 1)
+- `hawk_net_poll` が即 `""` を返す原因 (ソケット初期化タイミング、fd 管理等)
+- 既存の unit/integration テスト (`test_libs_net_listen_skip`) でカバーされていない実際の poll 動作を検証
+
+**Step 4: `_http_serve_zig` の単体テスト追加**
+
+Zig transport が正常に動作するスモークテストを `tests/` に追加。
+
 ### 考慮点
 
-- Zig transport が `hawk_net_listen()` 成功後に poll で即失敗した場合、ポートは gawk 側から見ると未使用 (Zig socket の後始末は Zig 側責任)。`/inet/tcp/PORT/0/0` への fallback は通常成功する。
-- `hawk_net_listen()` 自体が失敗 (返値 0) した場合の fallback は既存コードが処理済み。今回の変更は「listen 成功後の poll 失敗」ケースのみ追加。
-- フォールバック発生時は `[WARN]` ログで記録し、サーバーは継続動作させる。
+- fallback 後は `/inet/tcp/PORT/0/0` でリッスン。Zig socket は Zig 側でクローズ済みと仮定 (ポート競合なし)。ポート競合が発生する場合は `hawk_net_close()` API の追加を検討。
+- Step 1–2 は AWK 側のみの変更で即適用可。Step 3 は Zig デバッグが必要。
 
 ---
 

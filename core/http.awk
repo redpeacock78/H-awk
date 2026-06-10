@@ -131,9 +131,8 @@ function _http_serve_zig(    poll_result, req, res, conn_id, dispatch_ok, start_
   while (!HAWK_SHUTDOWN) {
     poll_result = hawk_net_poll()
     if (poll_result == "") {
-      log_warn("libs/net: event loop stopped unexpectedly, falling back to /inet/tcp/")
-      _http_serve_inet()
-      return
+      log_error("libs/net: event loop stopped unexpectedly")
+      break
     }
 
     start_ms = now_ms()
