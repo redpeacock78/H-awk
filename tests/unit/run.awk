@@ -63,6 +63,7 @@ BEGIN {
   test_libs_binary_length()
   test_libs_binary_read_text()
   test_libs_binary_read_missing()
+  test_libs_net_listen_skip()
 
   printf "\n%d passed, %d failed, %d skipped\n", TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED
   exit (TESTS_FAILED > 0)
