@@ -47,7 +47,8 @@ fn argon2idFn(args: ffi.Args) ffi.Result {
 
     const hash = crypto.argon2idHash(alloc, password, io) catch return .{ .string = "" };
     defer alloc.free(hash);
-    return .{ .string = hash };
+    const out = ffi.gawkAllocator().dupe(u8, hash) catch return .{ .string = "" };
+    return .{ .string = out };
 }
 
 // hawk_argon2id_verify(hash, password) → "1" or "0"
@@ -80,7 +81,8 @@ fn ecdsaSignFn(args: ffi.Args) ffi.Result {
     // Sign
     const sig = crypto.ecdsaSign(alloc, &sk_bytes, data) catch return .{ .string = "" };
     defer alloc.free(sig);
-    return .{ .string = sig };
+    const out = ffi.gawkAllocator().dupe(u8, sig) catch return .{ .string = "" };
+    return .{ .string = out };
 }
 
 // hawk_ecdsa_verify(pub_key_b64url, data, sig_b64url) → "1" or "0"
