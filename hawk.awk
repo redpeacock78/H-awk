@@ -11,6 +11,7 @@
 #   request    -- raw → req[]
 #   response   -- res[] + wire format
 #   router     -- ROUTES + dispatch
+#   ctx        -- ctx:: namespace / Context API (Hono-style)
 #   plugin     -- hook 登録 + call_hooks
 #   http       -- END でリッスンループ起動
 

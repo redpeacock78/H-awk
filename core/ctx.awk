@@ -20,7 +20,7 @@ function body()           { return ctx::req["body"] }
 # --- Response helpers ---
 
 # json(data): set body to a pre-encoded JSON string and set content-type.
-# For array-based encoding, callers should use json_encode() directly.
+# For array-based encoding, callers should use awk::json_encode() directly.
 function json(data) {
   if (!("status" in ctx::res)) ctx::res["status"] = 200
   ctx::res["header:content-type"] = "application/json; charset=utf-8"
