@@ -1,7 +1,7 @@
 # H-awk v0.4 ctx 名前空間 + ルーター分割設計仕様書
 
 - **プロジェクト名**: H-awk
-- **サブシステム**: `core/ctx.awk`, `core/router.awk` (軽微変更), `core/http.awk` (`listen()` 追加)
+- **サブシステム**: `core/ctx.awk`, `core/router.awk` (軽微変更), `core/http.awk` (`listen()` 追加), `core/libs.awk` (net 登録追加)
 - **作成日**: 2026-06-10
 - **対象バージョン**: H-awk v0.4
 - **ステータス**: 承認済み
@@ -264,7 +264,46 @@ BEGIN {
 
 ---
 
-## 9. 非機能要件
+## 9. libs/net トランスポートの graceful fallback
+
+### 背景
+
+`core/libs.awk` への `net` 登録追加 (`HAWK_LIBS_net` → `LIBS_LOADED["net"]`) により、`libs/net` がビルド済みの場合 `_http_serve_zig()` が呼ばれるようになる。しかし Zig transport で `hawk_net_poll()` が即座に空文字を返す (イベントループ即終了) ケースで、既存コードは単に `break` するだけでサーバーが落ちる:
+
+```
+[INFO]  H-awk listening on http://0.0.0.0:8080 [libs: net, crypto, multipart, binary]
+[ERROR] libs/net: event loop stopped unexpectedly
+[INFO]  shutting down
+```
+
+### 修正方針
+
+`_http_serve_zig()` の poll ループで空返却を受けたとき、`break` の代わりに `/inet/tcp/` フォールバックを試みる:
+
+```awk
+# 変更前
+if (poll_result == "") {
+  log_error("libs/net: event loop stopped unexpectedly")
+  break
+}
+
+# 変更後
+if (poll_result == "") {
+  log_warn("libs/net: event loop stopped unexpectedly, falling back to /inet/tcp/")
+  _http_serve_inet()
+  return
+}
+```
+
+### 考慮点
+
+- Zig transport が `hawk_net_listen()` 成功後に poll で即失敗した場合、ポートは gawk 側から見ると未使用 (Zig socket の後始末は Zig 側責任)。`/inet/tcp/PORT/0/0` への fallback は通常成功する。
+- `hawk_net_listen()` 自体が失敗 (返値 0) した場合の fallback は既存コードが処理済み。今回の変更は「listen 成功後の poll 失敗」ケースのみ追加。
+- フォールバック発生時は `[WARN]` ログで記録し、サーバーは継続動作させる。
+
+---
+
+## 10. 非機能要件
 
 - リクエスト毎の `ctx::req`/`ctx::res` コピーは O(n)、n ≈ 30–50 キー。パフォーマンス影響は無視可。
 - gawk 5.0 以上 (`@namespace` サポート) が必要。既存要件と同じ。
