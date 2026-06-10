@@ -50,3 +50,52 @@ function test_libs_multipart_parse_skip(    raw, req) {
   assert_eq(hawk_multipart_parse(raw, "B", req), "1", "libs/multipart: parse returns 1")
   assert_eq(req["form:x"], "hello", "libs/multipart: parse sets form field")
 }
+
+function test_libs_crypto_sha256(    result) {
+  if (!LIBS_LOADED["crypto"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  result = hawk_sha256("abc")
+  assert_eq(result, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "libs/crypto: sha256(abc)")
+}
+
+function test_libs_crypto_hmac_sha256(    result) {
+  if (!LIBS_LOADED["crypto"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  result = hawk_hmac_sha256("key", "data")
+  assert_eq(result, "5031fe3d989c6d1537a013fa6e739da23463fdaec3b70137d828e36ace221bd0", "libs/crypto: hmac_sha256(key, data)")
+}
+
+function test_libs_crypto_argon2id(    hash, verify_ok, verify_fail) {
+  if (!LIBS_LOADED["crypto"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  hash = hawk_argon2id("password")
+  assert_true(index(hash, "$argon2id$") == 1, "libs/crypto: argon2id hash starts with $argon2id$")
+}
+
+function test_libs_crypto_argon2id_verify(    hash, verify_ok, verify_fail) {
+  if (!LIBS_LOADED["crypto"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  hash = hawk_argon2id("password")
+  verify_ok = hawk_argon2id_verify(hash, "password")
+  verify_fail = hawk_argon2id_verify(hash, "wrongpassword")
+  assert_eq(verify_ok, "1", "libs/crypto: argon2id_verify with correct password")
+  assert_eq(verify_fail, "0", "libs/crypto: argon2id_verify with wrong password")
+}
+
+function test_libs_crypto_sha256_no_lib(    saved, saved_skipped) {
+  saved = LIBS_LOADED["crypto"]
+  delete LIBS_LOADED["crypto"]
+  saved_skipped = TESTS_SKIPPED
+  test_libs_crypto_sha256()
+  assert_true(TESTS_SKIPPED == saved_skipped + 1, "libs/crypto: sha256 skipped when lib not loaded")
+  LIBS_LOADED["crypto"] = saved
+  TESTS_SKIPPED = saved_skipped
+}

@@ -69,6 +69,12 @@ BEGIN {
   test_libs_net_listen_skip()
   test_libs_multipart_parse_skip()
 
+  test_libs_crypto_sha256()
+  test_libs_crypto_hmac_sha256()
+  test_libs_crypto_argon2id()
+  test_libs_crypto_argon2id_verify()
+  test_libs_crypto_sha256_no_lib()
+
   printf "\n%d passed, %d failed, %d skipped\n", TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED
   exit (TESTS_FAILED > 0)
 }
