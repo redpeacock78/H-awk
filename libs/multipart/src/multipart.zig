@@ -86,12 +86,14 @@ fn parsePart(allocator: std.mem.Allocator, part: []const u8) !Part {
         }
     }
 
-    return Part{
-        .name = try allocator.dupe(u8, name),
-        .filename = try allocator.dupe(u8, filename),
-        .content_type = try allocator.dupe(u8, content_type),
-        .body = try allocator.dupe(u8, body),
-    };
+    const duped_name = try allocator.dupe(u8, name);
+    errdefer allocator.free(duped_name);
+    const duped_filename = try allocator.dupe(u8, filename);
+    errdefer allocator.free(duped_filename);
+    const duped_ct = try allocator.dupe(u8, content_type);
+    errdefer allocator.free(duped_ct);
+    const duped_body = try allocator.dupe(u8, body);
+    return Part{ .name = duped_name, .filename = duped_filename, .content_type = duped_ct, .body = duped_body };
 }
 
 /// Extract param value from Content-Disposition header value.
