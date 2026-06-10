@@ -38,6 +38,9 @@ BEGIN {
   test_request_parse_zig_post_form()
   test_request_parse_zig_query()
   test_request_parse_zig_bad()
+  test_request_parse_multipart_no_lib()
+  test_request_parse_multipart_text()
+  test_request_parse_multipart_file()
 
   test_response_status()
   test_response_header()
@@ -64,6 +67,7 @@ BEGIN {
   test_libs_binary_read_text()
   test_libs_binary_read_missing()
   test_libs_net_listen_skip()
+  test_libs_multipart_parse_skip()
 
   printf "\n%d passed, %d failed, %d skipped\n", TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED
   exit (TESTS_FAILED > 0)
