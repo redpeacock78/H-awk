@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
-# テスト用ハンドラ
-function _t_hello(req, res) { text(res, "hello") }
-function _t_show(req, res)  { text(res, "id=" req["params:id"]) }
-function _t_add(req, res)   { status(res, 201); text(res, "added") }
+# テスト用ハンドラ (ctx:: スタイル — @handler() でゼロ引数呼び出し)
+function _t_hello() { ctx::text("hello") }
+function _t_show()  { ctx::text("id=" ctx::param("id")) }
+function _t_add()   { ctx::status(201); ctx::text("added") }
 
 function _router_reset() {
   delete ROUTES

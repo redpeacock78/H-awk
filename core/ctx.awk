@@ -3,8 +3,8 @@
 #
 # ctx::req[], ctx::res[] are populated by _ctx_load() before each handler call.
 # _ctx_save() copies ctx::res[] back to res[] after the handler returns.
-# Handler functions that accept (req, res) args continue to work unchanged.
-# Handler functions with no args (or only local vars) use ctx:: directly.
+# All route handlers use ctx:: directly; router calls @handler() with 0 args
+# so all declared params are true local variables.
 #
 # Requires gawk 5.0+ (@namespace support).
 
@@ -25,13 +25,14 @@ function json(data) {
   if (!("status" in ctx::res)) ctx::res["status"] = 200
   ctx::res["header:content-type"] = "application/json; charset=utf-8"
   ctx::res["body"] = data
+  return 1
 }
-function text(data)          { awk::text(ctx::res, data) }
-function html(data)          { awk::html(ctx::res, data) }
-function render(tpl, d)      { awk::render(ctx::res, tpl, d) }
-function redirect(url, c)    { awk::redirect(ctx::res, url, c) }
-function status(code)        { awk::status(ctx::res, code) }
-function set_header(name, v) { awk::header(ctx::res, name, v) }
+function text(data)          { awk::text(ctx::res, data);        return 1 }
+function html(data)          { awk::html(ctx::res, data);        return 1 }
+function render(tpl, d)      { awk::render(ctx::res, tpl, d);   return 1 }
+function redirect(url, c)    { awk::redirect(ctx::res, url, c); return 1 }
+function status(code)        { awk::status(ctx::res, code);     return 1 }
+function set_header(name, v) { awk::header(ctx::res, name, v);  return 1 }
 
 @namespace "awk"
 

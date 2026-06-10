@@ -62,7 +62,7 @@ function router_dispatch(req, res,    idx, key, k, pattern, arr, params, names, 
         }
         handler = ROUTES[k[1], k[2], "handler"]
         _ctx_load(req, res)
-        @handler(req, res)
+        @handler()
         _ctx_save(res)
         return 1
       } else {
