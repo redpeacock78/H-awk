@@ -43,6 +43,7 @@ fn argon2idFn(args: ffi.Args) ffi.Result {
 
     // Initialize Threaded IO instance for entropy
     var threaded_io = std.Io.Threaded.init(alloc, .{});
+    defer threaded_io.deinit();
     const io = threaded_io.io();
 
     const hash = crypto.argon2idHash(alloc, password, io) catch return .{ .string = "" };
@@ -59,6 +60,7 @@ fn argon2idVerifyFn(args: ffi.Args) ffi.Result {
 
     // Initialize Threaded IO instance for entropy
     var threaded_io = std.Io.Threaded.init(alloc, .{});
+    defer threaded_io.deinit();
     const io = threaded_io.io();
 
     const ok = crypto.argon2idVerify(alloc, hash, password, io);
