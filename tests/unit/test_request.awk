@@ -93,14 +93,16 @@ function test_request_parse_zig_bad(   poll, req, ok) {
   assert_eq(ok, 0, "zig req: too few fields rejected")
 }
 
-function test_request_parse_multipart_no_lib(    raw, req, ok) {
-  delete LIBS_LOADED
+function test_request_parse_multipart_no_lib(   raw, req, ok, saved) {
+  saved = LIBS_LOADED["multipart"]
+  delete LIBS_LOADED["multipart"]
   raw = "POST /upload HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=BOUND\r\nContent-Length: 10\r\n\r\ndummybody"
   delete req
   ok = request_parse(raw, req)
   assert_eq(ok, 1, "request: multipart no-lib still parses ok")
   assert_eq(req["method"], "POST", "request: multipart no-lib method")
   assert_eq(req["header:content-type"], "multipart/form-data; boundary=BOUND", "request: multipart no-lib ct header")
+  LIBS_LOADED["multipart"] = saved
 }
 
 function test_request_parse_multipart_text(    raw, req, ok, body, boundary) {
