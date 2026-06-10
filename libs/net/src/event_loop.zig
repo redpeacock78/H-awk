@@ -106,7 +106,7 @@ pub const EventLoop = struct {
             .resp_mu = .{},
             .wakeup_read_fd = pipe_fds[0],
             .wakeup_write_fd = pipe_fds[1],
-            .running = std.atomic.Value(bool).init(false),
+            .running = std.atomic.Value(bool).init(true),
         };
     }
 

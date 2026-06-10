@@ -16,3 +16,9 @@ function test_util_to_lower() {
   assert_eq(to_lower("Content-Type"), "content-type", "util: to_lower header")
   assert_eq(to_lower("ABC123"),       "abc123",       "util: to_lower mixed")
 }
+
+function test_util_log_warn() {
+  # log_warn must exist and not crash — output goes to stderr, not testable here
+  log_warn("test warn message")
+  TESTS_SKIPPED++
+}
