@@ -38,3 +38,15 @@ function test_libs_net_listen_skip() {
   }
   assert_eq((hawk_net_listen(19999) == 1 || hawk_net_listen(19999) == 0), 1, "libs/net: listen callable")
 }
+
+function test_libs_multipart_parse_skip(    raw, req) {
+  if (!LIBS_LOADED["multipart"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  # Basic integration smoke test: parse a single-field body
+  raw = "--B\r\nContent-Disposition: form-data; name=\"x\"\r\n\r\nhello\r\n--B--\r\n"
+  delete req
+  assert_eq(hawk_multipart_parse(raw, "B", req), "1", "libs/multipart: parse returns 1")
+  assert_eq(req["form:x"], "hello", "libs/multipart: parse sets form field")
+}

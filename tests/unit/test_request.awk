@@ -92,3 +92,44 @@ function test_request_parse_zig_bad(   poll, req, ok) {
   ok = parse_request_zig(poll, req)
   assert_eq(ok, 0, "zig req: too few fields rejected")
 }
+
+function test_request_parse_multipart_no_lib(   raw, req, ok, saved) {
+  saved = LIBS_LOADED["multipart"]
+  delete LIBS_LOADED["multipart"]
+  raw = "POST /upload HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=BOUND\r\nContent-Length: 10\r\n\r\ndummybody"
+  delete req
+  ok = request_parse(raw, req)
+  assert_eq(ok, 1, "request: multipart no-lib still parses ok")
+  assert_eq(req["method"], "POST", "request: multipart no-lib method")
+  assert_eq(req["header:content-type"], "multipart/form-data; boundary=BOUND", "request: multipart no-lib ct header")
+  LIBS_LOADED["multipart"] = saved
+}
+
+function test_request_parse_multipart_text(    raw, req, ok, body, boundary) {
+  if (!LIBS_LOADED["multipart"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  boundary = "TESTBOUND"
+  body = "--TESTBOUND\r\nContent-Disposition: form-data; name=\"username\"\r\n\r\nalice\r\n--TESTBOUND--\r\n"
+  raw = sprintf("POST /upload HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=TESTBOUND\r\nContent-Length: %d\r\n\r\n%s", length(body), body)
+  delete req
+  ok = request_parse(raw, req)
+  assert_eq(ok, 1, "request: multipart text parse ok")
+  assert_eq(req["form:username"], "alice", "request: multipart text field value")
+}
+
+function test_request_parse_multipart_file(    raw, req, ok, body) {
+  if (!LIBS_LOADED["multipart"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  body = "--BOUND\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"photo.jpg\"\r\nContent-Type: image/jpeg\r\n\r\nFAKEJPEG\r\n--BOUND--\r\n"
+  raw = sprintf("POST /upload HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=BOUND\r\nContent-Length: %d\r\n\r\n%s", length(body), body)
+  delete req
+  ok = request_parse(raw, req)
+  assert_eq(ok, 1, "request: multipart file parse ok")
+  assert_eq(req["file:avatar"], "FAKEJPEG", "request: multipart file body")
+  assert_eq(req["file:avatar_filename"], "photo.jpg", "request: multipart file filename")
+  assert_eq(req["file:avatar_type"], "image/jpeg", "request: multipart file content-type")
+}
