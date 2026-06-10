@@ -7,6 +7,7 @@
 #   to_lower(s)            -- ASCII 小文字化 (ヘッダ名正規化用)
 #   to_upper(s)            -- ASCII 大文字化
 #   log_info(msg)          -- stdout に "[INFO] ..." 出力
+#   log_warn(msg)          -- stderr に "[WARN] ..." 出力
 #   log_error(msg)         -- stderr に "[ERROR] ..." 出力
 #   now_ms()               -- 起動時間からのミリ秒 (リクエスト計測用)
 #   trim(s)                -- 前後空白除去
@@ -76,6 +77,11 @@ function to_upper(s,    out, i, n, c) {
 function log_info(msg) {
   printf "[INFO]  %s\n", msg
   fflush()
+}
+
+function log_warn(msg) {
+  printf "[WARN]  %s\n", msg > "/dev/stderr"
+  fflush("/dev/stderr")
 }
 
 function log_error(msg) {

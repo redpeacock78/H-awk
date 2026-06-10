@@ -11,6 +11,7 @@ BEGIN {
   test_util_url_decode()
   test_util_escape_html()
   test_util_to_lower()
+  test_util_log_warn()
 
   test_json_encode_flat()
   test_json_encode_type_suffix()
