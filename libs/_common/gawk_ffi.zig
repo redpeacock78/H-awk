@@ -40,7 +40,26 @@ pub const Args = struct {
         if (_api.*.api_get_argument.?(_ext_id, @intCast(i), c.AWK_NUMBER, &v) == c.awk_false) return 0.0;
         return v.u.n.d;
     }
+
+    /// Get argument i as a gawk array handle. Returns null on index out of range or type mismatch.
+    pub fn getArray(self: Args, i: usize) c.awk_array_t {
+        if (i >= @as(usize, @intCast(self._argc))) return null;
+        var v: c.awk_value_t = undefined;
+        if (_api.*.api_get_argument.?(_ext_id, @intCast(i), c.AWK_ARRAY, &v) == c.awk_false) return null;
+        return v.u.a;
+    }
 };
+
+/// Write a string key/value pair into a gawk array.
+/// Both key and val must remain valid for the duration of the call;
+/// gawk copies them (awk_false = gawk does NOT take ownership of our pointer).
+pub fn arraySet(arr: c.awk_array_t, key: []const u8, val: []const u8) void {
+    var k: c.awk_value_t = undefined;
+    var v: c.awk_value_t = undefined;
+    if (c.r_make_string(_api, _ext_id, key.ptr, key.len, c.awk_false, &k) == null) return;
+    if (c.r_make_string(_api, _ext_id, val.ptr, val.len, c.awk_false, &v) == null) return;
+    _ = _api.*.api_set_array_element.?(_ext_id, arr, &k, &v);
+}
 
 /// Return value from a gawk extension function.
 pub const Result = union(enum) {
