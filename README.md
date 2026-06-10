@@ -1,46 +1,49 @@
 # H-awk
 
-> **awkでシンプルにバックエンドルーターを書こう！**
+> Express-style HTTP server for GNU AWK. Write backends in plain AWK.
 
-`gawk` 単体で動作する、Express 型 API を備えた HTTP バックエンドルーター。
+H-awk is a lightweight HTTP framework built on top of `gawk`. Define routes, handle requests, and build APIs with a familiar Express-like API — no Node, no Python, no compiled binaries required.
 
-## 動作要件
+## Requirements
 
-- gawk 5.0 以上 (`gawk --version` で確認)
-- POSIX sh 互換のシェル
-- GNU make
-- (E2E テスト時のみ) curl
+- gawk 5.0+ (`gawk --version`)
+- POSIX sh + GNU make
+- Zig 0.14+ (only for `make build-libs`)
+- curl (e2e tests only)
 
-検証済み環境: gawk 5.3.1 / macOS Darwin 21。Linux は API 互換のため動作見込み。Windows は WSL 経由のみ。
+Tested on gawk 5.3.1 / macOS. Linux works. Windows via WSL only.
 
 ## Quickstart
 
 ```sh
-# .env を雛形からコピー
 cp .env.example .env
 
-# サーバー起動 (デフォルト :8080)
-./bin/hawk app.awk
+# Optional: build native extensions (binary I/O, TCP transport, etc.)
+make build-libs
 
-# 別ターミナルから
-curl http://127.0.0.1:8080/
-curl -X POST -d 'title=buy+milk' http://127.0.0.1:8080/todos
-curl http://127.0.0.1:8080/todos.json
+# Start the server (default :8080)
+./bin/hawk app.awk
 ```
 
-`make help` で利用可能なターゲットを表示。
+```sh
+curl http://localhost:8080/
+curl -X POST -d 'title=buy+milk' http://localhost:8080/todos
+curl -X DELETE http://localhost:8080/todos/1234
+curl http://localhost:8080/todos.json
+```
 
-## ルート定義 (app.awk)
+`make help` lists all available targets.
+
+## Routing
+
+### Classic style
+
+Handlers receive `req` and `res` arrays directly.
 
 ```awk
 BEGIN {
-  GET   ("/",            "index")
-  GET   ("/users/:id",   "show_user")
-  POST  ("/todos",       "add_todo")
-}
-
-function index(req, res) {
-  render(res, "views/index.html")
+  GET("/users/:id", "show_user")
+  POST("/todos",    "add_todo")
 }
 
 function show_user(req, res) {
@@ -53,15 +56,95 @@ function add_todo(req, res,    row) {
   row["title"] = req["form:title"]
   append_tsv("data/todos.tsv", row)
   status(res, 201)
-  text(res, "ok")
+  json(res, "{\"ok\":true}")
 }
 ```
 
-詳細仕様: [docs/superpowers/specs/2026-06-06-h-awk-design.md](docs/superpowers/specs/2026-06-06-h-awk-design.md)
+### Context style (v0.4+)
 
-## プラグインの作り方
+Use `ctx::` helpers instead of `req`/`res` arguments. Call `listen(port)` explicitly from `BEGIN`.
 
-`plugins/<name>/manifest.awk` と `plugins/<name>/<name>.awk` を作る。
+```awk
+BEGIN {
+  GET("/todos",        "list_todos")
+  POST("/todos",       "add_todo")
+  DELETE("/todos/:id", "delete_todo")
+  listen(8080)
+}
+
+function list_todos(    n, rows) {
+  delete rows
+  n = read_tsv("data/todos.tsv", rows)
+  ctx::json(sprintf("[%d items]", n))
+}
+
+function add_todo(    title) {
+  title = ctx::req["form:title"]
+  if (title == "") { ctx::status(400); ctx::text("title required"); return }
+  ctx::status(201)
+  ctx::text("added: " title)
+}
+
+function delete_todo() {
+  delete_tsv("data/todos.tsv", "id", ctx::param("id"))
+  ctx::status(200)
+  ctx::html("")
+}
+```
+
+#### Context API reference
+
+| Function | Description |
+|---|---|
+| `ctx::query(key)` | URL query parameter |
+| `ctx::param(key)` | Path parameter (`:id`) |
+| `ctx::get_header(key)` | Request header (lowercase normalized) |
+| `ctx::body()` | Raw request body |
+| `ctx::req["form:KEY"]` | Form field |
+| `ctx::json(data)` | Respond with JSON |
+| `ctx::text(data)` | Respond with plain text |
+| `ctx::html(data)` | Respond with HTML |
+| `ctx::render(path)` | Render a static HTML file |
+| `ctx::status(code)` | Set HTTP status code |
+| `ctx::set_header(name, val)` | Set response header |
+| `ctx::redirect(url[, code])` | HTTP redirect |
+
+### Router files
+
+Split routes into namespaced files using gawk `@namespace`:
+
+```awk
+# routers/todos.awk
+@namespace "todos_router"
+
+function routes() {
+  awk::GET("/todos",     "todos_router::index")
+  awk::GET("/todos/:id", "todos_router::show")
+}
+
+function index() { ctx::json("[]") }
+
+function show(    id) {
+  id = ctx::param("id")
+  ctx::json("{\"id\":\"" id "\"}")
+}
+```
+
+```awk
+# app.awk
+@include "routers/todos.awk"
+
+BEGIN {
+  todos_router::routes()
+  listen(8080)
+}
+```
+
+Both old-style and ctx-style handlers can coexist in the same application.
+
+## Plugins
+
+Drop a plugin directory into `plugins/<name>/`. H-awk auto-discovers and loads plugins at startup.
 
 ```awk
 # plugins/logger/manifest.awk
@@ -70,113 +153,80 @@ function plugin_logger_manifest(meta) {
   meta["version"]     = "0.1.0"
   meta["description"] = "Per-request stdout logger"
   meta["hooks"]       = "post_request"
-  meta["api"]         = ""
-  meta["config_keys"] = ""
 }
 ```
 
 ```awk
 # plugins/logger/logger.awk
 function plugin_logger_post_request(req, res) {
-  log_info(sprintf("→ %s %s %d", req["method"], req["path"], res["status"]))
-  return 0
+  log_info(sprintf("%s %s %d", req["method"], req["path"], res["status"]))
 }
 ```
 
-`plugins/logger/` に置けば起動時に自動ロードされる。無効化したい場合は `plugins/logger/.disabled` を作る。
+### Plugin hooks
 
-## テスト
+| Hook | Signature | Notes |
+|---|---|---|
+| `init` | `(meta)` | Called once at startup |
+| `pre_request` | `(req, res)` | Before dispatch; return `1` to short-circuit |
+| `post_request` | `(req, res)` | After response is sent |
+| `shutdown` | `(meta)` | Called once at teardown |
 
-```sh
-make test          # ユニット + E2E
-make test-unit     # awk 内 assert のみ
-make test-e2e      # サーバー起動 + curl
-make lint          # gawk --lint の構文チェック
-make ci            # lint + 全テスト
-```
-
-## バイナリ配信と native 拡張 (libs)
-
-H-awk は標準で **PNG / JPG / アイコン等のバイナリファイル配信** に対応するが、これは内部的に `libs/binary/` (Zig 製 gawk extension) を使う。**ユーザーは Zig の存在を意識する必要はない**。`make build-libs` で一度ビルドすれば、以降は通常通り `./bin/hawk app.awk` で起動するだけでバイナリ配信が透過的に有効になる。
-
-### libs のセットアップ (3 通り)
-
-#### 方法 A: Zig からビルド (推奨)
+Disable a plugin without removing it:
 
 ```sh
-make build-libs    # libs/*/zig-out/lib/libhawk_*.{so,dylib}
+touch plugins/logger/.disabled
 ```
 
-要件: Zig 0.15+ (`zig version` で確認)
-
-#### 方法 B: precompiled をダウンロード (Zig 不要)
-
-```sh
-HAWK_REPO=<owner>/<repo> make fetch-libs
-```
-
-GitHub Release から OS / アーキ対応の .so / .dylib を取得して `libs/<name>/zig-out/lib/` に展開する。
-
-#### 方法 C: libs を使わない
-
-何もしない。サーバーは起動するが、PNG / JPG 等のバイナリ配信時に内容が壊れる (text mode 読込で `\n` が混入する)。CSS / JS / HTML / JSON / プレーンテキストは libs 不要で正常配信される。
-
-### 状態確認
-
-起動時のログに有効な libs が表示される:
-
-```
-[INFO]  H-awk listening on http://0.0.0.0:8080 [libs: binary]
-```
-
-### 提供 libs (v0.2 時点)
-
-- **`libs/binary`** — バイナリ-safe file I/O。PNG/JPG/ICO/WebP/font 等の正確な読込・送信に必須
-
-### 今後追加予定 (ロードマップ)
-
-- v0.3: `libs/multipart` (ファイルアップロード) / `libs/crypto` (sha256/hmac)
-- v0.4: `libs/gzip` / `libs/url` (高速 url_decode)
-
-## プラグイン (plugins/) — git submodule で管理
-
-H-awk のプラグインは **island plugin** 方式: 各プラグインは独立した git リポジトリで配布され、本リポジトリでは `git submodule` として取り込む。core は `plugins/<name>/manifest.awk` の存在のみで discover するため、submodule 未初期化 (= ディレクトリ空) の場合は自動的に無効化される。
-
-### プラグインの追加
+Plugins are distributed as standalone git repositories and added via `git submodule`:
 
 ```sh
 git submodule add https://github.com/<owner>/hawk-plugin-csrf plugins/csrf
 git submodule update --init plugins/csrf
 ```
 
-`plugins/csrf/manifest.awk` + `plugins/csrf/csrf.awk` が配置され、次の起動から自動有効化される。
+## Native Extensions (libs)
 
-### プラグインの一時無効化
+Optional Zig-compiled gawk extensions unlock capabilities beyond what AWK can do natively.
+
+| Lib | Description |
+|---|---|
+| `libs/net` | Zig TCP event loop for higher-concurrency HTTP |
+| `libs/binary` | Binary-safe file I/O (PNG, JPG, WebP, fonts, etc.) |
+| `libs/multipart` | `multipart/form-data` parser for file uploads |
+| `libs/crypto` | SHA-256 / HMAC-SHA256 |
+| `libs/gzip` | Gzip / deflate compression |
+| `libs/url` | High-performance URL encode/decode |
+
+H-awk runs without any libs. Missing libs degrade gracefully — e.g., the server falls back to gawk's `/inet/tcp/` transport if `libs/net` is absent.
+
+### Setup
 
 ```sh
-touch plugins/csrf/.disabled
+# Build all libs (requires Zig 0.14+)
+make build-libs
+
+# Or fetch precompiled binaries (no Zig required)
+HAWK_REPO=<owner>/<repo> make fetch-libs
 ```
 
-`.disabled` マーカーがあれば bin/hawk は当該 plugin を gawk -f 集約から外す。
+Enabled libs are shown at startup:
 
-### プラグインの完全削除
+```
+[INFO]  H-awk listening on http://0.0.0.0:8080 [libs: net, binary]
+```
+
+## Testing
 
 ```sh
-git submodule deinit plugins/csrf
-git rm plugins/csrf
+make test           # unit + e2e
+make test-unit      # AWK assertions only (fast, no server)
+make test-e2e       # server + curl integration tests
+make test-libs      # Zig lib unit tests
+make lint           # gawk --lint syntax check
+make ci             # lint + all tests
 ```
 
-### 公式 plugin 命名規約
+## License
 
-- リポジトリ名: `hawk-plugin-<name>`
-- マウント先: `plugins/<name>/`
-- 関数命名: `plugin_<name>_<hook>` (フック) / `<name>_<api>` (公開 API)
-
-### 提供予定 (公式 plugin、ロードマップ)
-
-- v0.3: `hawk-plugin-csrf` / `hawk-plugin-postgres` / `hawk-plugin-s3`
-- v0.4: `hawk-plugin-session` / `hawk-plugin-cors` / `hawk-plugin-logger-json`
-
-## ライセンス
-
-(プロジェクトのライセンスに合わせて記載)
+MIT
