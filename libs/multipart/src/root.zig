@@ -19,6 +19,7 @@ fn multipartParse(args: ffi.Args) ffi.Result {
     const body = args.getString(0);
     const boundary = args.getString(1);
     const arr = args.getArray(2);
+    if (arr == null) return .{ .string = "0" };
 
     const alloc = std.heap.c_allocator;
     const parts = multipart.parse(alloc, body, boundary) catch return .{ .string = "0" };
