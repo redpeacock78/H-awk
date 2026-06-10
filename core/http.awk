@@ -10,35 +10,44 @@
 #   gawk は次の read で EOF / EINTR を見て HAWK_SHUTDOWN=1 を立て、ループを抜ける。
 
 END {
-  if (!("HAWK_NO_SERVE" in ENVIRON)) {
-    # ENVIRON 経由設定 (.env)
-    HAWK_PORT             = ENVIRON["PORT"]                  ? ENVIRON["PORT"]                  + 0 : 8080
-    HAWK_MAX_HEADER_SIZE  = ENVIRON["HAWK_MAX_HEADER_SIZE"]  ? ENVIRON["HAWK_MAX_HEADER_SIZE"]  + 0 : 8192
-    HAWK_MAX_BODY_SIZE    = ENVIRON["HAWK_MAX_BODY_SIZE"]    ? ENVIRON["HAWK_MAX_BODY_SIZE"]    + 0 : 1048576
-    HAWK_REQUEST_TIMEOUT  = ENVIRON["HAWK_REQUEST_TIMEOUT"]  ? ENVIRON["HAWK_REQUEST_TIMEOUT"]  + 0 : 30
-    HAWK_DEV              = (ENVIRON["DEV"] == "1")
-
-    plugin_discover()
-    if (PLUGIN_REGISTER_ERROR) {
-      log_error("plugin registration failed, exiting.")
-      exit 1
-    }
-    call_hooks("init")
-
-    libs_list = ""
-    for (lib in LIBS_LOADED) {
-      libs_list = libs_list (libs_list == "" ? "" : ", ") lib
-    }
-    log_info(sprintf("H-awk listening on http://0.0.0.0:%d%s", \
-      HAWK_PORT, \
-      libs_list == "" ? "" : " [libs: " libs_list "]"))
-
-    HAWK_SHUTDOWN = 0
-    http_serve()
-
-    log_info("shutting down")
-    call_hooks("shutdown")
+  if (!_HAWK_LISTEN_CALLED && !("HAWK_NO_SERVE" in ENVIRON)) {
+    _hawk_serve()
   }
+}
+
+function listen(port) {
+  if (port > 0) HAWK_PORT = port
+  _hawk_serve()
+  _HAWK_LISTEN_CALLED = 1
+}
+
+function _hawk_serve(    libs_list, lib) {
+  if (!HAWK_PORT)            HAWK_PORT            = ENVIRON["PORT"]                  ? ENVIRON["PORT"]                  + 0 : 8080
+  if (!HAWK_MAX_HEADER_SIZE) HAWK_MAX_HEADER_SIZE = ENVIRON["HAWK_MAX_HEADER_SIZE"]  ? ENVIRON["HAWK_MAX_HEADER_SIZE"]  + 0 : 8192
+  if (!HAWK_MAX_BODY_SIZE)   HAWK_MAX_BODY_SIZE   = ENVIRON["HAWK_MAX_BODY_SIZE"]    ? ENVIRON["HAWK_MAX_BODY_SIZE"]    + 0 : 1048576
+  if (!HAWK_REQUEST_TIMEOUT) HAWK_REQUEST_TIMEOUT = ENVIRON["HAWK_REQUEST_TIMEOUT"]  ? ENVIRON["HAWK_REQUEST_TIMEOUT"]  + 0 : 30
+  HAWK_DEV = (ENVIRON["DEV"] == "1")
+
+  plugin_discover()
+  if (PLUGIN_REGISTER_ERROR) {
+    log_error("plugin registration failed, exiting.")
+    exit 1
+  }
+  call_hooks("init")
+
+  libs_list = ""
+  for (lib in LIBS_LOADED) {
+    libs_list = libs_list (libs_list == "" ? "" : ", ") lib
+  }
+  log_info(sprintf("H-awk listening on http://0.0.0.0:%d%s", \
+    HAWK_PORT, \
+    libs_list == "" ? "" : " [libs: " libs_list "]"))
+
+  HAWK_SHUTDOWN = 0
+  http_serve()
+
+  log_info("shutting down")
+  call_hooks("shutdown")
 }
 
 function http_serve() {

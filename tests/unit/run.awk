@@ -59,6 +59,18 @@ BEGIN {
   test_router_405()
   test_router_static_priority()
 
+  test_ctx_load_copies_req()
+  test_ctx_save_copies_res_back()
+  test_ctx_query_helper()
+  test_ctx_param_helper()
+  test_ctx_get_header_helper()
+  test_ctx_body_helper()
+  test_ctx_json_helper()
+  test_ctx_text_helper()
+  test_ctx_status_helper()
+  test_ctx_set_header_helper()
+  test_ctx_load_clears_previous()
+
   test_plugin_register_one()
   test_plugin_call_hooks_normal()
   test_plugin_call_hooks_abort()
@@ -103,3 +115,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_router.awk"
 @include "tests/unit/test_plugin.awk"
 @include "tests/unit/test_libs.awk"
+@include "tests/unit/test_ctx.awk"

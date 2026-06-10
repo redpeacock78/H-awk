@@ -11,6 +11,7 @@
 #   request    -- raw → req[]
 #   response   -- res[] + wire format
 #   router     -- ROUTES + dispatch
+#   ctx        -- ctx:: namespace / Context API (Hono-style)
 #   plugin     -- hook 登録 + call_hooks
 #   http       -- END でリッスンループ起動
 
@@ -23,5 +24,6 @@
 @include "core/request.awk"
 @include "core/response.awk"
 @include "core/router.awk"
+@include "core/ctx.awk"
 @include "core/plugin.awk"
 @include "core/http.awk"
