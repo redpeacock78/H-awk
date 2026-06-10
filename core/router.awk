@@ -61,7 +61,9 @@ function router_dispatch(req, res,    idx, key, k, pattern, arr, params, names, 
           for (i = 1; i in names; i++) req["params:" names[i]] = arr[i]
         }
         handler = ROUTES[k[1], k[2], "handler"]
+        _ctx_load(req, res)
         @handler(req, res)
+        _ctx_save(res)
         return 1
       } else {
         has_path = 1
