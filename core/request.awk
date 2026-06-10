@@ -67,7 +67,11 @@ function request_parse(raw, req,    parts, headers_raw, body, lines, n, i, line,
       _request_parse_kv(body, req, "form:")
     } else if (index(req["header:content-type"], "multipart/form-data") == 1) {
       if (LIBS_LOADED["multipart"]) {
-        hawk_multipart_parse(body, _extract_boundary(req["header:content-type"]), req)
+        if (_extract_boundary(req["header:content-type"]) != "") {
+          hawk_multipart_parse(body, _extract_boundary(req["header:content-type"]), req)
+        } else {
+          log_error("request: multipart/form-data missing boundary parameter")
+        }
       } else {
         log_error("request: multipart/form-data received but libs/multipart not loaded")
       }
@@ -101,13 +105,15 @@ function _request_parse_kv(s, req, prefix,    pairs, np, i, eq, k, v) {
   }
 }
 
-function _extract_boundary(ct,    i, parts, n, kv) {
+function _extract_boundary(ct,    i, parts, n, kv, val) {
   n = split(ct, parts, ";")
   for (i = 2; i <= n; i++) {
     kv = parts[i]
     sub(/^[[:space:]]+/, "", kv)
     if (index(kv, "boundary=") == 1) {
-      return substr(kv, length("boundary=") + 1)
+      val = substr(kv, length("boundary=") + 1)
+      gsub(/^"|"$/, "", val)
+      return val
     }
   }
   return ""
@@ -171,7 +177,11 @@ function parse_request_zig(poll_result, req,    RS_CHAR, parts, n, i, j, k, v, c
       _request_parse_kv(req["body"], req, "form:")
     else if (index(req["header:content-type"], "multipart/form-data") == 1) {
       if (LIBS_LOADED["multipart"]) {
-        hawk_multipart_parse(req["body"], _extract_boundary(req["header:content-type"]), req)
+        if (_extract_boundary(req["header:content-type"]) != "") {
+          hawk_multipart_parse(req["body"], _extract_boundary(req["header:content-type"]), req)
+        } else {
+          log_error("request: multipart/form-data missing boundary parameter")
+        }
       } else {
         log_error("request: multipart/form-data received but libs/multipart not loaded")
       }
