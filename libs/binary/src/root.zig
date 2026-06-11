@@ -23,7 +23,7 @@ fn binRead(args: ffi.Args) ffi.Result {
         const s = std.mem.span(env.?);
         break :blk std.fmt.parseInt(usize, s, 10) catch 1048576;
     };
-    // Allocate with gawk's allocator so awk_false ownership transfer is API-compliant.
+    // Allocate via gawkAllocator so gawk takes ownership and calls efree() — no copy, no leak.
     const content = binary.readAll(ffi.gawkAllocator(), path, max_bytes) catch return .none;
     return .{ .gawk_string = content };
 }
