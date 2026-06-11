@@ -176,6 +176,24 @@ BEGIN {
 }
 ```
 
+## Environment (env::)
+
+`env::` is a [Deno.env](https://deno.land/api?s=Deno.env)-style namespace for reading and writing environment variables at runtime.
+
+```awk
+env::get("KEY")          # returns ENVIRON["KEY"]; "" if unset
+env::set("KEY", "val")   # ENVIRON["KEY"] = "val" (current process only)
+env::del("KEY")          # delete ENVIRON["KEY"]
+env::has("KEY")          # 1 if set, 0 if not
+```
+
+Variables set or deleted via `env::set` / `env::del` are visible to subsequent `env::get` calls within the same gawk process, but are **not** propagated to child processes spawned via `system()` or pipes.
+
+```awk
+# Read port from environment, fall back to 8080
+hawk::listen(env::get("PORT") ? env::get("PORT") + 0 : 8080)
+```
+
 ## Plugins
 
 Drop a plugin directory into `plugins/<name>/`. H-awk auto-discovers and loads plugins at startup.
