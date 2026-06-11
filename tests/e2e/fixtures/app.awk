@@ -7,20 +7,21 @@ BEGIN {
   GET("/render-html", "e_render")
 }
 
-function e_index(req, res) {
-  text(res, "hello")
+function e_index() {
+  ctx::text("hello")
 }
 
-function e_show(req, res) {
-  text(res, "user=" req["params:id"])
+function e_show() {
+  ctx::text("user=" ctx::param("id"))
 }
 
-function e_echo(req, res,    data) {
+function e_echo(    data) {
   delete data
-  data["got"] = req["form:msg"]
-  json(res, data, 201)
+  data["got"] = ctx::req["form:msg"]
+  ctx::status(201)
+  return ctx::json(json_encode(data))
 }
 
-function e_render(req, res) {
-  render(res, "tests/e2e/fixtures/views/test.html")
+function e_render() {
+  ctx::render("tests/e2e/fixtures/views/test.html")
 }
