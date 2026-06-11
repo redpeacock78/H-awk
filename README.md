@@ -69,6 +69,65 @@ function delete_todo() {
 }
 ```
 
+## App API (hawk::)
+
+`hawk::` is the primary routing interface. `GET`/`POST`/... are backward-compatible aliases.
+
+### Method shortcuts
+
+```awk
+hawk::get(path, handler)
+hawk::post(path, handler)
+hawk::put(path, handler)
+hawk::del(path, handler)    # hawk::delete is a gawk reserved keyword
+hawk::patch(path, handler)
+hawk::head(path, handler)
+hawk::listen(port)
+```
+
+### `hawk::on(methods, paths, handler)`
+
+Register routes for multiple methods and/or paths. Pass strings or gawk arrays.
+
+```awk
+# single method + path
+hawk::on("GET", "/todos", "list_todos")
+
+# multiple methods (array)
+delete ms; ms[1] = "GET"; ms[2] = "POST"
+hawk::on(ms, "/todos", "list_todos")
+
+# multiple paths (array)
+delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
+hawk::on("GET", ps, "list_todos")
+
+# custom method
+hawk::on("PURGE", "/cache", "purge_cache")
+```
+
+### `hawk::all(paths, handler)`
+
+Register all standard methods (GET POST PUT DELETE PATCH HEAD OPTIONS) for one or more paths.
+
+```awk
+hawk::all("/health", "ping")
+
+delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
+hawk::all(ps, "handler")
+```
+
+### Backward-compatible aliases
+
+```awk
+GET(path, handler)     # → hawk::get
+POST(path, handler)    # → hawk::post
+PUT(path, handler)     # → hawk::put
+DELETE(path, handler)  # → hawk::del
+PATCH(path, handler)   # → hawk::patch
+HEAD(path, handler)    # → hawk::head
+listen(port)           # unchanged
+```
+
 ### Context API reference
 
 | Function | Description |
