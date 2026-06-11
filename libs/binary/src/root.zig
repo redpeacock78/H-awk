@@ -25,7 +25,7 @@ fn binRead(args: ffi.Args) ffi.Result {
     };
     // Allocate with gawk's allocator so awk_false ownership transfer is API-compliant.
     const content = binary.readAll(ffi.gawkAllocator(), path, max_bytes) catch return .none;
-    return .{ .string = content };
+    return .{ .gawk_string = content };
 }
 
 fn binSend(_: ffi.Args) ffi.Result {

@@ -46,7 +46,7 @@ fn netListen(args: ffi.Args) ffi.Result {
 fn netPoll(_: ffi.Args) ffi.Result {
     const loop = _loop orelse return .none;
     const result = loop.dequeue(ffi.gawkAllocator()) orelse return .none;
-    return .{ .string = result };
+    return .{ .gawk_string = result };
 }
 
 fn netRespond(args: ffi.Args) ffi.Result {
