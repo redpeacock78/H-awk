@@ -94,3 +94,26 @@ function test_hawk_on_custom_method(    req, res) {
   assert_eq(router_dispatch(req, res), 1,  "on custom: dispatch")
   assert_eq(res["body"], "hello",           "on custom: body")
 }
+
+function test_hawk_all_single(    req, res) {
+  _router_reset()
+  hawk::all("/x", "_t_hello")
+  assert_eq(ROUTES_COUNT, 7, "all single: 7 routes")
+  delete req; req["method"] = "GET";     req["path"] = "/x"; delete res
+  assert_eq(router_dispatch(req, res), 1, "all single: GET")
+  delete req; req["method"] = "POST";    req["path"] = "/x"; delete res
+  assert_eq(router_dispatch(req, res), 1, "all single: POST")
+  delete req; req["method"] = "OPTIONS"; req["path"] = "/x"; delete res
+  assert_eq(router_dispatch(req, res), 1, "all single: OPTIONS")
+}
+
+function test_hawk_all_multi_paths(    req, res, ps) {
+  _router_reset()
+  delete ps; ps[1] = "/y"; ps[2] = "/z"
+  hawk::all(ps, "_t_hello")
+  assert_eq(ROUTES_COUNT, 14, "all multi: 14 routes")
+  delete req; req["method"] = "GET"; req["path"] = "/y"; delete res
+  assert_eq(router_dispatch(req, res), 1, "all multi: GET /y")
+  delete req; req["method"] = "PUT"; req["path"] = "/z"; delete res
+  assert_eq(router_dispatch(req, res), 1, "all multi: PUT /z")
+}

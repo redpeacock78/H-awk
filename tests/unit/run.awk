@@ -78,6 +78,8 @@ BEGIN {
   test_hawk_on_multi_paths()
   test_hawk_on_multi_both()
   test_hawk_on_custom_method()
+  test_hawk_all_single()
+  test_hawk_all_multi_paths()
 
   test_plugin_register_one()
   test_plugin_call_hooks_normal()
