@@ -22,3 +22,5 @@ libs/*/zig-out/
 libs/*/zig-cache/
 libs/*/.zig-cache/
 libtest_gawk_import.a
+# Added by code-review-graph
+.code-review-graph/
