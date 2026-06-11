@@ -10,7 +10,7 @@
 #   gawk は次の read で EOF / EINTR を見て HAWK_SHUTDOWN=1 を立て、ループを抜ける。
 
 END {
-  if (!_HAWK_LISTEN_CALLED && !("HAWK_NO_SERVE" in ENVIRON)) {
+  if (!_HAWK_LISTEN_CALLED && !env::has("HAWK_NO_SERVE")) {
     _hawk_serve()
   }
 }
@@ -22,11 +22,11 @@ function listen(port) {
 }
 
 function _hawk_serve(    libs_list, lib) {
-  if (!HAWK_PORT)            HAWK_PORT            = ENVIRON["PORT"]                  ? ENVIRON["PORT"]                  + 0 : 8080
-  if (!HAWK_MAX_HEADER_SIZE) HAWK_MAX_HEADER_SIZE = ENVIRON["HAWK_MAX_HEADER_SIZE"]  ? ENVIRON["HAWK_MAX_HEADER_SIZE"]  + 0 : 8192
-  if (!HAWK_MAX_BODY_SIZE)   HAWK_MAX_BODY_SIZE   = ENVIRON["HAWK_MAX_BODY_SIZE"]    ? ENVIRON["HAWK_MAX_BODY_SIZE"]    + 0 : 1048576
-  if (!HAWK_REQUEST_TIMEOUT) HAWK_REQUEST_TIMEOUT = ENVIRON["HAWK_REQUEST_TIMEOUT"]  ? ENVIRON["HAWK_REQUEST_TIMEOUT"]  + 0 : 30
-  HAWK_DEV = (ENVIRON["DEV"] == "1")
+  if (!HAWK_PORT)            HAWK_PORT            = env::get("PORT")                  ? env::get("PORT")                  + 0 : 8080
+  if (!HAWK_MAX_HEADER_SIZE) HAWK_MAX_HEADER_SIZE = env::get("HAWK_MAX_HEADER_SIZE")  ? env::get("HAWK_MAX_HEADER_SIZE")  + 0 : 8192
+  if (!HAWK_MAX_BODY_SIZE)   HAWK_MAX_BODY_SIZE   = env::get("HAWK_MAX_BODY_SIZE")    ? env::get("HAWK_MAX_BODY_SIZE")    + 0 : 1048576
+  if (!HAWK_REQUEST_TIMEOUT) HAWK_REQUEST_TIMEOUT = env::get("HAWK_REQUEST_TIMEOUT")  ? env::get("HAWK_REQUEST_TIMEOUT")  + 0 : 30
+  HAWK_DEV = (env::get("DEV") == "1")
 
   plugin_discover()
   if (PLUGIN_REGISTER_ERROR) {

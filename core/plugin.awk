@@ -45,7 +45,7 @@ function plugin_register(pname, meta,    keys, n, j, hooks, m, hook_name, k) {
     n = split(meta["config_keys"], keys, ",")
     for (j = 1; j <= n; j++) {
       k = trim(keys[j])
-      if (!(k in ENVIRON)) {
+      if (!env::has(k)) {
         if (!PLUGIN_QUIET) log_error("plugin " pname " missing env: " k)
         PLUGIN_REGISTER_ERROR = 1
       }
