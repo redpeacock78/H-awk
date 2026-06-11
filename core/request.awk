@@ -144,6 +144,7 @@ function parse_request_zig(poll_result, req,    RS_CHAR, parts, n, i, j, k, v, c
   req["full_path"]    = parts[3]
   req["http_version"] = "HTTP/1.1"
 
+  req["_hdr_len"] = length(parts[4])
   hn = split(parts[4], hlines, "\r\n")
   for (j = 1; j <= hn; j++) {
     if (hlines[j] == "") continue

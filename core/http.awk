@@ -160,6 +160,15 @@ function _http_serve_zig(    poll_result, req, res, conn_id, dispatch_ok, start_
 
     conn_id = req["_conn_id"]
 
+    if (HAWK_MAX_HEADER_SIZE > 0 && req["_hdr_len"] + 0 > HAWK_MAX_HEADER_SIZE) {
+      _zig_http_send_simple(conn_id, 431, "Request Header Fields Too Large")
+      continue
+    }
+    if (HAWK_MAX_BODY_SIZE > 0 && length(req["body"]) > HAWK_MAX_BODY_SIZE) {
+      _zig_http_send_simple(conn_id, 413, "Payload Too Large")
+      continue
+    }
+
     if (call_hooks("pre_request", req, res) == 1) {
       _zig_http_send(conn_id, res, req, start_ms)
       continue
