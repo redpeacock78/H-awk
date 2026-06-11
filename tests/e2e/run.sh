@@ -65,11 +65,13 @@ check "431 on big header" "431" "$(curl -s -o /dev/null -w '%{http_code}' -H "$b
 # body 128 byte 制限超過
 check "413 on big body" "413" "$(curl -s -o /dev/null -w '%{http_code}' -X POST --data "$(head -c 1100 /dev/zero | tr '\0' 'a')" -H 'Content-Type: application/x-www-form-urlencoded' http://127.0.0.1:$PORT/echo)"
 
-# ---- binary integrity test (requires libs/binary) ----
-# v0.2 limitation: binary files with null bytes cannot be fully transmitted
-# via gawk printf. Skipped until v0.3 with proper binary streaming.
-echo "SKIP: binary integrity (v0.2 limitation)"
-SKIP=$((SKIP + 1))
+# ---- binary integrity test ----
+# public/test.bin: 16 bytes (0x00-0x0f) with null bytes.
+# Served via static.awk → res["_binary_path"] → hawk_bin_read + hawk_net_respond.
+_bin_tmp=$(mktemp /tmp/hawk_e2e_bin.XXXXXX)
+curl -s "http://127.0.0.1:$PORT/test.bin" -o "$_bin_tmp" 2>/dev/null
+check "binary integrity" "ok" "$(cmp -s public/test.bin "$_bin_tmp" && echo ok || echo fail)"
+rm -f "$_bin_tmp"
 
 echo "$PASS passed, $FAIL failed, $SKIP skipped"
 exit "$FAIL"
