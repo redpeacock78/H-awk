@@ -10,23 +10,29 @@ function test_hawk_shortcuts(    req, res) {
   hawk::head("/f",   "_t_hello")
 
   delete req; req["method"] = "GET";    req["path"] = "/a"; delete res
-  assert_eq(router_dispatch(req, res), 1, "hawk::get registers GET /a")
+  assert_eq(router_dispatch(req, res), 1, "hawk::get dispatch")
+  assert_eq(res["body"], "hello",          "hawk::get body")
 
   delete req; req["method"] = "POST";   req["path"] = "/b"; delete res
-  assert_eq(router_dispatch(req, res), 1, "hawk::post registers POST /b")
-  assert_eq(res["status"], 201,              "hawk::post: handler status")
+  assert_eq(router_dispatch(req, res), 1, "hawk::post dispatch")
+  assert_eq(res["status"], 201,            "hawk::post status")
+  assert_eq(res["body"], "added",          "hawk::post body")
 
   delete req; req["method"] = "PUT";    req["path"] = "/c"; delete res
-  assert_eq(router_dispatch(req, res), 1, "hawk::put registers PUT /c")
+  assert_eq(router_dispatch(req, res), 1, "hawk::put dispatch")
+  assert_eq(res["body"], "hello",          "hawk::put body")
 
   delete req; req["method"] = "DELETE"; req["path"] = "/d"; delete res
-  assert_eq(router_dispatch(req, res), 1, "hawk::del registers DELETE /d")
+  assert_eq(router_dispatch(req, res), 1, "hawk::del dispatch")
+  assert_eq(res["body"], "hello",          "hawk::del body")
 
   delete req; req["method"] = "PATCH";  req["path"] = "/e"; delete res
-  assert_eq(router_dispatch(req, res), 1, "hawk::patch registers PATCH /e")
+  assert_eq(router_dispatch(req, res), 1, "hawk::patch dispatch")
+  assert_eq(res["body"], "hello",          "hawk::patch body")
 
   delete req; req["method"] = "HEAD";   req["path"] = "/f"; delete res
-  assert_eq(router_dispatch(req, res), 1, "hawk::head registers HEAD /f")
+  assert_eq(router_dispatch(req, res), 1, "hawk::head dispatch")
+  assert_eq(res["body"], "hello",          "hawk::head body")
 }
 
 function test_hawk_compat_GET(    req, res) {
