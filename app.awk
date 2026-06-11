@@ -14,7 +14,7 @@ BEGIN {
   hawk::post("/todos",       "todo_add")
   hawk::del("/todos/:id",    "todo_delete")
   hawk::get("/todos.json",   "todo_list_json")
-  hawk::listen(8080)
+  hawk::listen(env::get("PORT") ? env::get("PORT") + 0 : 8080)
 }
 
 function todo_index() {
