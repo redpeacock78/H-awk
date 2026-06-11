@@ -81,6 +81,14 @@ BEGIN {
   test_hawk_all_single()
   test_hawk_all_multi_paths()
 
+  test_env_get_existing()
+  test_env_get_missing()
+  test_env_set()
+  test_env_del()
+  test_env_has_existing()
+  test_env_has_missing()
+  test_env_set_overwrite()
+
   test_plugin_register_one()
   test_plugin_call_hooks_normal()
   test_plugin_call_hooks_abort()
@@ -127,3 +135,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_libs.awk"
 @include "tests/unit/test_ctx.awk"
 @include "tests/unit/test_hawk.awk"
+@include "tests/unit/test_env.awk"
