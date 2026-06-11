@@ -9,12 +9,12 @@
 #   GET    /todos.json    JSON API
 
 BEGIN {
-  GET("/",             "todo_index")
-  GET("/todos",        "todo_list_html")
-  POST("/todos",       "todo_add")
-  DELETE("/todos/:id", "todo_delete")
-  GET("/todos.json",   "todo_list_json")
-  listen(8080)
+  hawk::get("/",             "todo_index")
+  hawk::get("/todos",        "todo_list_html")
+  hawk::post("/todos",       "todo_add")
+  hawk::del("/todos/:id",    "todo_delete")
+  hawk::get("/todos.json",   "todo_list_json")
+  hawk::listen(8080)
 }
 
 function todo_index() {
