@@ -6,12 +6,12 @@
 #   0  -- マッチなし (呼出元が静的配信 → 404 を判断)
 #   -1 -- メソッド違い (res に 405 設定済)
 
-function GET(path, handler)    { _route_add("GET",    path, handler) }
-function POST(path, handler)   { _route_add("POST",   path, handler) }
-function PUT(path, handler)    { _route_add("PUT",    path, handler) }
-function DELETE(path, handler) { _route_add("DELETE", path, handler) }
-function PATCH(path, handler)  { _route_add("PATCH",  path, handler) }
-function HEAD(path, handler)   { _route_add("HEAD",   path, handler) }
+function GET(p, h)    { hawk::get(p, h) }
+function POST(p, h)   { hawk::post(p, h) }
+function PUT(p, h)    { hawk::put(p, h) }
+function DELETE(p, h) { hawk::del(p, h) }
+function PATCH(p, h)  { hawk::patch(p, h) }
+function HEAD(p, h)   { hawk::head(p, h) }
 
 function _route_add(method, path, handler,    pattern, params, parts, n, i, seg) {
   # :name を ([^/]+) に変換し、params に名前を蓄積
