@@ -71,6 +71,9 @@ BEGIN {
   test_ctx_set_header_helper()
   test_ctx_load_clears_previous()
 
+  test_hawk_shortcuts()
+  test_hawk_compat_GET()
+
   test_plugin_register_one()
   test_plugin_call_hooks_normal()
   test_plugin_call_hooks_abort()
@@ -116,3 +119,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_plugin.awk"
 @include "tests/unit/test_libs.awk"
 @include "tests/unit/test_ctx.awk"
+@include "tests/unit/test_hawk.awk"
