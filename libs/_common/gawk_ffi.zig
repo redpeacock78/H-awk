@@ -51,19 +51,23 @@ pub const Args = struct {
 };
 
 /// Write a string key/value pair into a gawk array.
-/// Both key and val must remain valid for the duration of the call;
-/// gawk copies them (awk_false = gawk does NOT take ownership of our pointer).
+/// gawk copies key and val (awk_true); caller retains ownership of the slices.
 pub fn arraySet(arr: c.awk_array_t, key: []const u8, val: []const u8) void {
     var k: c.awk_value_t = undefined;
     var v: c.awk_value_t = undefined;
-    if (c.r_make_string(_api, _ext_id, key.ptr, key.len, c.awk_false, &k) == null) return;
-    if (c.r_make_string(_api, _ext_id, val.ptr, val.len, c.awk_false, &v) == null) return;
+    if (c.r_make_string(_api, _ext_id, key.ptr, key.len, c.awk_true, &k) == null) return;
+    if (c.r_make_string(_api, _ext_id, val.ptr, val.len, c.awk_true, &v) == null) return;
     _ = _api.*.api_set_array_element.?(_ext_id, arr, &k, &v);
 }
 
 /// Return value from a gawk extension function.
 pub const Result = union(enum) {
+    /// Caller-owned slice (static literal, stack array, Zig-managed memory).
+    /// adapter uses awk_true so gawk copies; caller retains ownership.
     string: []const u8,
+    /// gawkAllocator()-owned slice. adapter uses awk_false to transfer ownership to gawk.
+    /// gawk will call efree() on it; do NOT free it yourself after returning.
+    gawk_string: []const u8,
     int: i64,
     bool: bool,
     none,
@@ -172,7 +176,8 @@ fn makeAdapter(comptime impl: *const fn (Args) Result) fn (c_int, [*c]c.awk_valu
         fn adapter(nargs: c_int, result: [*c]c.awk_value_t, _: [*c]c.awk_ext_func_t) callconv(.c) [*c]c.awk_value_t {
             const r = impl(.{ ._argc = nargs });
             return switch (r) {
-                .string => |s| c.r_make_string(_api, _ext_id, s.ptr, s.len, c.awk_false, result),
+                .string      => |s| c.r_make_string(_api, _ext_id, s.ptr, s.len, c.awk_true,  result),
+                .gawk_string => |s| c.r_make_string(_api, _ext_id, s.ptr, s.len, c.awk_false, result),
                 .int => |n| c.make_number(@floatFromInt(n), result),
                 .bool => |b| c.make_number(if (b) 1.0 else 0.0, result),
                 .none => {
