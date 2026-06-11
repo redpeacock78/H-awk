@@ -23,8 +23,8 @@ comptime {
 fn sha256Fn(args: ffi.Args) ffi.Result {
     const data = args.getString(0);
     const hex_bytes = crypto.sha256(data);
-    // gawk copies the string immediately, so we can return a pointer to stack array
-    return .{ .string = &hex_bytes };
+    const out = ffi.gawkAllocator().dupe(u8, &hex_bytes) catch return .{ .string = "" };
+    return .{ .gawk_string = out };
 }
 
 // hawk_hmac_sha256(key, data) → hex string (64 chars)
@@ -32,8 +32,8 @@ fn hmacSha256Fn(args: ffi.Args) ffi.Result {
     const key = args.getString(0);
     const data = args.getString(1);
     const hex_bytes = crypto.hmacSha256(key, data);
-    // gawk copies the string immediately, so we can return a pointer to stack array
-    return .{ .string = &hex_bytes };
+    const out = ffi.gawkAllocator().dupe(u8, &hex_bytes) catch return .{ .string = "" };
+    return .{ .gawk_string = out };
 }
 
 // hawk_argon2id(password) → "$argon2id$..." hash string or "" on error
