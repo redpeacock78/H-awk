@@ -56,6 +56,17 @@ done
 export AWKLIBPATH
 fi
 
+# PID ファイルで前回の stale プロセスを終了させる
+HAWK_PIDFILE="${TMPDIR:-/tmp}/hawk-$(pwd | tr '/' '_').pid"
+if [ -f "$HAWK_PIDFILE" ]; then
+  old_pid=$(cat "$HAWK_PIDFILE" 2>/dev/null)
+  if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+    kill -TERM "$old_pid" 2>/dev/null || true
+    sleep 0.3
+  fi
+  rm -f "$HAWK_PIDFILE"
+fi
+
 # シグナル受信時に gawk を kill して supervisor も終了
 HAWK_PID=""
 shutdown() {
@@ -63,6 +74,7 @@ shutdown() {
     kill -TERM "$HAWK_PID" 2>/dev/null || true
     wait "$HAWK_PID" 2>/dev/null || true
   fi
+  rm -f "$HAWK_PIDFILE"
   exit 0
 }
 trap shutdown INT TERM
@@ -72,6 +84,7 @@ while true; do
   # shellcheck disable=SC2086
   gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP" &
   HAWK_PID=$!
+  echo "$HAWK_PID" > "$HAWK_PIDFILE"
   wait "$HAWK_PID"
   status=$?
   HAWK_PID=""
