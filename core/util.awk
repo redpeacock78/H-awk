@@ -98,3 +98,32 @@ function trim(s) {
   sub(/[ \t\r\n]+$/, "", s)
   return s
 }
+
+function _on_impl(methods, paths, handler,    ms, ps, i, j) {
+  # Handle methods (string or array) - uses gawk built-in isarray()
+  if (isarray(methods)) {
+    for (i in methods) ms[i] = to_upper(trim(methods[i]))
+  } else {
+    ms[1] = to_upper(trim(methods))
+  }
+
+  # Handle paths (string or array) - uses gawk built-in isarray()
+  if (isarray(paths)) {
+    for (i in paths) ps[i] = trim(paths[i])
+  } else {
+    ps[1] = trim(paths)
+  }
+
+  # Register routes (cartesian product)
+  for (i in ms) for (j in ps) _route_add(ms[i], ps[j], handler)
+}
+
+function _all_impl(paths, handler,    std_ms, ps, i, j) {
+  split("GET POST PUT DELETE PATCH HEAD OPTIONS", std_ms, " ")
+  if (isarray(paths)) {
+    for (i in paths) ps[i] = trim(paths[i])
+  } else {
+    ps[1] = trim(paths)
+  }
+  for (i in std_ms) for (j in ps) _route_add(std_ms[i], ps[j], handler)
+}

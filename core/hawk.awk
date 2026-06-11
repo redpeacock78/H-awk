@@ -13,19 +13,14 @@ function del(path, handler)    { awk::_route_add("DELETE", path, handler) }
 function patch(path, handler)  { awk::_route_add("PATCH",  path, handler) }
 function head(path, handler)   { awk::_route_add("HEAD",   path, handler) }
 
-function on(methods, paths, handler,    ms, ps, i, j) {
-  if (isarray(methods)) { for (i in methods) ms[i] = awk::to_upper(awk::trim(methods[i])) }
-  else                  { ms[1] = awk::to_upper(awk::trim(methods)) }
-  if (isarray(paths))   { for (i in paths)   ps[i] = awk::trim(paths[i]) }
-  else                  { ps[1] = awk::trim(paths) }
-  for (i in ms) for (j in ps) awk::_route_add(ms[i], ps[j], handler)
+function on(methods, paths, handler) {
+  # Delegate to awk:: namespace to use isarray() built-in
+  return awk::_on_impl(methods, paths, handler)
 }
 
-function all(paths, handler,    std_ms, ps, i, j) {
-  split("GET POST PUT DELETE PATCH HEAD OPTIONS", std_ms, " ")
-  if (isarray(paths)) { for (i in paths) ps[i] = awk::trim(paths[i]) }
-  else                { ps[1] = awk::trim(paths) }
-  for (i in std_ms) for (j in ps) awk::_route_add(std_ms[i], ps[j], handler)
+function all(paths, handler) {
+  # Delegate to awk:: namespace to use isarray() built-in
+  return awk::_all_impl(paths, handler)
 }
 
 function listen(port) { awk::listen(port) }

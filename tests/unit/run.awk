@@ -73,6 +73,11 @@ BEGIN {
 
   test_hawk_shortcuts()
   test_hawk_compat_GET()
+  test_hawk_on_single()
+  test_hawk_on_multi_methods()
+  test_hawk_on_multi_paths()
+  test_hawk_on_multi_both()
+  test_hawk_on_custom_method()
 
   test_plugin_register_one()
   test_plugin_call_hooks_normal()
