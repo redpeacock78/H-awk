@@ -25,6 +25,7 @@
 @include "core/response.awk"
 @include "core/hawk.awk"
 @include "core/env.awk"
+@include "core/type.awk"
 @include "core/router.awk"
 @include "core/ctx.awk"
 @include "core/plugin.awk"
