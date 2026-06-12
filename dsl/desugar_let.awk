@@ -53,12 +53,14 @@ function _ds_let_transform(line, lineno,    arr, rhs, declared) {
   }
   # Assignment: let name = expr
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.+)$/, arr)) {
-    _DS_let_locals[++_DS_let_count] = arr[2]
+    if (!(arr[2] in _DS_let_type_map))
+      _DS_let_locals[++_DS_let_count] = arr[2]
     return arr[1] arr[2] " = " arr[3]
   }
   # Bare declaration: let name
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*$/, arr)) {
-    _DS_let_locals[++_DS_let_count] = arr[2]
+    if (!(arr[2] in _DS_let_type_map))
+      _DS_let_locals[++_DS_let_count] = arr[2]
     return ""
   }
   # 型付き変数への代入を coerce でラップ
