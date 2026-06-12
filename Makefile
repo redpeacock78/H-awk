@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-.PHONY: run dev test test-unit test-e2e lint clean help ci build-libs fetch-libs test-libs libs-clean ci-full
+.PHONY: run dev test test-unit test-dsl test-e2e lint clean help ci build-libs fetch-libs test-libs libs-clean ci-full
 
 APP     ?= app.awk
 WORKERS ?= 4
@@ -16,7 +16,7 @@ run: ## サーバー起動 (WORKERS=N で worker 数指定)
 dev: ## DEV=1 でログ詳細
 	DEV=1 ./bin/hawk --workers $(WORKERS) $(APP)
 
-test: test-unit test-e2e ## 全テスト
+test: test-unit test-dsl test-e2e ## 全テスト
 
 test-unit: ## awk 内 assert
 	@libs_args=""; libs_vars=""; \
@@ -35,6 +35,9 @@ test-unit: ## awk 内 assert
 	grep -v "multipart/form-data received but libs/multipart not loaded" "$$_u_log" >&2; \
 	rm -f "$$_u_log"; \
 	exit $$_u_ret
+
+test-dsl: ## DSL desugar 単体テスト
+	./tests/unit/dsl/run.sh
 
 test-e2e: ## サーバー起動 + curl
 	./tests/e2e/run.sh
