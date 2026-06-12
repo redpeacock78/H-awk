@@ -25,7 +25,8 @@ function call(ns, routes, arity_tbl, path, a1, a2, a3,    _fn, _ar) {
         print ns "::dispatch: missing arity for path: " path " (defaulting to 3)" > "/dev/stderr"
         _ar = 3
     }
-    if      (_ar == 1) return @_fn(a1)
+    if      (_ar == 0) return @_fn()
+    else if (_ar == 1) return @_fn(a1)
     else if (_ar == 2) return @_fn(a1, a2)
     else if (_ar == 3) return @_fn(a1, a2, a3)
     else {
