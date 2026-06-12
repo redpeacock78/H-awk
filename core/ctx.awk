@@ -34,6 +34,23 @@ function redirect(url, c)    { awk::redirect(ctx::res, url, c); return 1 }
 function status(code)        { awk::status(ctx::res, code);     return 1 }
 function set_header(name, v) { awk::header(ctx::res, name, v);  return 1 }
 
+# dispatch: DSL desugar target — ctx.req.form(...) → ctx::dispatch("req.form", ...)
+function dispatch(path, a1, a2) {
+    if (path == "req.form")     return req["form:" a1]
+    if (path == "req.query")    return query(a1)
+    if (path == "req.param")    return param(a1)
+    if (path == "req.header")   return get_header(a1)
+    if (path == "req.body")     return body()
+    if (path == "res.html")     return html(a1)
+    if (path == "res.text")     return text(a1)
+    if (path == "res.json")     return json(a1)
+    if (path == "res.render")   return render(a1, a2)
+    if (path == "res.status")   return status(a1)
+    if (path == "res.header")   return set_header(a1, a2)
+    if (path == "res.redirect") return redirect(a1, a2)
+    print "ctx::dispatch: unknown path: " path > "/dev/stderr"
+}
+
 @namespace "awk"
 
 # _ctx_load: copy req[] and res[] into ctx:: namespace before calling handler

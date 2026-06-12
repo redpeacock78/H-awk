@@ -25,4 +25,16 @@ function all(paths, handler) {
 
 function listen(port) { awk::listen(port) }
 
+# dispatch: DSL desugar target — hawk.app.get(...) → hawk::dispatch("app.get", ...)
+function dispatch(path, a1, a2) {
+    if (path == "app.get")    { get(a1, a2);   return }
+    if (path == "app.post")   { post(a1, a2);  return }
+    if (path == "app.put")    { put(a1, a2);   return }
+    if (path == "app.del")    { del(a1, a2);   return }
+    if (path == "app.patch")  { patch(a1, a2); return }
+    if (path == "app.head")   { head(a1, a2);  return }
+    if (path == "app.listen") { listen(a1);    return }
+    print "hawk::dispatch: unknown path: " path > "/dev/stderr"
+}
+
 @namespace "awk"
