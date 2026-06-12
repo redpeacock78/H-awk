@@ -23,10 +23,9 @@ function todo_index() {
 
 function todo_list_html() {
   let rows = []
-  let i
-  let out
-  let n = read_tsv("data/todos.tsv", rows)
-  out = ""
+  let n: Int = read_tsv("data/todos.tsv", rows)
+  let out: Str = ""
+  let i: Int
   for (i = 1; i <= n; i++) {
     out = out _todo_tr(rows[i, "id"], rows[i, "title"])
   }
@@ -34,7 +33,7 @@ function todo_list_html() {
 }
 
 function todo_add() {
-  let title = ctx.req.form("title")
+  let title: Str = ctx.req.form("title")
   let row = []
   if (title == "") title = ctx.req.query("title")
   if (title == "") {
@@ -49,7 +48,7 @@ function todo_add() {
 }
 
 function todo_delete() {
-  let deleted = delete_tsv("data/todos.tsv", "id", ctx.req.param("id"))
+  let deleted: Int = delete_tsv("data/todos.tsv", "id", ctx.req.param("id"))
   if (deleted == 0) {
     ctx.res.status(404)
     return ctx.res.text("not found")
@@ -60,10 +59,10 @@ function todo_delete() {
 
 function todo_list_json() {
   let rows = []
-  let i
-  let n = read_tsv("data/todos.tsv", rows)
+  let n: Int = read_tsv("data/todos.tsv", rows)
   let item = []
-  let items_json = ""
+  let items_json: Str = ""
+  let i: Int
   for (i = 1; i <= n; i++) {
     item["id"]    = rows[i, "id"]
     item["title"] = rows[i, "title"]
