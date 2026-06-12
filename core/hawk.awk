@@ -24,7 +24,7 @@ function all(paths, handler) {
 }
 
 function listen(port) {
-    if (port !~ /^[0-9]+$/ || port + 0 == 0) {
+    if (port !~ /^[0-9]+$/ || port + 0 == 0 || port + 0 > 65535) {
         print "hawk::listen: invalid port: \"" port "\"" > "/dev/stderr"
         exit 1
     }
