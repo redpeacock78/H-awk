@@ -34,21 +34,26 @@ function redirect(url, c)    { awk::redirect(ctx::res, url, c); return 1 }
 function status(code)        { awk::status(ctx::res, code);     return 1 }
 function set_header(name, v) { awk::header(ctx::res, name, v);  return 1 }
 
+function req_form(key)   { return req["form:" key] }
+
+BEGIN {
+    _CTX_ROUTES["req.form"]     = "ctx::req_form";   _CTX_ARITY["req.form"]     = 1
+    _CTX_ROUTES["req.query"]    = "ctx::query";      _CTX_ARITY["req.query"]    = 1
+    _CTX_ROUTES["req.param"]    = "ctx::param";      _CTX_ARITY["req.param"]    = 1
+    _CTX_ROUTES["req.header"]   = "ctx::get_header"; _CTX_ARITY["req.header"]   = 1
+    _CTX_ROUTES["req.body"]     = "ctx::body";       _CTX_ARITY["req.body"]     = 0
+    _CTX_ROUTES["res.html"]     = "ctx::html";       _CTX_ARITY["res.html"]     = 1
+    _CTX_ROUTES["res.text"]     = "ctx::text";       _CTX_ARITY["res.text"]     = 1
+    _CTX_ROUTES["res.json"]     = "ctx::json";       _CTX_ARITY["res.json"]     = 1
+    _CTX_ROUTES["res.render"]   = "ctx::render";     _CTX_ARITY["res.render"]   = 2
+    _CTX_ROUTES["res.status"]   = "ctx::status";     _CTX_ARITY["res.status"]   = 1
+    _CTX_ROUTES["res.header"]   = "ctx::set_header"; _CTX_ARITY["res.header"]   = 2
+    _CTX_ROUTES["res.redirect"] = "ctx::redirect";   _CTX_ARITY["res.redirect"] = 2
+}
+
 # dispatch: DSL desugar target — ctx.req.form(...) → ctx::dispatch("req.form", ...)
-function dispatch(path, a1, a2) {
-    if (path == "req.form")     return req["form:" a1]
-    if (path == "req.query")    return query(a1)
-    if (path == "req.param")    return param(a1)
-    if (path == "req.header")   return get_header(a1)
-    if (path == "req.body")     return body()
-    if (path == "res.html")     return html(a1)
-    if (path == "res.text")     return text(a1)
-    if (path == "res.json")     return json(a1)
-    if (path == "res.render")   return render(a1, a2)
-    if (path == "res.status")   return status(a1)
-    if (path == "res.header")   return set_header(a1, a2)
-    if (path == "res.redirect") return redirect(a1, a2)
-    print "ctx::dispatch: unknown path: " path > "/dev/stderr"
+function dispatch(path, a1, a2, a3) {
+    return hawk_dispatch::call("ctx", _CTX_ROUTES, _CTX_ARITY, path, a1, a2, a3)
 }
 
 @namespace "awk"
