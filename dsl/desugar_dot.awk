@@ -65,7 +65,7 @@ function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
   # Now recursively transform after_close (it's the tail of the line)
   # We need to re-segment after_close and transform it
   # But after_close may start mid-way through a segment — just transform it as a new line
-  return ns "::dispatch(\"" path "\"" (args != "" ? ", " args : "") ")" \
+  return ns "::dispatch(\"" path "\"" (args != "" ? ", " _ds_dot_transform(args) : "") ")" \
          _ds_dot_transform(after_close)
 }
 

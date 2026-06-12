@@ -14,7 +14,7 @@ BEGIN {
   hawk.app.post("/todos",     "todo_add")
   hawk.app.del("/todos/:id",  "todo_delete")
   hawk.app.get("/todos.json", "todo_list_json")
-  hawk.app.listen(env::get("PORT") ? env::get("PORT") + 0 : 8080)
+  hawk.app.listen(env.get("PORT") ?? 8080)
 }
 
 function todo_index() {
@@ -60,14 +60,11 @@ function todo_delete() {
 
 function todo_list_json() {
   let rows = []
-  let n
   let i
+  let n = read_tsv("data/todos.tsv", rows)
   let item = []
-  let items_json
-  n = read_tsv("data/todos.tsv", rows)
-  items_json = ""
+  let items_json = ""
   for (i = 1; i <= n; i++) {
-    delete item
     item["id"]    = rows[i, "id"]
     item["title"] = rows[i, "title"]
     items_json = items_json (i > 1 ? "," : "") json_encode(item)
