@@ -1,16 +1,43 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# H-awk entry: .env load → plugin glob → libs glob → gawk supervisor loop
+# H-awk entry: .env load → plugin glob → libs glob → multi-worker supervisor loop
+
+# Require bash 4.3+ for wait -n
+if [[ "${BASH_VERSINFO[0]}" -lt 4 || ( "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -lt 3 ) ]]; then
+  echo "[hawk] bash 4.3+ required (got ${BASH_VERSION})" >&2
+  exit 1
+fi
+
 set -e
 
-APP="${1:-app.awk}"
-if [ ! -f "$APP" ]; then
+# Parse --workers / -w before APP argument
+WORKERS="${HAWK_WORKERS:-4}"
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --workers|-w)
+      WORKERS="$2"
+      shift 2
+      ;;
+    --workers=*)
+      WORKERS="${1#*=}"
+      shift
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+APP="${args[0]:-app.awk}"
+if [[ ! -f "$APP" ]]; then
   echo "[hawk] app file not found: $APP" >&2
   exit 1
 fi
 
 # .env を export (値内スペース安全)
-if [ -f .env ]; then
+if [[ -f .env ]]; then
   set -a
   # shellcheck source=/dev/null
   . ./.env
@@ -21,13 +48,13 @@ fi
 # .disabled マーカーがあるディレクトリはスキップ
 PLUGIN_FILES=""
 for d in plugins/*/; do
-  [ -d "$d" ] || continue
-  [ -f "${d}.disabled" ] && continue
+  [[ -d "$d" ]] || continue
+  [[ -f "${d}.disabled" ]] && continue
   name=$(basename "$d")
   manifest="${d}manifest.awk"
   impl="${d}${name}.awk"
-  [ -f "$manifest" ] && PLUGIN_FILES="$PLUGIN_FILES -f $manifest"
-  [ -f "$impl" ]     && PLUGIN_FILES="$PLUGIN_FILES -f $impl"
+  [[ -f "$manifest" ]] && PLUGIN_FILES="$PLUGIN_FILES -f $manifest"
+  [[ -f "$impl" ]]     && PLUGIN_FILES="$PLUGIN_FILES -f $impl"
 done
 
 # Libs glob (v0.2): libs/<name>/zig-out/lib/libhawk_<name>.{so,dylib} を検出
@@ -38,59 +65,90 @@ case "$(uname -s)" in
   *)      SO_EXT=so ;;
 esac
 
-if [ -z "$HAWK_NO_LIBS" ]; then
-for d in libs/*/; do
-  [ -d "$d" ] || continue
-  name=$(basename "$d")
-  [ "$name" = "_common" ] && continue
-  so="${d}zig-out/lib/libhawk_${name}.${SO_EXT}"
-  if [ -f "$so" ]; then
-    LIBS_ARGS="$LIBS_ARGS -l $so"
-    LIBS_VARS="$LIBS_VARS -v HAWK_LIBS_${name}=1"
-  else
-    if [ -f "${d}build.zig" ]; then
-      echo "[WARN] libs/${name} 未ビルド ($so 不在)。機能 fallback 動作" >&2
+if [[ -z "$HAWK_NO_LIBS" ]]; then
+  for d in libs/*/; do
+    [[ -d "$d" ]] || continue
+    name=$(basename "$d")
+    [[ "$name" = "_common" ]] && continue
+    so="${d}zig-out/lib/libhawk_${name}.${SO_EXT}"
+    if [[ -f "$so" ]]; then
+      LIBS_ARGS="$LIBS_ARGS -l $so"
+      LIBS_VARS="$LIBS_VARS -v HAWK_LIBS_${name}=1"
+    else
+      if [[ -f "${d}build.zig" ]]; then
+        echo "[WARN] libs/${name} 未ビルド ($so 不在)。機能 fallback 動作" >&2
+      fi
     fi
+  done
+  export AWKLIBPATH
+fi
+
+# libs/net が利用可能な場合のみ multi-worker 有効 (SO_REUSEPORT 必須)
+if echo "$LIBS_ARGS" | grep -q "libhawk_net"; then
+  EFFECTIVE_WORKERS="$WORKERS"
+else
+  if [[ "$WORKERS" -gt 1 ]]; then
+    echo "[hawk] [WARN] libs/net not available, multi-worker disabled (falling back to 1 worker)" >&2
   fi
-done
-export AWKLIBPATH
+  EFFECTIVE_WORKERS=1
 fi
 
 # PID ファイルで前回の stale プロセスを終了させる
 HAWK_PIDFILE="${TMPDIR:-/tmp}/hawk-$(pwd | tr '/' '_').pid"
-if [ -f "$HAWK_PIDFILE" ]; then
+if [[ -f "$HAWK_PIDFILE" ]]; then
   old_pid=$(cat "$HAWK_PIDFILE" 2>/dev/null)
-  if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+  if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
     kill -TERM "$old_pid" 2>/dev/null || true
     sleep 0.3
   fi
   rm -f "$HAWK_PIDFILE"
 fi
 
-# シグナル受信時に gawk を kill して supervisor も終了
-HAWK_PID=""
+WORKER_PIDS=()
+
 shutdown() {
-  if [ -n "$HAWK_PID" ]; then
-    kill -TERM "$HAWK_PID" 2>/dev/null || true
-    wait "$HAWK_PID" 2>/dev/null || true
-  fi
+  for pid in "${WORKER_PIDS[@]}"; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  for pid in "${WORKER_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
   rm -f "$HAWK_PIDFILE"
   exit 0
 }
 trap shutdown INT TERM
 
-# Supervisor loop: gawk が異常終了した場合のみ再起動
-while true; do
+# Start N workers
+for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do
   # shellcheck disable=SC2086
   gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP" &
-  HAWK_PID=$!
-  echo "$HAWK_PID" > "$HAWK_PIDFILE"
-  wait "$HAWK_PID"
-  status=$?
-  HAWK_PID=""
-  if [ "$status" = 0 ]; then
-    break
-  fi
-  echo "[hawk] gawk exited $status, restart in 1s" >&2
-  sleep 1
+  WORKER_PIDS+=($!)
+done
+
+echo "$$" > "$HAWK_PIDFILE"
+
+# Supervisor loop: wait -n (bash 4.3+) blocks until any child exits.
+# Then kill -0 scan identifies which worker died → restart if non-zero exit.
+while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
+  wait -n 2>/dev/null || true
+
+  new_pids=()
+  for pid in "${WORKER_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      new_pids+=("$pid")
+    else
+      wait "$pid" 2>/dev/null
+      status=$?
+      if [[ "$status" -eq 0 ]]; then
+        : # clean exit; don't restart
+      else
+        echo "[hawk] worker $pid exited $status, restart in 1s" >&2
+        sleep 1
+        # shellcheck disable=SC2086
+        gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP" &
+        new_pids+=($!)
+      fi
+    fi
+  done
+  WORKER_PIDS=("${new_pids[@]}")
 done

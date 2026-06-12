@@ -9,6 +9,12 @@ const BACKLOG: u31 = 128;
 const MAX_EVENTS = 64;
 const READ_BUF_SIZE = 65536;
 
+fn monoNanos() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
+    return ts.sec * std.time.ns_per_s + ts.nsec;
+}
+
 pub const PendingResponse = struct {
     conn_id: u64,
     data: []u8,
@@ -34,6 +40,9 @@ pub const EventLoop = struct {
     // Atomic running flag
     running: std.atomic.Value(bool),
 
+    // Keep-Alive idle timeout in nanoseconds (from HAWK_KEEPALIVE_TIMEOUT env, default 75s)
+    keepalive_timeout_ns: i64,
+
     pub fn init(alloc: std.mem.Allocator, port: u16) !EventLoop {
         // Create listening socket
         const listen_fd = blk: {
@@ -47,12 +56,19 @@ pub const EventLoop = struct {
         };
         errdefer _ = std.posix.system.close(listen_fd);
 
-        // Set SO_REUSEADDR
+        // Set SO_REUSEADDR + SO_REUSEPORT (enables multi-worker kernel-level load balancing)
         const reuse: c_int = 1;
         _ = std.posix.system.setsockopt(
             listen_fd,
             std.posix.SOL.SOCKET,
             std.posix.SO.REUSEADDR,
+            @ptrCast(&reuse),
+            @sizeOf(c_int),
+        );
+        _ = std.posix.system.setsockopt(
+            listen_fd,
+            std.posix.SOL.SOCKET,
+            std.c.SO.REUSEPORT,
             @ptrCast(&reuse),
             @sizeOf(c_int),
         );
@@ -96,6 +112,11 @@ pub const EventLoop = struct {
         pipe_fl |= @as(usize, 1 << @bitOffsetOf(std.posix.O, "NONBLOCK"));
         _ = std.posix.system.fcntl(pipe_fds[0], std.posix.F.SETFL, pipe_fl);
 
+        const keepalive_s: i64 = if (std.c.getenv("HAWK_KEEPALIVE_TIMEOUT")) |val|
+            std.fmt.parseInt(i64, std.mem.sliceTo(val, 0), 10) catch 75
+        else
+            75;
+
         return EventLoop{
             .alloc = alloc,
             .listen_fd = listen_fd,
@@ -107,6 +128,7 @@ pub const EventLoop = struct {
             .wakeup_read_fd = pipe_fds[0],
             .wakeup_write_fd = pipe_fds[1],
             .running = std.atomic.Value(bool).init(true),
+            .keepalive_timeout_ns = keepalive_s * std.time.ns_per_s,
         };
     }
 
@@ -159,6 +181,54 @@ pub const EventLoop = struct {
         }
     }
 
+    // Scan response bytes for "Connection: keep-alive" header.
+    fn responseIsKeepAlive(data: []const u8) bool {
+        const headers_end = std.mem.indexOf(u8, data, "\r\n\r\n") orelse return false;
+        const headers = data[0..headers_end];
+        var it = std.mem.splitSequence(u8, headers, "\r\n");
+        _ = it.next(); // skip status line
+        while (it.next()) |line| {
+            const colon = std.mem.indexOf(u8, line, ":") orelse continue;
+            const name = std.mem.trim(u8, line[0..colon], " \t");
+            if (std.ascii.eqlIgnoreCase(name, "Connection")) {
+                const val = std.mem.trim(u8, line[colon + 1 ..], " \t");
+                return std.ascii.eqlIgnoreCase(val, "keep-alive");
+            }
+        }
+        return false;
+    }
+
+    // Close connections idle longer than keepalive_timeout_ns.
+    fn sweepIdleConns(self: *EventLoop) void {
+        const now = monoNanos();
+        var ids: [256]u64 = undefined;
+        var fds: [256]std.posix.socket_t = undefined;
+        var count: usize = 0;
+
+        self.pool.mu.lock();
+        var it = self.pool.conns.iterator();
+        while (it.next()) |entry| {
+            if (count >= ids.len) break;
+            const conn = entry.value_ptr;
+            if (conn.keep_alive and now - conn.last_used > self.keepalive_timeout_ns) {
+                ids[count] = entry.key_ptr.*;
+                fds[count] = conn.fd;
+                count += 1;
+            }
+        }
+        for (ids[0..count], fds[0..count]) |id, _| {
+            if (self.pool.conns.fetchRemove(id)) |kv| {
+                var c = kv.value;
+                c.read_buf.deinit(self.alloc);
+            }
+        }
+        self.pool.mu.unlock();
+
+        for (fds[0..count]) |fd| {
+            _ = std.posix.system.close(fd);
+        }
+    }
+
     // ---- kqueue implementation (macOS) ----
     fn runKqueue(self: *EventLoop) !void {
         // Create kqueue fd
@@ -192,16 +262,19 @@ pub const EventLoop = struct {
         }
 
         var event_buf: [MAX_EVENTS]std.posix.Kevent = undefined;
+        const sweep_timeout = std.posix.timespec{ .sec = 5, .nsec = 0 };
 
         while (self.running.load(.seq_cst)) {
             // Drain response queue first
             self.drainResponses();
 
             const empty_changes: [0]std.posix.Kevent = .{};
-            const n_rc = std.posix.system.kevent(kq, &empty_changes, 0, &event_buf, MAX_EVENTS, null);
+            const n_rc = std.posix.system.kevent(kq, &empty_changes, 0, &event_buf, MAX_EVENTS, &sweep_timeout);
             if (std.posix.errno(n_rc) == .INTR) continue;
             if (std.posix.errno(n_rc) != .SUCCESS) break;
             const n: usize = @intCast(n_rc);
+
+            self.sweepIdleConns();
 
             for (event_buf[0..n]) |ev| {
                 if (ev.udata == std.math.maxInt(usize)) {
@@ -209,7 +282,7 @@ pub const EventLoop = struct {
                     var tmp: [64]u8 = undefined;
                     while (true) {
                         const r = std.posix.system.read(self.wakeup_read_fd, &tmp, tmp.len);
-                        if (std.posix.errno(r) == .AGAIN ) break;
+                        if (std.posix.errno(r) == .AGAIN) break;
                         if (@as(isize, @intCast(r)) <= 0) break;
                     }
                     // Drain responses after wakeup
@@ -236,7 +309,7 @@ pub const EventLoop = struct {
             var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
             const accept_rc = std.posix.system.accept(self.listen_fd, &client_addr, &addr_len);
             const e = std.posix.errno(accept_rc);
-            if (e == .AGAIN ) break;
+            if (e == .AGAIN) break;
             if (e != .SUCCESS) break;
             const client_fd: std.posix.socket_t = @intCast(accept_rc);
 
@@ -295,7 +368,7 @@ pub const EventLoop = struct {
         const r = std.posix.system.read(fd, &buf, buf.len);
         const e = std.posix.errno(r);
 
-        if (e == .AGAIN ) return;
+        if (e == .AGAIN) return;
 
         if (@as(isize, @intCast(r)) <= 0 or e != .SUCCESS) {
             // Connection closed or error
@@ -387,14 +460,24 @@ pub const EventLoop = struct {
                 written += @intCast(rc);
             }
 
-            // Close connection (Connection: close semantics)
-            self.pool.mu.lock();
-            if (self.pool.conns.fetchRemove(resp.conn_id)) |kv| {
-                var conn = kv.value;
-                conn.read_buf.deinit(self.alloc);
+            if (responseIsKeepAlive(resp.data)) {
+                // Keep connection open; update idle timestamp
+                self.pool.mu.lock();
+                if (self.pool.conns.getPtr(resp.conn_id)) |conn| {
+                    conn.keep_alive = true;
+                    conn.last_used = monoNanos();
+                }
+                self.pool.mu.unlock();
+            } else {
+                // Close connection
+                self.pool.mu.lock();
+                if (self.pool.conns.fetchRemove(resp.conn_id)) |kv| {
+                    var conn = kv.value;
+                    conn.read_buf.deinit(self.alloc);
+                }
+                self.pool.mu.unlock();
+                _ = std.posix.system.close(fd);
             }
-            self.pool.mu.unlock();
-            _ = std.posix.system.close(fd);
         }
     }
 
@@ -426,14 +509,16 @@ pub const EventLoop = struct {
         while (self.running.load(.seq_cst)) {
             self.drainResponses();
 
-            const n = std.posix.epoll_wait(epoll_fd, &event_buf, -1);
+            const n = std.posix.epoll_wait(epoll_fd, &event_buf, 5000);
+            self.sweepIdleConns();
+
             for (event_buf[0..n]) |ev| {
                 const fd: std.posix.fd_t = ev.data.fd;
                 if (fd == self.wakeup_read_fd) {
                     var tmp: [64]u8 = undefined;
                     while (true) {
                         const r = std.posix.system.read(self.wakeup_read_fd, &tmp, tmp.len);
-                        if (std.posix.errno(r) == .AGAIN ) break;
+                        if (std.posix.errno(r) == .AGAIN) break;
                         if (@as(isize, @intCast(r)) <= 0) break;
                     }
                     self.drainResponses();
@@ -453,7 +538,7 @@ pub const EventLoop = struct {
             var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
             const accept_rc = std.posix.system.accept(self.listen_fd, &client_addr, &addr_len);
             const e = std.posix.errno(accept_rc);
-            if (e == .AGAIN ) break;
+            if (e == .AGAIN) break;
             if (e != .SUCCESS) break;
             const client_fd: std.posix.socket_t = @intCast(accept_rc);
 

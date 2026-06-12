@@ -39,7 +39,10 @@ pub fn parse(buf: []const u8, conn_id: u64, alloc: std.mem.Allocator) !Request {
     }
 
     var content_length: usize = 0;
-    var keep_alive = false;
+    // HTTP/1.1 default: keep-alive. HTTP/1.0 default: close.
+    const http_version = it.next() orelse "";
+    var keep_alive = std.mem.eql(u8, http_version, "HTTP/1.1");
+    var connection_explicit = false;
     var hdr_it = std.mem.splitSequence(u8, headers_block_raw, "\r\n");
     while (hdr_it.next()) |hline| {
         if (hline.len == 0) continue;
@@ -49,8 +52,9 @@ pub fn parse(buf: []const u8, conn_id: u64, alloc: std.mem.Allocator) !Request {
         if (std.ascii.eqlIgnoreCase(hname, "content-length")) {
             content_length = std.fmt.parseInt(usize, hval, 10) catch 0;
         }
-        if (std.ascii.eqlIgnoreCase(hname, "connection")) {
+        if (std.ascii.eqlIgnoreCase(hname, "connection") and !connection_explicit) {
             keep_alive = std.ascii.eqlIgnoreCase(hval, "keep-alive");
+            connection_explicit = true;
         }
     }
 
@@ -74,15 +78,16 @@ pub fn parse(buf: []const u8, conn_id: u64, alloc: std.mem.Allocator) !Request {
 }
 
 /// Format poll result string for AWK.
-/// Format: conn_id RS method RS path RS headers_block RS body_len RS body
-/// RS = \x1e (ASCII Record Separator). Caller owns returned slice.
+/// Format: conn_id RS method RS path RS headers_block RS body_len RS keep_alive RS body
+/// RS = \x1e (ASCII Record Separator). keep_alive = "1" or "0". Caller owns returned slice.
 pub fn formatPollResult(req: Request, alloc: std.mem.Allocator) ![]const u8 {
-    return std.fmt.allocPrint(alloc, "{d}\x1e{s}\x1e{s}\x1e{s}\x1e{d}\x1e{s}", .{
+    return std.fmt.allocPrint(alloc, "{d}\x1e{s}\x1e{s}\x1e{s}\x1e{d}\x1e{d}\x1e{s}", .{
         req.conn_id,
         req.method,
         req.path,
         req.headers_block,
         req.body.len,
+        @intFromBool(req.keep_alive),
         req.body,
     });
 }

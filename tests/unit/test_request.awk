@@ -54,7 +54,7 @@ function test_request_parse_eq_in_value(   raw, req) {
 }
 
 function test_request_parse_zig_get(   poll, req) {
-  poll = "42\x1eGET\x1e/users/1\x1eHost: localhost\r\nAccept: */*\r\n\x1e0\x1e"
+  poll = "42\x1eGET\x1e/users/1\x1eHost: localhost\r\nAccept: */*\r\n\x1e0\x1e1\x1e"
   delete req
   delete _ARR_COUNT
   assert_eq(parse_request_zig(poll, req), 1, "zig req: parse returns 1")
@@ -67,7 +67,7 @@ function test_request_parse_zig_get(   poll, req) {
 }
 
 function test_request_parse_zig_post_form(   poll, req) {
-  poll = "7\x1ePOST\x1e/todos\x1eContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 9\r\n\x1e9\x1etitle=buy"
+  poll = "7\x1ePOST\x1e/todos\x1eContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 9\r\n\x1e9\x1e1\x1etitle=buy"
   delete req
   delete _ARR_COUNT
   assert_eq(parse_request_zig(poll, req), 1, "zig post: parse ok")
@@ -76,7 +76,7 @@ function test_request_parse_zig_post_form(   poll, req) {
 }
 
 function test_request_parse_zig_query(   poll, req) {
-  poll = "3\x1eGET\x1e/search?q=hello&page=2\x1eHost: x\r\n\x1e0\x1e"
+  poll = "3\x1eGET\x1e/search?q=hello&page=2\x1eHost: x\r\n\x1e0\x1e1\x1e"
   delete req
   delete _ARR_COUNT
   parse_request_zig(poll, req)

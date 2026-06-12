@@ -7,7 +7,8 @@ H-awk is a lightweight HTTP framework built on top of `gawk`. Define routes, han
 ## Requirements
 
 - gawk 5.0+ (`gawk --version`)
-- POSIX sh + GNU make
+- bash 4.3+ (for multi-worker supervisor)
+- GNU make
 - Zig 0.14+ (only for `make build-libs`)
 - curl (e2e tests only)
 
@@ -21,8 +22,13 @@ cp .env.example .env
 # Optional: build native extensions (binary I/O, TCP transport, etc.)
 make build-libs
 
-# Start the server (default :8080)
+# Start the server (default :8080, 4 workers)
 ./bin/hawk app.awk
+
+# Or with make
+make run                  # 4 workers (default)
+make run WORKERS=8        # 8 workers
+make run WORKERS=1        # single worker (debug)
 ```
 
 ```sh
@@ -243,7 +249,7 @@ Optional Zig-compiled gawk extensions unlock capabilities beyond what AWK can do
 
 | Lib | Description |
 |---|---|
-| `libs/net` | Zig TCP event loop for higher-concurrency HTTP |
+| `libs/net` | Zig TCP event loop — keep-alive, SO_REUSEPORT multi-worker |
 | `libs/binary` | Binary-safe file I/O (PNG, JPG, WebP, fonts, etc.) |
 | `libs/multipart` | `multipart/form-data` parser for file uploads |
 | `libs/crypto` | SHA-256 / HMAC-SHA256 |
@@ -251,6 +257,32 @@ Optional Zig-compiled gawk extensions unlock capabilities beyond what AWK can do
 | `libs/url` | High-performance URL encode/decode |
 
 H-awk runs without any libs. Missing libs degrade gracefully — e.g., the server falls back to gawk's `/inet/tcp/` transport if `libs/net` is absent.
+
+### Multi-worker & Keep-Alive (`libs/net`)
+
+When `libs/net` is built, `bin/hawk` spawns N independent gawk workers sharing the same port via `SO_REUSEPORT`. The OS kernel distributes incoming connections across workers. Each worker is supervised and auto-restarted on crash.
+
+```sh
+# CLI
+./bin/hawk --workers 8 app.awk
+
+# Make
+make run WORKERS=8
+
+# Environment
+HAWK_WORKERS=8 ./bin/hawk app.awk
+```
+
+HTTP/1.1 keep-alive is enabled by default. Workers maintain idle connections and close them after a configurable timeout:
+
+```sh
+HAWK_KEEPALIVE_TIMEOUT=30 ./bin/hawk app.awk   # 30s idle timeout (default: 75)
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `HAWK_WORKERS` | `4` | Number of worker processes (requires `libs/net`) |
+| `HAWK_KEEPALIVE_TIMEOUT` | `75` | Idle keep-alive timeout in seconds |
 
 ### Setup
 

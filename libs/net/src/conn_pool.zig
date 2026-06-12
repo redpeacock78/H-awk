@@ -2,6 +2,12 @@
 // SPDX-License-Identifier: MIT
 const std = @import("std");
 
+fn monoNanos() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
+    return ts.sec * std.time.ns_per_s + ts.nsec;
+}
+
 pub const ConnState = enum { reading, ready, closed };
 
 pub const SimpleMutex = struct {
@@ -21,6 +27,7 @@ pub const Conn = struct {
     state: ConnState,
     read_buf: std.ArrayList(u8),
     keep_alive: bool,
+    last_used: i64,
 };
 
 pub const ConnPool = struct {
@@ -58,6 +65,7 @@ pub const ConnPool = struct {
             .state = .reading,
             .read_buf = try std.ArrayList(u8).initCapacity(self.alloc, 0),
             .keep_alive = false,
+            .last_used = monoNanos(),
         });
         self.next_id += 1;
         return id;

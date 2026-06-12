@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 .PHONY: run dev test test-unit test-e2e lint clean help ci build-libs fetch-libs test-libs libs-clean ci-full
 
-APP ?= app.awk
+APP     ?= app.awk
+WORKERS ?= 4
 
 # Collect plugin files for gawk -f
 PLUGIN_FILES := $(foreach d,$(wildcard plugins/*/),$(if $(wildcard $(d).disabled),,-f $(d)manifest.awk -f $(d)$(notdir $(patsubst %/,%,$(d))).awk))
@@ -9,11 +10,11 @@ PLUGIN_FILES := $(foreach d,$(wildcard plugins/*/),$(if $(wildcard $(d).disabled
 help: ## 利用可能なターゲット一覧
 	@awk -F':.*##' '/^[a-z0-9_-]+:.*##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-run: ## サーバー起動
-	./bin/hawk $(APP)
+run: ## サーバー起動 (WORKERS=N で worker 数指定)
+	./bin/hawk --workers $(WORKERS) $(APP)
 
 dev: ## DEV=1 でログ詳細
-	DEV=1 ./bin/hawk $(APP)
+	DEV=1 ./bin/hawk --workers $(WORKERS) $(APP)
 
 test: test-unit test-e2e ## 全テスト
 

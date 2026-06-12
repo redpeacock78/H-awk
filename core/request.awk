@@ -130,19 +130,20 @@ function _request_parse_json_body(body, req,    flat, key) {
 
 # parse_request_zig(poll_result, req)
 # hawk_net_poll() 出力を req[] に分解する。
-# poll_result format: conn_id RS method RS path RS headers_block RS body_len RS body
+# poll_result format: conn_id RS method RS path RS headers_block RS body_len RS keep_alive RS body
 # RS = \x1e (ASCII Record Separator 0x1E)
 # Returns 1 on success, 0 on failure.
 function parse_request_zig(poll_result, req,    RS_CHAR, parts, n, i, j, k, v, colon, hlines, hn, body, q) {
   RS_CHAR = "\x1e"
   delete req
   n = split(poll_result, parts, RS_CHAR)
-  if (n < 5) return 0
+  if (n < 6) return 0
 
   req["_conn_id"]     = parts[1]
   req["method"]       = parts[2]
   req["full_path"]    = parts[3]
   req["http_version"] = "HTTP/1.1"
+  req["keep_alive"]   = parts[6]
 
   req["_hdr_len"] = length(parts[4])
   hn = split(parts[4], hlines, "\r\n")
@@ -155,10 +156,10 @@ function parse_request_zig(poll_result, req,    RS_CHAR, parts, n, i, j, k, v, c
     req["header:" k] = v
   }
 
-  # parts[5] = body_len; parts[6..n] = body (joined with RS_CHAR to handle body containing RS)
+  # parts[5] = body_len; parts[6] = keep_alive; parts[7..n] = body (joined with RS_CHAR)
   body = ""
-  for (i = 6; i <= n; i++) {
-    body = body (i > 6 ? RS_CHAR : "") parts[i]
+  for (i = 7; i <= n; i++) {
+    body = body (i > 7 ? RS_CHAR : "") parts[i]
   }
   req["body"] = body
   req["raw"]  = poll_result

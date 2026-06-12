@@ -22,10 +22,11 @@ function listen(port) {
 }
 
 function _hawk_serve(    libs_list, lib) {
-  if (!HAWK_PORT)            HAWK_PORT            = env::get("PORT")                  ? env::get("PORT")                  + 0 : 8080
-  if (!HAWK_MAX_HEADER_SIZE) HAWK_MAX_HEADER_SIZE = env::get("HAWK_MAX_HEADER_SIZE")  ? env::get("HAWK_MAX_HEADER_SIZE")  + 0 : 8192
-  if (!HAWK_MAX_BODY_SIZE)   HAWK_MAX_BODY_SIZE   = env::get("HAWK_MAX_BODY_SIZE")    ? env::get("HAWK_MAX_BODY_SIZE")    + 0 : 1048576
-  if (!HAWK_REQUEST_TIMEOUT) HAWK_REQUEST_TIMEOUT = env::get("HAWK_REQUEST_TIMEOUT")  ? env::get("HAWK_REQUEST_TIMEOUT")  + 0 : 30
+  if (!HAWK_PORT)               HAWK_PORT               = env::get("PORT")                   ? env::get("PORT")                   + 0 : 8080
+  if (!HAWK_MAX_HEADER_SIZE)    HAWK_MAX_HEADER_SIZE    = env::get("HAWK_MAX_HEADER_SIZE")   ? env::get("HAWK_MAX_HEADER_SIZE")   + 0 : 8192
+  if (!HAWK_MAX_BODY_SIZE)      HAWK_MAX_BODY_SIZE      = env::get("HAWK_MAX_BODY_SIZE")     ? env::get("HAWK_MAX_BODY_SIZE")     + 0 : 1048576
+  if (!HAWK_REQUEST_TIMEOUT)    HAWK_REQUEST_TIMEOUT    = env::get("HAWK_REQUEST_TIMEOUT")   ? env::get("HAWK_REQUEST_TIMEOUT")   + 0 : 30
+  if (!HAWK_KEEPALIVE_TIMEOUT)  HAWK_KEEPALIVE_TIMEOUT  = env::get("HAWK_KEEPALIVE_TIMEOUT") ? env::get("HAWK_KEEPALIVE_TIMEOUT") + 0 : 75
   HAWK_DEV = (env::get("DEV") == "1")
 
   plugin_discover()
@@ -189,6 +190,18 @@ function _http_serve_zig(    poll_result, req, res, conn_id, dispatch_ok, start_
 
 function _zig_http_send(conn_id, res, req, start_ms,    wire, split_pos, head_part, body_part, first_crlf, status_line, headers, content, dur, ts) {
   if (res["sent"]) return
+
+  # Set Connection header based on request keep-alive preference
+  if (!("header:connection" in res)) {
+    if (req["keep_alive"] == "1") {
+      res["header:connection"] = "keep-alive"
+      if (!("header:keep-alive" in res)) {
+        res["header:keep-alive"] = "timeout=" HAWK_KEEPALIVE_TIMEOUT
+      }
+    } else {
+      res["header:connection"] = "close"
+    }
+  }
 
   if (res["_binary_path"] != "" && LIBS_LOADED["binary"]) {
     content = hawk_bin_read(res["_binary_path"])
