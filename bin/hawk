@@ -23,6 +23,10 @@ while [[ $# -gt 0 ]]; do
       WORKERS="${1#*=}"
       shift
       ;;
+    --debug)
+      HAWK_DEBUG=1
+      shift
+      ;;
     *)
       args+=("$1")
       shift
@@ -118,10 +122,33 @@ shutdown() {
 }
 trap shutdown INT TERM
 
+# Resolve HAWK_LIB: directory containing hawk.awk (default: script's parent)
+HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+_hawk_desugar_app() {
+  local src="$1"
+  local tmp
+  tmp=$(mktemp /tmp/hawk.XXXXXX.awk)
+  if [[ -z "${HAWK_DEBUG}" ]]; then
+    # shellcheck disable=SC2064
+    trap "rm -f '$tmp'" EXIT
+  else
+    echo "[hawk] desugar tmp: $tmp" >&2
+  fi
+  gawk -f "${HAWK_LIB}/dsl/desugar.awk" "$src" > "$tmp"
+  if [[ $? -ne 0 || ! -s "$tmp" ]]; then
+    echo "[hawk] desugar failed: $src" >&2
+    exit 1
+  fi
+  echo "$tmp"
+}
+
+APP_AWK=$(_hawk_desugar_app "$APP")
+
 # Start N workers
 for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do
   # shellcheck disable=SC2086
-  gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP" &
+  gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP_AWK" &
   WORKER_PIDS+=($!)
 done
 
@@ -145,7 +172,7 @@ while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
         echo "[hawk] worker $pid exited $status, restart in 1s" >&2
         sleep 1
         # shellcheck disable=SC2086
-        gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP" &
+        gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP_AWK" &
         new_pids+=($!)
       fi
     fi
