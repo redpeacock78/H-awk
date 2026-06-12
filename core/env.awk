@@ -12,10 +12,10 @@
 @namespace "env"
 
 BEGIN {
-    _ENV_ROUTES["get"] = "env::get"
-    _ENV_ROUTES["set"] = "env::set"
-    _ENV_ROUTES["del"] = "env::del"
-    _ENV_ROUTES["has"] = "env::has"
+    _ENV_ROUTES["get"] = "env::get";  _ENV_ARITY["get"] = 1
+    _ENV_ROUTES["set"] = "env::set";  _ENV_ARITY["set"] = 2
+    _ENV_ROUTES["del"] = "env::del";  _ENV_ARITY["del"] = 1
+    _ENV_ROUTES["has"] = "env::has";  _ENV_ARITY["has"] = 1
 }
 
 function get(key)      { return ENVIRON[key] }
@@ -24,7 +24,7 @@ function del(key)      { delete ENVIRON[key] }
 function has(key)      { return (key in ENVIRON) }
 
 function dispatch(path, a1, a2, a3) {
-    return hawk_dispatch::call("env", _ENV_ROUTES, path, a1, a2, a3)
+    return hawk_dispatch::call("env", _ENV_ROUTES, _ENV_ARITY, path, a1, a2, a3)
 }
 
 @namespace "awk"
