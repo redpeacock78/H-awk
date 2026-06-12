@@ -42,6 +42,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p) {
       _DS_body_count   = 0
       delete _DS_let_locals
       delete _DS_body_buf
+      delete _DS_let_type_map
       return
     }
     nc_result = _ds_nc_transform(_ds_dot_transform(line), nc_pre)
