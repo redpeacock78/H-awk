@@ -5,6 +5,7 @@
 @include "dsl/desugar_strings.awk"
 @include "dsl/desugar_dot.awk"
 @include "dsl/desugar_let.awk"
+@include "dsl/desugar_nullcoalesce.awk"
 
 BEGIN { _ds_init() }
 
@@ -24,7 +25,7 @@ END {
   }
 }
 
-function _ds_process_line(line, lineno,    transformed) {
+function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p) {
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
       print "dsl error: " _DS_src_file ":" lineno \
@@ -42,7 +43,9 @@ function _ds_process_line(line, lineno,    transformed) {
       delete _DS_body_buf
       return
     }
-    print _ds_dot_transform(line)
+    nc_result = _ds_nc_transform(_ds_dot_transform(line), nc_pre)
+    for (p = 1; p in nc_pre; p++) print nc_pre[p]
+    print nc_result
     return
   }
 
@@ -57,7 +60,10 @@ function _ds_process_line(line, lineno,    transformed) {
     return
   }
 
-  transformed = _ds_let_transform(_ds_dot_transform(line), lineno)
+  nc_result = _ds_nc_transform(_ds_dot_transform(line), nc_pre)
+  for (p = 1; p in nc_pre; p++)
+    _DS_body_buf[++_DS_body_count] = nc_pre[p]
+  transformed = _ds_let_transform(nc_result, lineno)
   if (transformed != "") _DS_body_buf[++_DS_body_count] = transformed
 }
 
