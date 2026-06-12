@@ -49,7 +49,7 @@ BEGIN {
   hawk.app.get("/todos",        "list_todos")
   hawk.app.post("/todos",       "add_todo")
   hawk.app.del("/todos/:id",    "delete_todo")
-  hawk.app.listen(8080)
+  hawk.app.listen(env.get("PORT") ?? 8080)
 }
 
 function list_todos() {
@@ -114,6 +114,58 @@ function handler(    title, items, tmp) {
 
 `let` declarations are hoisted to the function signature as gawk locals (4-space convention). `let name = []` becomes `delete name`. Bare `let name` is hoisted only (line removed).
 
+**Type annotations on `let`**
+
+```awk
+# Typed let with initializer — coerced + static check at desugar time
+function handler() {
+  let port: Int = 8080
+  let title: Str = ctx.req.form("title")
+}
+
+# Desugared
+function handler(    port, title) {
+  port  = type::coerce(8080, "Int")
+  title = type::coerce(ctx::dispatch("req.form", "title"), "Str")
+}
+```
+
+```awk
+# Bare typed declaration — hoist only, typed assignment auto-coerced
+function handler() {
+  let n: Int
+  n = "42"   # auto-coerced + static check
+}
+
+# Desugared
+function handler(    n) {
+  n = type::coerce("42", "Int")
+}
+```
+
+Static type checking at desugar time — mismatched types produce an error:
+
+```sh
+# Desugar-time error: string literal assigned to Int
+let port: Int = "hello"
+# dsl error: app.awk:5: type mismatch: cannot assign Str to Int
+```
+
+Supported types: `Int`, `Float`, `Str`, `Bool`. Type inference works for literals and known DSL functions (`env.get` → Str, `ctx.req.form` → Str, etc.).
+
+**`??` null-coalescing operator**
+
+```awk
+# DSL
+hawk.app.listen(env.get("PORT") ?? 8080)
+
+# Desugared
+_ds_tc_1 = env::dispatch("get", "PORT")
+hawk::dispatch("app.listen", (_ds_tc_1 != "" ? _ds_tc_1 : 8080))
+```
+
+Rule: `expr ?? default` — if `expr` evaluates to empty string, use `default`. Works inside function arguments.
+
 Use `--debug` to inspect the generated file:
 
 ```sh
@@ -169,20 +221,20 @@ hawk::all(ps, "handler")
 
 ### Context API reference
 
-| DSL | Underlying | Description |
+| DSL | Desugared | Description |
 |---|---|---|
-| `ctx.req.query(key)` | `ctx::query(key)` | URL query parameter |
-| `ctx.req.param(key)` | `ctx::param(key)` | Path parameter (`:id`) |
-| `ctx.req.header(key)` | `ctx::get_header(key)` | Request header (lowercase normalized) |
-| `ctx.req.body()` | `ctx::body()` | Raw request body |
-| `ctx.req.form(key)` | `ctx::req["form:KEY"]` | Form field |
-| `ctx.res.json(data)` | `ctx::json(data)` | Respond with JSON |
-| `ctx.res.text(data)` | `ctx::text(data)` | Respond with plain text |
-| `ctx.res.html(data)` | `ctx::html(data)` | Respond with HTML |
-| `ctx.res.render(path)` | `ctx::render(path)` | Render a static HTML file |
-| `ctx.res.status(code)` | `ctx::status(code)` | Set HTTP status code |
-| `ctx.res.header(name, val)` | `ctx::set_header(name, val)` | Set response header |
-| `ctx.res.redirect(url[, code])` | `ctx::redirect(url[, code])` | HTTP redirect |
+| `ctx.req.query(key)` | `ctx::dispatch("req.query", key)` | URL query parameter |
+| `ctx.req.param(key)` | `ctx::dispatch("req.param", key)` | Path parameter (`:id`) |
+| `ctx.req.header(key)` | `ctx::dispatch("req.header", key)` | Request header (lowercase normalized) |
+| `ctx.req.body()` | `ctx::dispatch("req.body")` | Raw request body |
+| `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | Form field |
+| `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | Respond with JSON |
+| `ctx.res.text(data)` | `ctx::dispatch("res.text", data)` | Respond with plain text |
+| `ctx.res.html(data)` | `ctx::dispatch("res.html", data)` | Respond with HTML |
+| `ctx.res.render(path)` | `ctx::dispatch("res.render", path)` | Render a static HTML file |
+| `ctx.res.status(code)` | `ctx::dispatch("res.status", code)` | Set HTTP status code |
+| `ctx.res.header(name, val)` | `ctx::dispatch("res.header", name, val)` | Set response header |
+| `ctx.res.redirect(url[, code])` | `ctx::dispatch("res.redirect", url[, code])` | HTTP redirect |
 
 ### Router files
 
@@ -226,11 +278,20 @@ env::del("KEY")          # delete ENVIRON["KEY"]
 env::has("KEY")          # 1 if set, 0 if not
 ```
 
+DSL-style (dot-notation) invocations are also supported:
+
+```awk
+env.get("KEY")          # returns ENVIRON["KEY"]; "" if unset
+env.set("KEY", "val")   # ENVIRON["KEY"] = "val"
+env.del("KEY")          # delete ENVIRON["KEY"]
+env.has("KEY")          # 1 if set, 0 if not
+```
+
 Variables set or deleted via `env::set` / `env::del` are visible to subsequent `env::get` calls within the same gawk process, but are **not** propagated to child processes spawned via `system()` or pipes.
 
 ```awk
 # Read port from environment, fall back to 8080
-hawk::listen(env::get("PORT") ? env::get("PORT") + 0 : 8080)
+hawk.app.listen(env.get("PORT") ?? 8080)
 ```
 
 ## Plugins
