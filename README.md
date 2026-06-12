@@ -42,53 +42,99 @@ curl http://localhost:8080/todos.json
 
 ## Routing
 
-Use `ctx::` helpers to read requests and write responses. All declared function parameters are true local variables — no `req`/`res` noise. Call `listen(port)` from `BEGIN`.
+`bin/hawk` desugars your app file at startup — write routes and handlers using dot-notation DSL, and gawk locals using `let`.
 
 ```awk
 BEGIN {
-  GET("/todos",        "list_todos")
-  POST("/todos",       "add_todo")
-  DELETE("/todos/:id", "delete_todo")
-  listen(8080)
+  hawk.app.get("/todos",        "list_todos")
+  hawk.app.post("/todos",       "add_todo")
+  hawk.app.del("/todos/:id",    "delete_todo")
+  hawk.app.listen(8080)
 }
 
-function list_todos(n, rows) {
+function list_todos() {
+  let rows
+  let n = read_tsv("data/todos.tsv", rows)
   delete rows
-  n = read_tsv("data/todos.tsv", rows)
-  return ctx::json(sprintf("[%d items]", n))
+  return ctx.res.json(sprintf("[%d items]", n))
 }
 
-function add_todo(title) {
-  title = ctx::req["form:title"]
+function add_todo() {
+  let title = ctx.req.form("title")
   if (title == "") {
-    ctx::status(400)
-    return ctx::text("title required")
+    ctx.res.status(400)
+    return ctx.res.text("title required")
   }
-  ctx::status(201)
-  return ctx::text("added: " title)
+  ctx.res.status(201)
+  return ctx.res.text("added: " title)
 }
 
 function delete_todo() {
-  delete_tsv("data/todos.tsv", "id", ctx::param("id"))
-  ctx::status(200)
-  return ctx::html("")
+  delete_tsv("data/todos.tsv", "id", ctx.req.param("id"))
+  ctx.res.status(200)
+  return ctx.res.html("")
 }
+```
+
+## DSL Preprocessing
+
+`bin/hawk` runs every app file through `dsl/desugar.awk` before passing it to gawk. Two transforms are applied:
+
+**Dot-notation → dispatch**
+
+```awk
+# DSL
+hawk.app.get("/todos", "list_todos")
+ctx.req.form("title")
+
+# Desugared
+hawk::dispatch("app.get", "/todos", "list_todos")
+ctx::dispatch("req.form", "title")
+```
+
+Rule: `ns.a.b.c(args)` → `ns::dispatch("a.b.c", args)`. First segment is the dispatcher namespace; the rest becomes the path string.
+
+**`let` → gawk local variables**
+
+```awk
+# DSL
+function handler() {
+  let title = ctx.req.form("title")
+  let items = []
+  let tmp
+  ...
+}
+
+# Desugared
+function handler(    title, items, tmp) {
+  title = ctx::dispatch("req.form", "title")
+  delete items
+  ...
+}
+```
+
+`let` declarations are hoisted to the function signature as gawk locals (4-space convention). `let name = []` becomes `delete name`. Bare `let name` is hoisted only (line removed).
+
+Use `--debug` to inspect the generated file:
+
+```sh
+./bin/hawk --debug app.awk   # prints temp file path to stderr
 ```
 
 ## App API (hawk::)
 
-`hawk::` is the primary routing interface. `GET`/`POST`/... are backward-compatible aliases.
+`hawk.app.*` is the primary routing interface in DSL style. Desugars to `hawk::dispatch("app.*", ...)`.
 
-### Method shortcuts
+### Routing methods
 
 ```awk
-hawk::get(path, handler)
-hawk::post(path, handler)
-hawk::put(path, handler)
-hawk::del(path, handler)    # hawk::delete is a gawk reserved keyword
-hawk::patch(path, handler)
-hawk::head(path, handler)
-hawk::listen(port)
+hawk.app.get(path, handler)
+hawk.app.post(path, handler)
+hawk.app.put(path, handler)
+hawk.app.del(path, handler)
+hawk.app.patch(path, handler)
+hawk.app.head(path, handler)
+hawk.app.listen(port)
 ```
 
 ### `hawk::on(methods, paths, handler)`
@@ -122,34 +168,22 @@ delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
 hawk::all(ps, "handler")
 ```
 
-### Backward-compatible aliases
-
-```awk
-GET(path, handler)     # → hawk::get
-POST(path, handler)    # → hawk::post
-PUT(path, handler)     # → hawk::put
-DELETE(path, handler)  # → hawk::del
-PATCH(path, handler)   # → hawk::patch
-HEAD(path, handler)    # → hawk::head
-listen(port)           # unchanged
-```
-
 ### Context API reference
 
-| Function | Description |
-|---|---|
-| `ctx::query(key)` | URL query parameter |
-| `ctx::param(key)` | Path parameter (`:id`) |
-| `ctx::get_header(key)` | Request header (lowercase normalized) |
-| `ctx::body()` | Raw request body |
-| `ctx::req["form:KEY"]` | Form field |
-| `ctx::json(data)` | Respond with JSON |
-| `ctx::text(data)` | Respond with plain text |
-| `ctx::html(data)` | Respond with HTML |
-| `ctx::render(path)` | Render a static HTML file |
-| `ctx::status(code)` | Set HTTP status code |
-| `ctx::set_header(name, val)` | Set response header |
-| `ctx::redirect(url[, code])` | HTTP redirect |
+| DSL | Underlying | Description |
+|---|---|---|
+| `ctx.req.query(key)` | `ctx::query(key)` | URL query parameter |
+| `ctx.req.param(key)` | `ctx::param(key)` | Path parameter (`:id`) |
+| `ctx.req.header(key)` | `ctx::get_header(key)` | Request header (lowercase normalized) |
+| `ctx.req.body()` | `ctx::body()` | Raw request body |
+| `ctx.req.form(key)` | `ctx::req["form:KEY"]` | Form field |
+| `ctx.res.json(data)` | `ctx::json(data)` | Respond with JSON |
+| `ctx.res.text(data)` | `ctx::text(data)` | Respond with plain text |
+| `ctx.res.html(data)` | `ctx::html(data)` | Respond with HTML |
+| `ctx.res.render(path)` | `ctx::render(path)` | Render a static HTML file |
+| `ctx.res.status(code)` | `ctx::status(code)` | Set HTTP status code |
+| `ctx.res.header(name, val)` | `ctx::set_header(name, val)` | Set response header |
+| `ctx.res.redirect(url[, code])` | `ctx::redirect(url[, code])` | HTTP redirect |
 
 ### Router files
 
@@ -303,8 +337,9 @@ Enabled libs are shown at startup:
 ## Testing
 
 ```sh
-make test           # unit + e2e
+make test           # unit + dsl + e2e
 make test-unit      # AWK assertions only (fast, no server)
+make test-dsl       # DSL desugar fixture tests
 make test-e2e       # server + curl integration tests
 make test-libs      # Zig lib unit tests
 make lint           # gawk --lint syntax check
