@@ -23,17 +23,25 @@ function all(paths, handler) {
   return awk::_all_impl(paths, handler)
 }
 
-function listen(port) { awk::listen(port) }
+function listen(port) {
+    if (port !~ /^[0-9]+$/ || port + 0 == 0) {
+        print "hawk::listen: invalid port: \"" port "\"" > "/dev/stderr"
+        exit 1
+    }
+    awk::listen(port + 0)
+}
 
 # dispatch: DSL desugar target — hawk.app.get(...) → hawk::dispatch("app.get", ...)
-function dispatch(path, a1, a2) {
-    if (path == "app.get")    { get(a1, a2);   return }
-    if (path == "app.post")   { post(a1, a2);  return }
-    if (path == "app.put")    { put(a1, a2);   return }
-    if (path == "app.del")    { del(a1, a2);   return }
-    if (path == "app.patch")  { patch(a1, a2); return }
-    if (path == "app.head")   { head(a1, a2);  return }
-    if (path == "app.listen") { listen(a1);    return }
+function dispatch(path, a1, a2, a3) {
+    if (path == "app.get")    { get(a1, a2);      return }
+    if (path == "app.post")   { post(a1, a2);     return }
+    if (path == "app.put")    { put(a1, a2);      return }
+    if (path == "app.del")    { del(a1, a2);      return }
+    if (path == "app.patch")  { patch(a1, a2);    return }
+    if (path == "app.head")   { head(a1, a2);     return }
+    if (path == "app.on")     { on(a1, a2, a3);   return }
+    if (path == "app.all")    { all(a1, a2);      return }
+    if (path == "app.listen") { listen(a1);       return }
     print "hawk::dispatch: unknown path: " path > "/dev/stderr"
 }
 
