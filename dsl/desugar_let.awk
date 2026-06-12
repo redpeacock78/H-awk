@@ -7,6 +7,11 @@ function _ds_let_transform(line, lineno,    arr) {
     _DS_let_locals[++_DS_let_count] = arr[2]
     return arr[1] "delete " arr[2]
   }
+  # Type-annotated assignment: let name: Type = expr
+  if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*([A-Z][a-zA-Z0-9]*)[[:space:]]*=[[:space:]]*(.+)$/, arr)) {
+    _DS_let_locals[++_DS_let_count] = arr[2]
+    return arr[1] arr[2] " = type::coerce(" arr[4] ", \"" arr[3] "\")"
+  }
   # Assignment: let name = expr
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.+)$/, arr)) {
     _DS_let_locals[++_DS_let_count] = arr[2]
