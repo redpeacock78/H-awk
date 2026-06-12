@@ -22,10 +22,9 @@ function todo_index() {
 }
 
 function todo_list_html() {
-  let rows
+  let rows = []
   let i
   let out
-  delete rows
   let n = read_tsv("data/todos.tsv", rows)
   out = ""
   for (i = 1; i <= n; i++) {
@@ -36,13 +35,12 @@ function todo_list_html() {
 
 function todo_add() {
   let title = ctx.req.form("title")
-  let row
+  let row = []
   if (title == "") title = ctx.req.query("title")
   if (title == "") {
     ctx.res.status(400)
     return ctx.res.text("title required")
   }
-  delete row
   row["id"]    = systime() "_" int(rand() * 100000)
   row["title"] = title
   append_tsv("data/todos.tsv", row)
@@ -61,12 +59,11 @@ function todo_delete() {
 }
 
 function todo_list_json() {
-  let rows
+  let rows = []
   let n
   let i
-  let item
+  let item = []
   let items_json
-  delete rows
   n = read_tsv("data/todos.tsv", rows)
   items_json = ""
   for (i = 1; i <= n; i++) {

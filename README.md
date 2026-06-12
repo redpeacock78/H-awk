@@ -53,9 +53,8 @@ BEGIN {
 }
 
 function list_todos() {
-  let rows
+  let rows = []
   let n = read_tsv("data/todos.tsv", rows)
-  delete rows
   return ctx.res.json(sprintf("[%d items]", n))
 }
 
