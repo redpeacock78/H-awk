@@ -11,17 +11,20 @@
 
 @namespace "env"
 
+BEGIN {
+    _ENV_ROUTES["get"] = "env::get"
+    _ENV_ROUTES["set"] = "env::set"
+    _ENV_ROUTES["del"] = "env::del"
+    _ENV_ROUTES["has"] = "env::has"
+}
+
 function get(key)      { return ENVIRON[key] }
 function set(key, val) { ENVIRON[key] = val }
 function del(key)      { delete ENVIRON[key] }
 function has(key)      { return (key in ENVIRON) }
 
-function dispatch(path, a1, a2) {
-    if (path == "get")  return get(a1)
-    if (path == "set")  { set(a1, a2); return }
-    if (path == "del")  { del(a1); return }
-    if (path == "has")  return has(a1)
-    print "env::dispatch: unknown path: " path > "/dev/stderr"
+function dispatch(path, a1, a2, a3) {
+    return hawk_dispatch::call("env", _ENV_ROUTES, path, a1, a2, a3)
 }
 
 @namespace "awk"

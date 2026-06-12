@@ -6,6 +6,18 @@
 
 @namespace "hawk"
 
+BEGIN {
+    _HAWK_ROUTES["app.get"]    = "hawk::get"
+    _HAWK_ROUTES["app.post"]   = "hawk::post"
+    _HAWK_ROUTES["app.put"]    = "hawk::put"
+    _HAWK_ROUTES["app.del"]    = "hawk::del"
+    _HAWK_ROUTES["app.patch"]  = "hawk::patch"
+    _HAWK_ROUTES["app.head"]   = "hawk::head"
+    _HAWK_ROUTES["app.on"]     = "hawk::on"
+    _HAWK_ROUTES["app.all"]    = "hawk::all"
+    _HAWK_ROUTES["app.listen"] = "hawk::listen"
+}
+
 function get(path, handler)    { awk::_route_add("GET",    path, handler) }
 function post(path, handler)   { awk::_route_add("POST",   path, handler) }
 function put(path, handler)    { awk::_route_add("PUT",    path, handler) }
@@ -33,16 +45,7 @@ function listen(port) {
 
 # dispatch: DSL desugar target — hawk.app.get(...) → hawk::dispatch("app.get", ...)
 function dispatch(path, a1, a2, a3) {
-    if (path == "app.get")    { get(a1, a2);      return }
-    if (path == "app.post")   { post(a1, a2);     return }
-    if (path == "app.put")    { put(a1, a2);      return }
-    if (path == "app.del")    { del(a1, a2);      return }
-    if (path == "app.patch")  { patch(a1, a2);    return }
-    if (path == "app.head")   { head(a1, a2);     return }
-    if (path == "app.on")     { on(a1, a2, a3);   return }
-    if (path == "app.all")    { all(a1, a2);      return }
-    if (path == "app.listen") { listen(a1);       return }
-    print "hawk::dispatch: unknown path: " path > "/dev/stderr"
+    return hawk_dispatch::call("hawk", _HAWK_ROUTES, path, a1, a2, a3)
 }
 
 @namespace "awk"
