@@ -93,3 +93,43 @@ function union_of(a, b) {
     return normalize(a "|" b)
 }
 
+# type::expand_alias -- expand alias if found in _DS_TYPE_ALIAS, else return as-is
+function expand_alias(t) {
+    if (t in awk::_DS_TYPE_ALIAS) return awk::_DS_TYPE_ALIAS[t]
+    return t
+}
+
+# type::accepts -- returns 1 if expected accepts actual, 0 if not
+function accepts(expected, actual,    eparts, apart, en, an, i, j) {
+    if (expected == actual)  return 1
+    if (expected == "Any")   return 1
+    if (actual   == "Any")   return 1
+    if (actual   == "")      return 1
+
+    # alias expansion
+    if (expected in awk::_DS_TYPE_ALIAS) return accepts(awk::_DS_TYPE_ALIAS[expected], actual)
+    if (actual   in awk::_DS_TYPE_ALIAS) return accepts(expected, awk::_DS_TYPE_ALIAS[actual])
+
+    en = split_union(expected, eparts)
+    an = split_union(actual,   apart)
+
+    if (en > 1 && an == 1) {
+        # expected is union: any member accepts actual => OK
+        for (i = 1; i <= en; i++)
+            if (accepts(eparts[i], actual)) return 1
+        return 0
+    }
+
+    if (an > 1) {
+        # actual is union: ALL members must be accepted by expected
+        for (j = 1; j <= an; j++)
+            if (!accepts(expected, apart[j])) return 0
+        return 1
+    }
+
+    # special case: HandlerName accepts Str (existing behavior)
+    if (expected == "HandlerName" && actual == "Str") return 1
+
+    return 0
+}
+

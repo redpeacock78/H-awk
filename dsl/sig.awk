@@ -6,6 +6,10 @@
 # _DS_SIG_ARG[path, index] : argument type, 1-indexed
 
 BEGIN {
+    # Type aliases
+    _DS_TYPE_ALIAS["Port"]        = "Int|NumericStr|Str"
+    _DS_TYPE_ALIAS["HandlerName"] = "Str"
+
     # env.*
     _DS_SIG_RET["env.get"]        = "Str"
     _DS_SIG_ARITY["env.get"]      = 1
@@ -120,5 +124,5 @@ BEGIN {
 
     _DS_SIG_RET["hawk.app.listen"]    = "Void"
     _DS_SIG_ARITY["hawk.app.listen"]  = 1
-    _DS_SIG_ARG["hawk.app.listen", 1] = "Int"
+    _DS_SIG_ARG["hawk.app.listen", 1] = "Port"
 }
