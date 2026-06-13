@@ -4,8 +4,9 @@
 function _ds_init() {
   _DS_brace_depth = 0
   _DS_in_function = 0
-  _DS_func_name   = ""
-  _DS_func_sig    = ""
+  _DS_func_name     = ""
+  _DS_func_sig      = ""
+  _DS_func_ret_type = ""
   _DS_let_count   = 0
   _DS_body_count  = 0
   _DS_tc_count    = 0
