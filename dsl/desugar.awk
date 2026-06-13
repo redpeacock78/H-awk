@@ -28,7 +28,7 @@ END {
   }
 }
 
-function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p) {
+function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed) {
   _DS_current_lineno = lineno
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
@@ -66,10 +66,11 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p) {
     return
   }
 
-  nc_result = _ds_nc_transform(_ds_dot_transform(line), nc_pre)
+  dot_transformed = _ds_dot_transform(line)
+  nc_result = _ds_nc_transform(dot_transformed, nc_pre)
   for (p = 1; p in nc_pre; p++)
     _DS_body_buf[++_DS_body_count] = nc_pre[p]
-  transformed = _ds_let_transform(nc_result, lineno)
+  transformed = _ds_let_transform(nc_result, lineno, line)
   if (transformed != "") _DS_body_buf[++_DS_body_count] = transformed
 }
 

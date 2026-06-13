@@ -3,8 +3,6 @@
 
 # _ds_infer_type: 式の静的型を推論する。不明な場合は "" を返す
 function _ds_infer_type(expr,    m) {
-    # ?? 演算子を含む式は複合型のため推論不可
-    if (expr ~ /\?\?/) return ""
     # 数字のみの文字列リテラル: "8080" 形式 → NumericStr
     if (expr ~ /^"[0-9]+"$/) return "NumericStr"
     # 文字列リテラル: "..." 形式
@@ -67,7 +65,23 @@ function _ds_extract_let_parts(line, out_indent, out_varname, out_type, out_rhs,
     return 1
 }
 
-function _ds_let_transform(line, lineno,    arr, rhs, declared) {
+# Extract the RHS from the original let line (before transforms)
+function _ds_extract_orig_rhs(orig_line,    m) {
+    if (match(orig_line, /=[[:space:]]*(.+)$/, m)) return _ds_trim(m[1])
+    return ""
+}
+
+# Infer type from transformed expr, falling back to orig_expr for ?? detection
+function _ds_infer_type_with_orig(transformed_expr, orig_expr,    m, ltype, rtype) {
+    if (orig_expr != "" && match(orig_expr, /^(.+)\?\?(.+)$/, m)) {
+        ltype = _ds_infer_type(_ds_trim(m[1]))
+        rtype = _ds_infer_type(_ds_trim(m[2]))
+        return type::union_of(ltype, rtype)
+    }
+    return _ds_infer_type(transformed_expr)
+}
+
+function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared) {
   # ?= unwrap: let name ?= expr  (requires Option or Result return type)
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
     rhs = _ds_trim(arr[3])
@@ -107,7 +121,8 @@ function _ds_let_transform(line, lineno,    arr, rhs, declared) {
     _DS_let_type_map[varname]        = declared
     _DS_VAR_TYPES[_DS_func_name, varname] = declared
     _DS_VAR_KIND[_DS_func_name, varname]  = _ds_kind_of(declared)
-    inferred = _ds_infer_type(rhs)
+    orig_rhs = _ds_extract_orig_rhs(orig_line)
+    inferred = _ds_infer_type_with_orig(rhs, orig_rhs)
     _ds_check_type(declared, inferred, lineno)
     # Union type: no coerce (ambiguous target), assign directly
     if (type::is_union(declared))
