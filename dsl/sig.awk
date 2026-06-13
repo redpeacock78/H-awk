@@ -7,7 +7,7 @@
 
 BEGIN {
     # Type aliases
-    _DS_TYPE_ALIAS["Port"]        = "Int|NumericStr"
+    _DS_TYPE_ALIAS["Port"]        = "Int|NumericStr|Str"
     _DS_TYPE_ALIAS["HandlerName"] = "Str"
 
     # env.*
