@@ -106,7 +106,7 @@ function accepts(expected, actual,    eparts, apart, en, an, i, j) {
     if (actual   == "Any")   return 1
     if (actual   == "")      return 1
 
-    # alias expansion
+    # aliases must not be circular (table is hardcoded in sig.awk)
     if (expected in awk::_DS_TYPE_ALIAS) return accepts(awk::_DS_TYPE_ALIAS[expected], actual)
     if (actual   in awk::_DS_TYPE_ALIAS) return accepts(expected, awk::_DS_TYPE_ALIAS[actual])
 
@@ -126,9 +126,6 @@ function accepts(expected, actual,    eparts, apart, en, an, i, j) {
             if (!accepts(expected, apart[j])) return 0
         return 1
     }
-
-    # special case: HandlerName accepts Str (existing behavior)
-    if (expected == "HandlerName" && actual == "Str") return 1
 
     return 0
 }
