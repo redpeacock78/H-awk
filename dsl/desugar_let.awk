@@ -31,6 +31,7 @@ function _ds_infer_type(expr,    m) {
 # _ds_check_type: declared と inferred が不一致ならエラーを記録する
 function _ds_check_type(declared, inferred, lineno) {
     if (inferred == "" || inferred == declared) return
+    if (type::accepts(declared, inferred)) return
     print "dsl error: " _DS_src_file ":" lineno \
         ": type mismatch: cannot assign " inferred " to " declared > "/dev/stderr"
     _DS_had_error = 1
@@ -44,6 +45,26 @@ function _ds_kind_of(t) {
     if (t ~ /^Result</)       return "result"
     if (t == "Response")      return "response"
     return "scalar"
+}
+
+# _ds_extract_let_parts: parse "  let name: TYPE = RHS"
+# Returns 1 on success, 0 on failure
+# Fills: out_indent, out_varname, out_type, out_rhs
+function _ds_extract_let_parts(line, out_indent, out_varname, out_type, out_rhs,    m, rest, eq_pos, type_part, rhs_part) {
+    # Match "  let name:" prefix
+    if (!match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*(.+)$/, m))
+        return 0
+    out_indent[1]   = m[1]
+    out_varname[1]  = m[2]
+    rest            = m[3]  # "TYPE = RHS"
+    # Find first = (type cannot contain =, so first = splits correctly)
+    eq_pos = index(rest, "=")
+    if (eq_pos == 0) return 0
+    type_part      = substr(rest, 1, eq_pos - 1)
+    rhs_part       = substr(rest, eq_pos + 1)
+    out_type[1]    = type::normalize(_ds_trim(type_part))
+    out_rhs[1]     = _ds_trim(rhs_part)
+    return 1
 }
 
 function _ds_let_transform(line, lineno,    arr, rhs, declared) {
@@ -76,22 +97,34 @@ function _ds_let_transform(line, lineno,    arr, rhs, declared) {
     _DS_VAR_KIND[_DS_func_name, arr[2]]  = "array"
     return arr[1] "delete " arr[2]
   }
-  # Type-annotated assignment: let name: Type = expr
-  if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*([A-Z][a-zA-Z0-9]*)[[:space:]]*=[[:space:]]*(.+)$/, arr)) {
-    _DS_let_locals[++_DS_let_count] = arr[2]
-    _DS_let_type_map[arr[2]] = arr[3]
-    _DS_VAR_TYPES[_DS_func_name, arr[2]] = arr[3]
-    _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(arr[3])
-    _ds_check_type(arr[3], _ds_infer_type(arr[4]), lineno)
-    return arr[1] arr[2] " = type::coerce(" arr[4] ", \"" arr[3] "\")"
+  # Type-annotated assignment: let name: Type = expr (supports Union types)
+  if (_ds_extract_let_parts(line, _parts_indent, _parts_varname, _parts_type, _parts_rhs)) {
+    indent   = _parts_indent[1]
+    varname  = _parts_varname[1]
+    declared = _parts_type[1]
+    rhs      = _parts_rhs[1]
+    _DS_let_locals[++_DS_let_count] = varname
+    _DS_let_type_map[varname]        = declared
+    _DS_VAR_TYPES[_DS_func_name, varname] = declared
+    _DS_VAR_KIND[_DS_func_name, varname]  = _ds_kind_of(declared)
+    inferred = _ds_infer_type(rhs)
+    _ds_check_type(declared, inferred, lineno)
+    # Union type: no coerce (ambiguous target), assign directly
+    if (type::is_union(declared))
+      return indent varname " = " rhs
+    return indent varname " = type::coerce(" rhs ", \"" declared "\")"
   }
-  # Bare typed declaration: let name: Type  (初期値なし)
-  if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*([A-Z][a-zA-Z0-9]*)[[:space:]]*$/, arr)) {
-    _DS_let_locals[++_DS_let_count] = arr[2]
-    _DS_let_type_map[arr[2]] = arr[3]
-    _DS_VAR_TYPES[_DS_func_name, arr[2]] = arr[3]
-    _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(arr[3])
-    return ""
+  # Bare typed declaration: let name: Type  (初期値なし, supports Union types)
+  if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*(.+)$/, arr)) {
+    # Only match if no = sign (bare declaration)
+    if (index(arr[3], "=") == 0) {
+      declared = type::normalize(_ds_trim(arr[3]))
+      _DS_let_locals[++_DS_let_count] = arr[2]
+      _DS_let_type_map[arr[2]] = declared
+      _DS_VAR_TYPES[_DS_func_name, arr[2]] = declared
+      _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(declared)
+      return ""
+    }
   }
   # Assignment: let name = expr
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.+)$/, arr)) {
