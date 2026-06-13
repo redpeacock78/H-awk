@@ -86,6 +86,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
   nc_result = _ds_nc_transform(dot_transformed, nc_pre)
   for (p = 1; p in nc_pre; p++)
     _DS_body_buf[++_DS_body_count] = nc_pre[p]
+  _ds_typecheck_plain_call(nc_result)
   transformed = _ds_let_transform(nc_result, lineno, line)
   if (transformed != "") _DS_body_buf[++_DS_body_count] = transformed
 }
@@ -145,6 +146,14 @@ function _ds_parse_func_params(func_name, params_str,    i, c, depth, cur, n, pa
   result = ""
   for (i = 1; i <= n; i++) result = result (i > 1 ? ", " : "") parts[i]
   return result
+}
+
+# Check plain function call "f(args)" for arity + type errors
+function _ds_typecheck_plain_call(line,    m) {
+  if (match(line, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\((.*)\)[[:space:]]*$/, m)) {
+    if (m[1] in _DS_SIG_ARITY)
+      _ds_typecheck_call(m[1], m[2])
+  }
 }
 
 # Strip type annotations from function def line for gawk output
