@@ -15,4 +15,6 @@ function _ds_init() {
   delete _DS_let_locals
   delete _DS_body_buf
   delete _DS_let_type_map
+  delete _DS_VAR_TYPES
+  delete _DS_VAR_KIND
 }

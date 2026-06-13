@@ -32,16 +32,30 @@ function _ds_check_type(declared, inferred, lineno) {
     _DS_had_error = 1
 }
 
+# _ds_kind_of: 型文字列から変数の kind を取得する
+function _ds_kind_of(t) {
+    if (t == "Array")         return "array"
+    if (t == "Map")           return "map"
+    if (t ~ /^Option</)       return "option"
+    if (t ~ /^Result</)       return "result"
+    if (t == "Response")      return "response"
+    return "scalar"
+}
+
 function _ds_let_transform(line, lineno,    arr, rhs, declared) {
   # Array init: let name = []
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*\[\][[:space:]]*$/, arr)) {
     _DS_let_locals[++_DS_let_count] = arr[2]
+    _DS_VAR_TYPES[_DS_func_name, arr[2]] = "Array"
+    _DS_VAR_KIND[_DS_func_name, arr[2]]  = "array"
     return arr[1] "delete " arr[2]
   }
   # Type-annotated assignment: let name: Type = expr
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*([A-Z][a-zA-Z0-9]*)[[:space:]]*=[[:space:]]*(.+)$/, arr)) {
     _DS_let_locals[++_DS_let_count] = arr[2]
     _DS_let_type_map[arr[2]] = arr[3]
+    _DS_VAR_TYPES[_DS_func_name, arr[2]] = arr[3]
+    _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(arr[3])
     _ds_check_type(arr[3], _ds_infer_type(arr[4]), lineno)
     return arr[1] arr[2] " = type::coerce(" arr[4] ", \"" arr[3] "\")"
   }
@@ -49,18 +63,24 @@ function _ds_let_transform(line, lineno,    arr, rhs, declared) {
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*([A-Z][a-zA-Z0-9]*)[[:space:]]*$/, arr)) {
     _DS_let_locals[++_DS_let_count] = arr[2]
     _DS_let_type_map[arr[2]] = arr[3]
+    _DS_VAR_TYPES[_DS_func_name, arr[2]] = arr[3]
+    _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(arr[3])
     return ""
   }
   # Assignment: let name = expr
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.+)$/, arr)) {
     if (!(arr[2] in _DS_let_type_map))
       _DS_let_locals[++_DS_let_count] = arr[2]
+    _DS_VAR_TYPES[_DS_func_name, arr[2]] = _ds_infer_type(arr[3])
+    _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(_DS_VAR_TYPES[_DS_func_name, arr[2]])
     return arr[1] arr[2] " = " arr[3]
   }
   # Bare declaration: let name
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*$/, arr)) {
     if (!(arr[2] in _DS_let_type_map))
       _DS_let_locals[++_DS_let_count] = arr[2]
+    _DS_VAR_TYPES[_DS_func_name, arr[2]] = ""
+    _DS_VAR_KIND[_DS_func_name, arr[2]]  = "scalar"
     return ""
   }
   # 型付き変数への代入を coerce でラップ
