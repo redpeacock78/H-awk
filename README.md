@@ -117,16 +117,16 @@ function handler(    title, items, tmp) {
 **Type annotations on `let`**
 
 ```awk
-# Typed let with initializer — coerced + static check at desugar time
+# Typed let with initializer — static check at desugar time
 function handler() {
-  let port: Int = 8080
+  let n: Int = 42
   let title: Str = ctx.req.form("title")
 }
 
-# Desugared
-function handler(    port, title) {
-  port  = type::coerce(8080, "Int")
-  title = type::coerce(ctx::dispatch("req.form", "title"), "Str")
+# Desugared (coerce only when type can't be statically confirmed)
+function handler(    n, title) {
+  n     = 42
+  title = ctx::dispatch("req.form", "title")
 }
 ```
 
@@ -151,7 +151,86 @@ let port: Int = "hello"
 # dsl error: app.awk:5: type mismatch: cannot assign Str to Int
 ```
 
-Supported types: `Int`, `Float`, `Str`, `Bool`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Void`, `Any`. Type inference works for literals and known DSL functions (`ctx.req.form` → `Str`, `ctx.req.json` → `Result<Map, Error>`, `ctx.res.status` → `Response`, etc.).
+**Union type annotations**
+
+```awk
+# Union type: accepts any member type
+function handler() {
+  let port: Int | Str = env.get("PORT") ?? 8080
+}
+
+# Desugared
+function handler(    port) {
+  _ds_tc_1 = env::dispatch("get", "PORT")
+  port = (_ds_tc_1 != "" ? _ds_tc_1 : 8080)
+}
+```
+
+```sh
+# Desugar-time error: Bool is not a member of Int | Str
+let port: Int | Str = true
+# dsl error: app.awk:3: type mismatch: cannot assign Bool to Int|Str
+```
+
+The `??` operator infers a union type from its two operands (`Str | Int` from `env.get("PORT") ?? 8080`). The built-in `Port` type alias expands to `Int|NumericStr|Str`, so `hawk.app.listen(env.get("PORT") ?? 8080)` passes type checking.
+
+Supported types: `Int`, `Float`, `Str`, `Bool`, `NumericStr`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Void`, `Any`, and any union `A | B`. Type inference works for literals and known DSL functions (`ctx.req.form` → `Str`, `ctx.req.json` → `Result<Map, Error>`, `ctx.res.text` → `Response`, etc.).
+
+**Function type annotations**
+
+```awk
+# Argument and return type annotations (both optional)
+function normalize(text: Str) -> Str {
+  return text
+}
+
+function handler() -> Response {
+  let result: Str = normalize(ctx.req.form("title"))
+  return ctx.res.text(result)
+}
+
+# Desugared
+function normalize(text) {
+  return text
+}
+
+function handler(    result) {
+  result = normalize(ctx::dispatch("req.form", "title"))
+  return ctx::dispatch("res.text", result)
+}
+```
+
+Annotations are stripped from gawk output — they exist only at desugar time. Unannotated parameters and return types default to `Any` (no check). Union types work in annotations:
+
+```awk
+function process(id: Int | Str) -> Str {
+  return id
+}
+```
+
+Desugar-time checks on user-defined functions:
+
+```sh
+# Wrong argument type
+normalize(123)
+# dsl error: app.awk:8: normalize argument 1 expects Str, got Int
+
+# Wrong arity
+normalize("a", "b")
+# dsl error: app.awk:8: normalize expects 1 argument(s), got 2
+
+# Wrong return type
+function hello() -> Response {
+  return "hello"
+}
+# dsl error: app.awk:2: function hello expects return Response, got Str
+
+# Void with value
+function setup() -> Void {
+  return ctx.res.text("ok")
+}
+# dsl error: app.awk:2: function setup expects Void, got Response
+```
 
 **`??` null-coalescing operator**
 
@@ -195,7 +274,7 @@ let title ?= ctx.req.form("title")
 
 **DSL function call checking**
 
-Desugar validates arity and argument types for all built-in DSL functions:
+Desugar validates arity and argument types for all built-in DSL functions and user-defined annotated functions:
 
 ```sh
 # Wrong number of arguments
@@ -206,6 +285,8 @@ ctx.res.status()
 ctx.res.status("ok")
 # dsl error: app.awk:5: ctx.res.status argument 1 expects Int, got Str
 ```
+
+User-defined functions with type annotations are checked the same way. Forward references work — a function can be called before it is defined in the source file.
 
 Use `--debug` to inspect the generated file:
 
