@@ -5,6 +5,23 @@ function _ds_is_option(t) { return t ~ /^Option</ }
 function _ds_is_result(t) { return t ~ /^Result</ }
 function _ds_is_nullable(t) { return _ds_is_option(t) || _ds_is_result(t) }
 
+# Returns 1 if all union members are nullable (Option or Result)
+function _ds_all_nullable(t,    out, n, i) {
+    n = type::split_union(t, out)
+    for (i = 1; i <= n; i++)
+        if (!_ds_is_nullable(out[i])) return 0
+    return 1
+}
+
+# Unwrap each union member and union the resulting inner types
+function _ds_unwrap_union_type(t,    out, n, i, result) {
+    n = type::split_union(t, out)
+    result = _ds_inner_type(out[1])
+    for (i = 2; i <= n; i++)
+        result = type::union_of(result, _ds_inner_type(out[i]))
+    return result
+}
+
 function _ds_inner_type(t,    m) {
     if (match(t, /^Option<(.+)>$/, m))    return m[1]
     if (match(t, /^Result<([^,]+),/, m))  return m[1]

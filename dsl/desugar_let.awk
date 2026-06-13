@@ -90,7 +90,7 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
     rhs = _ds_trim(arr[3])
     declared = _ds_infer_type(rhs)
-    if (declared != "" && !_ds_is_nullable(declared)) {
+    if (declared != "" && !_ds_is_nullable(declared) && !_ds_all_nullable(declared)) {
       print "dsl error: " _DS_src_file ":" lineno \
           ": ?= requires Option or Result, got " declared > "/dev/stderr"
       _DS_had_error = 1
@@ -99,7 +99,7 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
     _DS_tc_count++
     _DS_let_locals[++_DS_let_count] = "_ds_tc_" _DS_tc_count
     _DS_let_locals[++_DS_let_count] = arr[2]
-    _DS_VAR_TYPES[_DS_func_name, arr[2]] = _ds_inner_type(declared)
+    _DS_VAR_TYPES[_DS_func_name, arr[2]] = _ds_unwrap_union_type(declared)
     _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(_DS_VAR_TYPES[_DS_func_name, arr[2]])
     _DS_body_buf[++_DS_body_count] = arr[1] "_ds_tc_" _DS_tc_count " = " rhs
     _DS_body_buf[++_DS_body_count] = arr[1] "if (!result_ok(_ds_tc_" _DS_tc_count ")) {"
