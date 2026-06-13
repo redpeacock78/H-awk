@@ -17,7 +17,12 @@ function _ds_pipe_find_close(s, open_pos,    i, c, depth) {
     return i - 1
 }
 
-# Find where the left operand token starts (scan left from pipe_pos-1)
+# Find where the left operand token starts (scan left from pipe_pos-1).
+# NOTE: only handles simple identifier LHS (variable names, temp vars like _ds_p_1).
+# Complex expressions (function calls, array subscripts, parenthesized exprs)
+# on the LHS of |> are not supported — use a let binding first:
+#   let tmp = foo(x)
+#   let result = tmp |> trim()
 function _ds_pipe_left_start(masked, pipe_pos,    i) {
     i = pipe_pos - 1
     while (i >= 1 && substr(masked, i, 1) == " ") i--
