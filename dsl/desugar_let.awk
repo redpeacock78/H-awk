@@ -3,6 +3,8 @@
 
 # _ds_infer_type: 式の静的型を推論する。不明な場合は "" を返す
 function _ds_infer_type(expr,    m) {
+    # ?? 演算子を含む式は複合型のため推論不可
+    if (expr ~ /\?\?/) return ""
     # 文字列リテラル: "..." 形式
     if (expr ~ /^".*"$/) return "Str"
     # 整数リテラル: オプショナルな負号 + 数字のみ
