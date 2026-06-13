@@ -38,3 +38,58 @@ function coerce(val, typename) {
     exit 1
 }
 
+# type::split_union -- split at top-level | only (respects <...> depth)
+# stores results in out[], returns count
+function split_union(t, out,    i, c, depth, cur, n) {
+    n = 0; depth = 0; cur = ""
+    for (i = 1; i <= length(t); i++) {
+        c = substr(t, i, 1)
+        if      (c == "<") depth++
+        else if (c == ">") depth--
+        else if (c == "|" && depth == 0) {
+            out[++n] = _ds_trim_type(cur)
+            cur = ""
+            continue
+        }
+        cur = cur c
+    }
+    if (length(_ds_trim_type(cur)) > 0) out[++n] = _ds_trim_type(cur)
+    return n
+}
+
+function _ds_trim_type(s) {
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+    return s
+}
+
+# type::is_union -- returns 1 if t is a Union type
+function is_union(t,    out, n) {
+    n = split_union(t, out)
+    return (n > 1)
+}
+
+# type::normalize -- sort members, deduplicate, join with | (no spaces)
+function normalize(t,    out, n, i, j, sorted, seen, result, tmp) {
+    n = split_union(t, out)
+    if (n == 1) return out[1]
+    # deduplicate
+    for (i = 1; i <= n; i++) seen[out[i]] = 1
+    n = 0
+    for (i in seen) sorted[++n] = i
+    # bubble sort (small n)
+    for (i = 1; i <= n; i++)
+        for (j = i+1; j <= n; j++)
+            if (sorted[i] > sorted[j]) { tmp = sorted[i]; sorted[i] = sorted[j]; sorted[j] = tmp }
+    result = sorted[1]
+    for (i = 2; i <= n; i++) result = result "|" sorted[i]
+    return result
+}
+
+# type::union_of -- combine two types into a normalized union
+function union_of(a, b) {
+    if (a == "" || a == "Any") return b
+    if (b == "" || b == "Any") return a
+    if (a == b) return a
+    return normalize(a "|" b)
+}
+
