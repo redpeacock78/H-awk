@@ -132,13 +132,23 @@ if (expr ~ /^".*"$/)     return "Str"          # "hello" -> Str
 現在: `??` を含む式は推論不可 (`""`) を返す。  
 変更後: 左辺・右辺を個別推論し、union 化する。
 
+**実装上の注意**: `_ds_nc_transform` が先に実行されるため、`_ds_infer_type` が呼ばれる時点では `??` はすでに ternary 形式 `(_ds_tc_N != "" ? _ds_tc_N : fallback)` に変換済である。
+
+そのため、`??` の union 推論は以下のいずれかで実装する:
+
+**方法A (推奨)**: `_ds_let_transform` に元の行（pre-transform）を追加引数として渡し、型推論だけ元の行に対して行う。コード生成はtransform後の行を使う。
+
 ```awk
-if (match(expr, /^(.+)\?\?(.+)$/, m)) {
+# _ds_let_transform(transformed_line, original_line, lineno) に変更
+# 型推論: original_line の RHS に ?? があれば union 推論
+if (match(original_rhs, /^(.+)\?\?(.+)$/, m)) {
     ltype = _ds_infer_type(_ds_trim(m[1]))
     rtype = _ds_infer_type(_ds_trim(m[2]))
-    return type_union(ltype, rtype)
+    inferred = type_union(ltype, rtype)
 }
 ```
+
+**方法B**: `_ds_nc_transform` が変換時に `_DS_NC_ORIG_TYPE[tc_var]` に元の型情報を記録し、`_ds_infer_type` がternary形式を検出した際にそこから取得する。
 
 #### 結果例
 
@@ -275,6 +285,19 @@ return が存在しない場合:
 単純関数呼び出し `f(args)` に対しても、built-in と同様に `_ds_typecheck_call` を適用する。
 
 Pass 1 でsig登録済のため、前方参照でも正しくチェックできる。
+
+**実装上の注意**: `_ds_dot_transform` は `ns.method()` 形式（`ctx.res.text(...)` 等）のみ変換するため、単純呼び出し `normalize(123)` はそこで処理されない。
+`_ds_process_line` の処理フロー内で、dot-transform後・let-transform前に単純関数呼び出しのチェックを行う専用のステップを追加する。
+
+```awk
+# _ds_process_line 内の追加ステップ
+function _ds_typecheck_plain_call(line,    m) {
+    if (match(line, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\((.*))\)[[:space:]]*$/, m)) {
+        if (m[1] in _DS_SIG_ARITY)
+            _ds_typecheck_call(m[1], m[2])
+    }
+}
+```
 
 ```hawk
 function normalize(s: Str) -> Str { return trim(s) }
