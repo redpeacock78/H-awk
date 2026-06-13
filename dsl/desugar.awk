@@ -87,6 +87,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
   for (p = 1; p in nc_pre; p++)
     _DS_body_buf[++_DS_body_count] = nc_pre[p]
   _ds_typecheck_plain_call(nc_result)
+  _ds_check_return(dot_transformed, lineno)
   transformed = _ds_let_transform(nc_result, lineno, line)
   if (transformed != "") _DS_body_buf[++_DS_body_count] = transformed
 }
@@ -146,6 +147,25 @@ function _ds_parse_func_params(func_name, params_str,    i, c, depth, cur, n, pa
   result = ""
   for (i = 1; i <= n; i++) result = result (i > 1 ? ", " : "") parts[i]
   return result
+}
+
+# Check return statement against declared return type
+function _ds_check_return(line, lineno,    m, actual) {
+  if (_DS_func_ret_type == "" || _DS_func_ret_type == "Any") return
+  if (!match(line, /^[[:space:]]*return[[:space:]]+(.+)$/, m)) return
+  actual = _ds_infer_type(_ds_trim(m[1]))
+  if (actual == "") return
+  if (_DS_func_ret_type == "Void") {
+    print "dsl error: " _DS_src_file ":" lineno \
+        ": function " _DS_func_name " expects Void, got " actual > "/dev/stderr"
+    _DS_had_error = 1
+    return
+  }
+  if (!type::accepts(_DS_func_ret_type, actual)) {
+    print "dsl error: " _DS_src_file ":" lineno \
+        ": function " _DS_func_name " expects return " _DS_func_ret_type ", got " actual > "/dev/stderr"
+    _DS_had_error = 1
+  }
 }
 
 # Check plain function call "f(args)" for arity + type errors
