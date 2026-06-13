@@ -151,7 +151,7 @@ let port: Int = "hello"
 # dsl error: app.awk:5: type mismatch: cannot assign Str to Int
 ```
 
-Supported types: `Int`, `Float`, `Str`, `Bool`. Type inference works for literals and known DSL functions (`env.get` → Str, `ctx.req.form` → Str, etc.).
+Supported types: `Int`, `Float`, `Str`, `Bool`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Void`, `Any`. Type inference works for literals and known DSL functions (`ctx.req.form` → `Str`, `ctx.req.json` → `Result<Map, Error>`, `ctx.res.status` → `Response`, etc.).
 
 **`??` null-coalescing operator**
 
@@ -165,6 +165,47 @@ hawk::dispatch("app.listen", (_ds_tc_1 != "" ? _ds_tc_1 : 8080))
 ```
 
 Rule: `expr ?? default` — if `expr` evaluates to empty string, use `default`. Works inside function arguments.
+
+**`?=` safe unwrap operator**
+
+Unwrap an `Option<T>` or `Result<T, E>` value. If the call fails, automatically returns a 500 response. Only valid for functions whose return type is `Option` or `Result`.
+
+```awk
+# DSL
+function create_todo() {
+  let body ?= ctx.req.json()
+}
+
+# Desugared
+function create_todo(    _ds_tc_1, body) {
+  _ds_tc_1 = ctx::dispatch("req.json")
+  if (!result_ok(_ds_tc_1)) {
+    return ctx::dispatch("res.status", 500)
+  }
+  body = result_val(_ds_tc_1)
+}
+```
+
+Desugar-time error if the RHS type is not Option or Result:
+
+```sh
+let title ?= ctx.req.form("title")
+# dsl error: app.awk:5: ?= requires Option or Result, got Str
+```
+
+**DSL function call checking**
+
+Desugar validates arity and argument types for all built-in DSL functions:
+
+```sh
+# Wrong number of arguments
+ctx.res.status()
+# dsl error: app.awk:5: ctx.res.status expects 1 argument(s), got 0
+
+# Wrong argument type
+ctx.res.status("ok")
+# dsl error: app.awk:5: ctx.res.status argument 1 expects Int, got Str
+```
 
 Use `--debug` to inspect the generated file:
 
