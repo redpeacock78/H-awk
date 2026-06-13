@@ -78,3 +78,9 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
         _DS_had_error = 1
     }
 }
+
+function _ds_extract_func_name(sig,    m) {
+    if (match(sig, /function[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)/, m))
+        return m[1]
+    return ""
+}
