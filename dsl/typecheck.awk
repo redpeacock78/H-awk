@@ -73,6 +73,7 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
         expected = _DS_SIG_ARG[path, i]
         actual   = _ds_infer_type(split_args[i])
         if (actual == "" || actual == "Any" || actual == expected) continue
+        if (expected == "HandlerName" && actual == "Str") continue
         print "dsl error: " _DS_src_file ":" lineno \
             ": " path " argument " i " expects " expected ", got " actual > "/dev/stderr"
         _DS_had_error = 1
