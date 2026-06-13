@@ -48,12 +48,14 @@ function trim(s: Str) -> Str {
 }
 ```
 
-| 分類 | シグネチャ | Untrusted 伝播 |
+`classify: transform` を付けると、型チェッカーは宣言型 `Str` を `Untrusted<Str>` に自動昇格して扱う。ユーザーは内部型（`Str`）を書くだけでよい。gawk 出力には `classify:` も `Untrusted` も現れない。
+
+| 分類 | 宣言シグネチャ | 型チェッカー上の扱い |
 |------|-----------|----------------|
-| `transform` | `Untrusted<T> -> Untrusted<U>` | 透過 |
-| `validator` | `Untrusted<T> -> Result<Refined, ValidationError>` | 封印解除 |
-| `sanitizer` | `Refined -> Safe<T>` | Safe 生成 |
-| `sink` | `Safe<T> -> Response` | 終端 |
+| `transform` | `(T) -> U` | `Untrusted<T> -> Untrusted<U>` として透過 |
+| `validator` | `(Untrusted<T>) -> Result<Refined, E>` | `Untrusted` を明示 — 封印解除 |
+| `sanitizer` | `(Refined) -> Safe<T>` | `Safe` 生成 |
+| `sink` | `(Safe<T>) -> Response` | 終端 |
 
 `classify:` なし関数: `Untrusted<T>` を引数に取れない（型エラー）。
 
@@ -212,6 +214,7 @@ dsl error: app.awk:5: match on Result<...> missing ng or default branch
 | `ctx.req.form(key)` | `Str` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.query(key)` | `Str` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.param(key)` | `Str` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.header(key)` | `Str` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.json()` | `Result<Map, Error>` | `Result<Untrusted<Map>, ParseError>` |
 | `ctx.req.body()` | `Str` | `Result<Untrusted<Str>, ParseError>` |
 
