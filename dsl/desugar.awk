@@ -39,6 +39,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p) {
     }
     if (_ds_is_func_def(line)) {
       _DS_in_function  = 1
+      _DS_func_name    = _ds_extract_func_name(line)
       _DS_func_sig     = line
       _DS_brace_depth  = _ds_net_braces(line)
       _DS_let_count    = 0
