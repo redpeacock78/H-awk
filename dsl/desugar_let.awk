@@ -43,6 +43,28 @@ function _ds_kind_of(t) {
 }
 
 function _ds_let_transform(line, lineno,    arr, rhs, declared) {
+  # ?= unwrap: let name ?= expr  (requires Option or Result return type)
+  if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
+    rhs = _ds_trim(arr[3])
+    declared = _ds_infer_type(rhs)
+    if (declared != "" && !_ds_is_nullable(declared)) {
+      print "dsl error: " _DS_src_file ":" lineno \
+          ": ?= requires Option or Result, got " declared > "/dev/stderr"
+      _DS_had_error = 1
+      return ""
+    }
+    _DS_tc_count++
+    _DS_let_locals[++_DS_let_count] = "_ds_tc_" _DS_tc_count
+    _DS_let_locals[++_DS_let_count] = arr[2]
+    _DS_VAR_TYPES[_DS_func_name, arr[2]] = _ds_inner_type(declared)
+    _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(_DS_VAR_TYPES[_DS_func_name, arr[2]])
+    _DS_body_buf[++_DS_body_count] = arr[1] "_ds_tc_" _DS_tc_count " = " rhs
+    _DS_body_buf[++_DS_body_count] = arr[1] "if (!result_ok(_ds_tc_" _DS_tc_count ")) {"
+    _DS_body_buf[++_DS_body_count] = arr[1] "  return ctx::dispatch(\"res.status\", 500)"
+    _DS_body_buf[++_DS_body_count] = arr[1] "}"
+    _DS_body_buf[++_DS_body_count] = arr[1] arr[2] " = result_val(_ds_tc_" _DS_tc_count ")"
+    return ""
+  }
   # Array init: let name = []
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*\[\][[:space:]]*$/, arr)) {
     _DS_let_locals[++_DS_let_count] = arr[2]
