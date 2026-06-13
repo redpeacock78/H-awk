@@ -10,7 +10,22 @@
 @include "dsl/typecheck.awk"
 @include "dsl/type.awk"
 
-BEGIN { _ds_init() }
+BEGIN {
+  _ds_init()
+  # Pass 1: collect user function signatures for forward-reference support
+  if (ARGC > 1) {
+    while ((getline _pass1_line < ARGV[1]) > 0) {
+      if (_ds_is_func_def(_pass1_line)) {
+        _pass1_fname = _ds_extract_func_name(_pass1_line)
+        _pass1_ret   = _ds_extract_return_type(_pass1_line)
+        _DS_SIG_RET[_pass1_fname] = (_pass1_ret != "" ? _pass1_ret : "Any")
+        if (match(_pass1_line, /\(([^)]*)\)[[:space:]]*(->.*)?[[:space:]]*\{/, _pass1_m))
+          _ds_parse_func_params(_pass1_fname, _pass1_m[1])
+      }
+    }
+    close(ARGV[1])
+  }
+}
 
 FNR == 1 {
   _DS_src_file = FILENAME
@@ -40,7 +55,8 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
     if (_ds_is_func_def(line)) {
       _DS_in_function  = 1
       _DS_func_name    = _ds_extract_func_name(line)
-      _DS_func_sig     = line
+      _DS_func_ret_type = _ds_extract_return_type(line)
+      _DS_func_sig     = _ds_strip_func_annotations(line)
       _DS_brace_depth  = _ds_net_braces(line)
       _DS_let_count    = 0
       _DS_body_count   = 0
@@ -75,7 +91,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
 }
 
 function _ds_is_func_def(line) {
-  return (line ~ /^[[:space:]]*function[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\([^)]*\)[[:space:]]*\{/)
+  return (line ~ /^[[:space:]]*function[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(.*\)[[:space:]]*(->.*)?[[:space:]]*\{[[:space:]]*$/)
 }
 
 function _ds_net_braces(line,    n, i, c) {
@@ -86,4 +102,58 @@ function _ds_net_braces(line,    n, i, c) {
     else if (c == "}") n--
   }
   return n
+}
+
+# Extract return type from "function f(...) -> ReturnType {"
+function _ds_extract_return_type(sig,    m) {
+  if (match(sig, /->[[:space:]]*([^{]+)[[:space:]]*\{/, m))
+    return type::normalize(_ds_trim(m[1]))
+  return ""
+}
+
+# Parse type-annotated params, register in sig tables, return gawk param list
+function _ds_parse_func_params(func_name, params_str,    i, c, depth, cur, n, parts, param, colon_pos, pname, ptype, result) {
+  # Split on , respecting <...> depth
+  n = 0; depth = 0; cur = ""
+  for (i = 1; i <= length(params_str); i++) {
+    c = substr(params_str, i, 1)
+    if      (c == "<") depth++
+    else if (c == ">") depth--
+    else if (c == "," && depth == 0) {
+      parts[++n] = _ds_trim(cur); cur = ""; continue
+    }
+    cur = cur c
+  }
+  if (_ds_trim(cur) != "") parts[++n] = _ds_trim(cur)
+
+  _DS_SIG_ARITY[func_name] = n
+
+  for (i = 1; i <= n; i++) {
+    param = parts[i]
+    colon_pos = index(param, ":")
+    if (colon_pos > 0) {
+      pname = _ds_trim(substr(param, 1, colon_pos - 1))
+      ptype = type::normalize(_ds_trim(substr(param, colon_pos + 1)))
+    } else {
+      pname = _ds_trim(param)
+      ptype = "Any"
+    }
+    _DS_SIG_ARG[func_name, i] = ptype
+    parts[i] = pname
+  }
+
+  result = ""
+  for (i = 1; i <= n; i++) result = result (i > 1 ? ", " : "") parts[i]
+  return result
+}
+
+# Strip type annotations from function def line for gawk output
+# "function f(a: Str, b: Int) -> Response {" -> "function f(a, b) {"
+function _ds_strip_func_annotations(sig,    m, func_name, params_str, clean_params) {
+  if (!match(sig, /^([[:space:]]*)function[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\(([^)]*)\)/, m))
+    return sig  # no match, return as-is
+  func_name    = m[2]
+  params_str   = m[3]
+  clean_params = _ds_parse_func_params(func_name, params_str)
+  return m[1] "function " func_name "(" clean_params ") {"
 }
