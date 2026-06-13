@@ -6,6 +6,7 @@
 @include "dsl/desugar_dot.awk"
 @include "dsl/desugar_let.awk"
 @include "dsl/desugar_nullcoalesce.awk"
+@include "dsl/sig.awk"
 @include "dsl/type.awk"
 
 BEGIN { _ds_init() }

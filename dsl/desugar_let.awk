@@ -14,12 +14,12 @@ function _ds_infer_type(expr,    m) {
     # 既知の DSL 関数呼び出し: ns.method(...) 形式 (desugar 前)
     if (match(expr, /^([a-z][a-zA-Z0-9_]*)\.([a-z][a-zA-Z0-9_]*)\(/, m)) {
         key = m[1] "." m[2]
-        if (key in _DS_TYPE_RETURNS) return _DS_TYPE_RETURNS[key]
+        if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
     }
     # 既知の DSL 関数呼び出し: ns::dispatch("path", ...) 形式 (desugar 後)
     if (match(expr, /^([a-z][a-zA-Z0-9_]*)::dispatch\("([^"]+)"/, m)) {
         key = m[1] "." m[2]
-        if (key in _DS_TYPE_RETURNS) return _DS_TYPE_RETURNS[key]
+        if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
     }
     return ""
 }
