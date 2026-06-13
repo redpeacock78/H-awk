@@ -23,6 +23,10 @@ function _ds_infer_type(expr,    m) {
         key = m[1] "." m[2]
         if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
     }
+    # ユーザー定義関数呼び出し: f(...) 形式
+    if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\(/, m)) {
+        if (m[1] in _DS_SIG_RET) return _DS_SIG_RET[m[1]]
+    }
     return ""
 }
 
@@ -81,7 +85,7 @@ function _ds_infer_type_with_orig(transformed_expr, orig_expr,    m, ltype, rtyp
     return _ds_infer_type(transformed_expr)
 }
 
-function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared) {
+function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_call) {
   # ?= unwrap: let name ?= expr  (requires Option or Result return type)
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
     rhs = _ds_trim(arr[3])
@@ -124,8 +128,16 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared) {
     orig_rhs = _ds_extract_orig_rhs(orig_line)
     inferred = _ds_infer_type_with_orig(rhs, orig_rhs)
     _ds_check_type(declared, inferred, lineno)
+    # RHS が関数呼び出しなら引数型チェック
+    if (match(rhs, /^([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\((.*)\)[[:space:]]*$/, _let_call)) {
+      if (_let_call[1] in _DS_SIG_ARITY)
+        _ds_typecheck_call(_let_call[1], _let_call[2])
+    }
     # Union type: no coerce (ambiguous target), assign directly
     if (type::is_union(declared))
+      return indent varname " = " rhs
+    # Type statically known and accepted: no coerce needed
+    if (inferred != "" && type::accepts(declared, inferred))
       return indent varname " = " rhs
     return indent varname " = type::coerce(" rhs ", \"" declared "\")"
   }
