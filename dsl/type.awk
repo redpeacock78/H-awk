@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
-# dsl/type.awk -- DSL 型アノテーション用ランタイム変換 + 型レジストリ
+# dsl/type.awk -- DSL 型アノテーション用ランタイム変換
 #
 # type::coerce(val, typename)  -- ランタイム型変換（デシュガー出力から呼ばれる）
-# _DS_TYPE_RETURNS[]           -- 既知 DSL 関数の戻り型（デシュガー時静的チェック用）
+# _DS_SIG_RET[]                -- 既知 DSL 関数の戻り型（dsl/sig.awk で定義）
 
 @namespace "type"
 
@@ -38,14 +38,3 @@ function coerce(val, typename) {
     exit 1
 }
 
-@namespace "awk"
-
-# 既知の DSL 関数の戻り型 (デシュガー時の静的チェックに使用)
-# キー: "namespace.method" の dot 記法文字列
-BEGIN {
-    _DS_TYPE_RETURNS["env.get"]       = "Str"
-    _DS_TYPE_RETURNS["ctx.req.form"]  = "Str"
-    _DS_TYPE_RETURNS["ctx.req.query"] = "Str"
-    _DS_TYPE_RETURNS["ctx.req.param"] = "Str"
-    _DS_TYPE_RETURNS["ctx.req.body"]  = "Str"
-}
