@@ -17,11 +17,11 @@ BEGIN {
   hawk.app.listen(env.get("PORT") ?? 8080)
 }
 
-function todo_index() {
+function todo_index() -> Response {
   ctx.res.render("views/index.html")
 }
 
-function todo_list_html() {
+function todo_list_html() -> Response {
   let rows = []
   let n: Int = read_tsv("data/todos.tsv", rows)
   let out: Str = ""
@@ -32,7 +32,7 @@ function todo_list_html() {
   return ctx.res.html(out)
 }
 
-function todo_add() {
+function todo_add() -> Response {
   let title: Str = ctx.req.form("title")
   let row = []
   if (title == "") title = ctx.req.query("title")
@@ -47,7 +47,7 @@ function todo_add() {
   return ctx.res.html(_todo_tr(row["id"], row["title"]))
 }
 
-function todo_delete() {
+function todo_delete() -> Response {
   let deleted: Int = delete_tsv("data/todos.tsv", "id", ctx.req.param("id"))
   if (deleted == 0) {
     ctx.res.status(404)
@@ -57,7 +57,7 @@ function todo_delete() {
   return ctx.res.html("")
 }
 
-function todo_list_json() {
+function todo_list_json() -> Response {
   let rows = []
   let n: Int = read_tsv("data/todos.tsv", rows)
   let item = []
@@ -71,7 +71,7 @@ function todo_list_json() {
   return ctx.res.json(sprintf("{\"count\":%d,\"items\":[%s]}", n, items_json))
 }
 
-function _todo_tr(id, title) {
+function _todo_tr(id: Str, title: Str) -> Str {
   return sprintf( \
     "<tr class=\"group border-b border-zinc-800/60 last:border-0\">" \
       "<td class=\"py-3 pr-4 text-sm text-zinc-200\">%s</td>" \
