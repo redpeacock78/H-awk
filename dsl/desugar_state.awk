@@ -11,6 +11,7 @@ function _ds_init() {
   _DS_tc_count    = 0
   _DS_had_error   = 0
   _DS_src_file    = ""
+  _DS_current_lineno = 0
   delete _DS_let_locals
   delete _DS_body_buf
   delete _DS_let_type_map

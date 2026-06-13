@@ -7,6 +7,7 @@
 @include "dsl/desugar_let.awk"
 @include "dsl/desugar_nullcoalesce.awk"
 @include "dsl/sig.awk"
+@include "dsl/typecheck.awk"
 @include "dsl/type.awk"
 
 BEGIN { _ds_init() }
@@ -28,6 +29,7 @@ END {
 }
 
 function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p) {
+  _DS_current_lineno = lineno
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
       print "dsl error: " _DS_src_file ":" lineno \

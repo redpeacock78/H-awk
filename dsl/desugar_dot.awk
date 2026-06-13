@@ -62,6 +62,8 @@ function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
   for (j = 2; j <= np; j++)
     path = path (j > 2 ? "." : "") parts[j]
 
+  _ds_typecheck_call(ns "." path, args)
+
   # Now recursively transform after_close (it's the tail of the line)
   # We need to re-segment after_close and transform it
   # But after_close may start mid-way through a segment — just transform it as a new line
