@@ -5,6 +5,8 @@
 function _ds_infer_type(expr,    m) {
     # ?? 演算子を含む式は複合型のため推論不可
     if (expr ~ /\?\?/) return ""
+    # 数字のみの文字列リテラル: "8080" 形式 → NumericStr
+    if (expr ~ /^"[0-9]+"$/) return "NumericStr"
     # 文字列リテラル: "..." 形式
     if (expr ~ /^".*"$/) return "Str"
     # 整数リテラル: オプショナルな負号 + 数字のみ
