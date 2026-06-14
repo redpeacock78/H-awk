@@ -11,11 +11,13 @@
 @include "dsl/type.awk"
 @include "dsl/desugar_pipe.awk"
 @include "dsl/desugar_match.awk"
+@include "dsl/type_dataflow.awk"
 
 BEGIN {
   _ds_init()
   # Pass 1: collect user function signatures for forward-reference support
   if (ARGC > 1) {
+    _pass1_fname = ""
     while ((getline _pass1_line < ARGV[1]) > 0) {
       if (_ds_is_func_def(_pass1_line)) {
         _pass1_fname = _ds_extract_func_name(_pass1_line)
@@ -23,6 +25,9 @@ BEGIN {
         _DS_SIG_RET[_pass1_fname] = (_pass1_ret != "" ? _pass1_ret : "Any")
         if (match(_pass1_line, /\(([^)]*)\)[[:space:]]*(->.*)?[[:space:]]*\{/, _pass1_m))
           _ds_parse_func_params(_pass1_fname, _pass1_m[1])
+      } else if (_pass1_fname != "" && \
+          match(_pass1_line, /^[[:space:]]*classify:[[:space:]]*(transform|validator|sanitizer|sink)[[:space:]]*$/, _pass1_m)) {
+        _DS_FUNC_CLASS[_pass1_fname] = _pass1_m[1]
       }
     }
     close(ARGV[1])
@@ -77,6 +82,11 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
 
   # Inside function body
   _DS_brace_depth += _ds_net_braces(line)
+
+  # Strip classify annotation lines — already stored in Pass 1
+  if (line ~ /^[[:space:]]*classify:[[:space:]]*(transform|validator|sanitizer|sink)[[:space:]]*$/) {
+    return
+  }
 
   # Dispatch to match state machine if inside a match block or starting one
   if (_DS_in_match) {

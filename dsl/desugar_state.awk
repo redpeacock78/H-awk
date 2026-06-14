@@ -31,4 +31,5 @@ function _ds_init() {
   delete _DS_VAR_KIND
   delete _DS_match_ok_body
   delete _DS_match_ng_body
+  delete _DS_FUNC_CLASS
 }
