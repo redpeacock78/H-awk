@@ -10,6 +10,7 @@
 @include "dsl/typecheck.awk"
 @include "dsl/type.awk"
 @include "dsl/desugar_pipe.awk"
+@include "dsl/desugar_match.awk"
 
 BEGIN {
   _ds_init()
@@ -44,7 +45,7 @@ END {
   }
 }
 
-function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result) {
+function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m) {
   _DS_current_lineno = lineno
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
@@ -76,6 +77,18 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
 
   # Inside function body
   _DS_brace_depth += _ds_net_braces(line)
+
+  # Dispatch to match state machine if inside a match block or starting one
+  if (_DS_in_match) {
+    _ds_match_collect(line, lineno)
+    return
+  }
+  if (_ds_match_starts(line, match_m)) {
+    _DS_match_expr   = match_m[2]
+    _DS_match_indent = match_m[1]
+    _DS_in_match = 1
+    return
+  }
 
   if (_DS_brace_depth <= 0) {
     _DS_in_function = 0
