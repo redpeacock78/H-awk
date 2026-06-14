@@ -1,0 +1,2 @@
+safe/brand type cannot be created by annotation
+HtmlEscapedStr must be constructed by trusted sanitizer

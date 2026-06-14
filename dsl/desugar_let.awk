@@ -41,6 +41,14 @@ function _ds_infer_type(expr,    m) {
 # _ds_check_type: declared と inferred が不一致ならエラーを記録する
 function _ds_check_type(declared, inferred, lineno) {
     if (inferred == "" || inferred == declared) return
+    # Brand forgery prevention: brand types cannot be created by annotation
+    if (_ds_is_brand(declared) && inferred != declared) {
+        print "dsl error: " _DS_src_file ":" lineno \
+            ": safe/brand type cannot be created by annotation" > "/dev/stderr"
+        print "  " declared " must be constructed by trusted sanitizer" > "/dev/stderr"
+        _DS_had_error = 1
+        return
+    }
     if (type::accepts(declared, inferred)) return
     print "dsl error: " _DS_src_file ":" lineno \
         ": type mismatch: cannot assign " inferred " to " declared > "/dev/stderr"
