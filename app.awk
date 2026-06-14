@@ -90,5 +90,5 @@ function _todo_tr(id: Str, title: Str) -> Str {
         ">&#x2715;</button>" \
       "</td>" \
     "</tr>", \
-    title, id)
+    escape_html(title), escape_html(id))
 }
