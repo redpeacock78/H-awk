@@ -1,1 +1,1 @@
-type mismatch: cannot assign Str to Int
+type mismatch: cannot assign Result<Untrusted<Str>, ParseError> to Int
