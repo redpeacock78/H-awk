@@ -72,10 +72,10 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
         close_pos = _ds_pipe_find_close(rhs, open_pos)
         fargs     = _ds_trim(substr(rhs, open_pos + 1, close_pos - open_pos - 1))
 
-        # Untrusted-propagation check: classify:transform and classify:validator accept Untrusted input
+        # Untrusted-propagation check: classify:transform, classify:validator, classify:sanitizer accept Untrusted input
         if (_ds_is_untrusted(left_type)) {
             cls = _DS_FUNC_CLASS[fname]
-            if (cls != "transform" && cls != "validator") {
+            if (cls != "transform" && cls != "validator" && cls != "sanitizer") {
                 print "dsl error: " _DS_src_file ":" _DS_current_lineno \
                     ": " fname " does not accept Untrusted input — classify as transform or unwrap first" > "/dev/stderr"
                 _DS_had_error = 1
@@ -94,9 +94,9 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
         else
             pre_buf[++pb] = indent tmpvar " = " fname "(" left_op ", " fargs ")"
 
-        # Track propagated type for this temp var
+        # Track propagated type for this temp var (using dataflow to preserve Untrusted<T>)
         if (_DS_in_function) {
-            _DS_VAR_TYPES[_DS_func_name, tmpvar] = _DS_SIG_RET[fname]
+            _DS_VAR_TYPES[_DS_func_name, tmpvar] = _ds_dataflow_ret(fname, left_type)
         }
 
         line = substr(line, 1, left_start - 1) tmpvar substr(line, rhs_abs_end + 1)

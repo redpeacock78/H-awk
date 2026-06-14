@@ -1,9 +1,8 @@
-function escape_html(s: Str) -> Str {
-  classify: sanitizer
+function process(s: Str) -> Str {
   return s
 }
 
 function handler() {
   let raw ?= ctx.req.form("title")
-  let safe = raw |> escape_html()
+  let result = raw |> process()
 }
