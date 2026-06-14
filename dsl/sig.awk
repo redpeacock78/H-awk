@@ -54,15 +54,15 @@ BEGIN {
     # ctx.res.*
     _DS_SIG_RET["ctx.res.json"]      = "Response"
     _DS_SIG_ARITY["ctx.res.json"]    = 1
-    _DS_SIG_ARG["ctx.res.json", 1]   = "Str"
+    _DS_SIG_ARG["ctx.res.json", 1]   = "Safe<JsonStr>"
 
     _DS_SIG_RET["ctx.res.text"]      = "Response"
     _DS_SIG_ARITY["ctx.res.text"]    = 1
-    _DS_SIG_ARG["ctx.res.text", 1]   = "Str"
+    _DS_SIG_ARG["ctx.res.text", 1]   = "Safe<Str>"
 
     _DS_SIG_RET["ctx.res.html"]      = "Response"
     _DS_SIG_ARITY["ctx.res.html"]    = 1
-    _DS_SIG_ARG["ctx.res.html", 1]   = "Str"
+    _DS_SIG_ARG["ctx.res.html", 1]   = "Safe<HtmlStr>"
 
     _DS_SIG_RET["ctx.res.render"]    = "Response"
     _DS_SIG_ARITY["ctx.res.render"]  = 1

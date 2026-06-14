@@ -72,10 +72,10 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
         close_pos = _ds_pipe_find_close(rhs, open_pos)
         fargs     = _ds_trim(substr(rhs, open_pos + 1, close_pos - open_pos - 1))
 
-        # Untrusted-propagation check: only classify:transform accepts Untrusted input
+        # Untrusted-propagation check: classify:transform and classify:validator accept Untrusted input
         if (_ds_is_untrusted(left_type)) {
             cls = _DS_FUNC_CLASS[fname]
-            if (cls != "transform") {
+            if (cls != "transform" && cls != "validator") {
                 print "dsl error: " _DS_src_file ":" _DS_current_lineno \
                     ": " fname " does not accept Untrusted input — classify as transform or unwrap first" > "/dev/stderr"
                 _DS_had_error = 1
