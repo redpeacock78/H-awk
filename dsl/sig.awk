@@ -10,6 +10,15 @@ BEGIN {
     _DS_TYPE_ALIAS["Port"]        = "Int|NumericStr|Str"
     _DS_TYPE_ALIAS["HandlerName"] = "Str"
 
+    # Safe<T> backward-compat aliases → brand types
+    _DS_TYPE_ALIAS["Safe<HtmlStr>"] = "HtmlEscapedStr"
+    _DS_TYPE_ALIAS["Safe<Str>"]     = "Str"
+
+    # Brand type kind table
+    _DS_TYPE_KIND["HtmlEscapedStr"]      = "brand"
+    _DS_TYPE_KIND["HtmlFragment"]        = "brand"
+    _DS_TYPE_KIND["HtmlAttrEscapedStr"]  = "brand"
+
     # env.*
     _DS_SIG_RET["env.get"]        = "Str"
     _DS_SIG_ARITY["env.get"]      = 1
@@ -58,11 +67,24 @@ BEGIN {
 
     _DS_SIG_RET["ctx.res.text"]      = "Response"
     _DS_SIG_ARITY["ctx.res.text"]    = 1
-    _DS_SIG_ARG["ctx.res.text", 1]   = "Safe<Str>"
+    _DS_SIG_ARG["ctx.res.text", 1]   = "Str|Untrusted<Str>"
 
     _DS_SIG_RET["ctx.res.html"]      = "Response"
     _DS_SIG_ARITY["ctx.res.html"]    = 1
-    _DS_SIG_ARG["ctx.res.html", 1]   = "Safe<HtmlStr>"
+    _DS_SIG_ARG["ctx.res.html", 1]   = "HtmlEscapedStr|HtmlFragment"
+
+    # escape_html: built-in trusted sanitizer
+    _DS_SIG_RET["escape_html"]       = "HtmlEscapedStr"
+    _DS_SIG_ARITY["escape_html"]     = 1
+    _DS_SIG_ARG["escape_html", 1]    = "Str|Untrusted<Str>"
+    _DS_FUNC_CLASS["escape_html"]    = "sanitizer"
+    _DS_SIG_TRUSTED["escape_html"]   = 1
+
+    # html_raw: assert-trust escape hatch for pre-built HTML strings
+    _DS_SIG_RET["html_raw"]          = "HtmlEscapedStr"
+    _DS_SIG_ARITY["html_raw"]        = 1
+    _DS_SIG_ARG["html_raw", 1]       = "Str"
+    _DS_SIG_TRUSTED["html_raw"]      = 1
 
     _DS_SIG_RET["ctx.res.render"]    = "Response"
     _DS_SIG_ARITY["ctx.res.render"]  = 1

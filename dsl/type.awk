@@ -71,9 +71,9 @@ function is_union(t,    out, n) {
 # type::normalize -- sort members, deduplicate, join with | (no spaces)
 function normalize(t,    out, n, i, j, sorted, seen, result, tmp) {
     n = split_union(t, out)
-    if (n == 1) return out[1]
+    if (n == 1) return expand_alias(out[1])
     # deduplicate
-    for (i = 1; i <= n; i++) seen[out[i]] = 1
+    for (i = 1; i <= n; i++) seen[expand_alias(out[i])] = 1
     n = 0
     for (i in seen) sorted[++n] = i
     # bubble sort (small n)
