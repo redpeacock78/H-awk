@@ -13,10 +13,15 @@ function _ds_infer_type(expr,    m) {
     if (expr ~ /^-?[0-9]*\.[0-9]+([eE][+-]?[0-9]+)?$/) return "Float"
     # Bool リテラル
     if (expr == "true" || expr == "false") return "Bool"
-    # 既知の DSL 関数呼び出し: ns.method(...) 形式 (desugar 前)
-    if (match(expr, /^([a-z][a-zA-Z0-9_]*)\.([a-z][a-zA-Z0-9_]*)\(/, m)) {
-        key = m[1] "." m[2]
-        if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
+    # 既知の DSL 関数呼び出し: ns.method(...) または ctx.ns.method(...) 形式 (desugar 前)
+    if (match(expr, /^((ctx\.)?[a-z][a-zA-Z0-9_]*(\.[a-z][a-zA-Z0-9_]*)*)\(/, m)) {
+        # Try the full name first: ctx.req.form, then ctx.res.json, etc.
+        if (m[1] in _DS_SIG_RET) return _DS_SIG_RET[m[1]]
+        # Fall back to last two components (ns.method)
+        if (match(m[1], /([a-z][a-zA-Z0-9_]*)\.([a-z][a-zA-Z0-9_]*)$/, m2)) {
+            key = m2[1] "." m2[2]
+            if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
+        }
     }
     # 既知の DSL 関数呼び出し: ns::dispatch("path", ...) 形式 (desugar 後)
     if (match(expr, /^([a-z][a-zA-Z0-9_]*)::dispatch\("([^"]+)"/, m)) {
