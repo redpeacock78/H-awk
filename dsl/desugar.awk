@@ -100,13 +100,42 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
     return
   }
 
+  # Multi-line adjacent string literal folding
+  if (_DS_str_fold_active) {
+    # Blank lines are transparent inside a fold — skip and continue accumulating.
+    if (line ~ /^[[:space:]]*$/) return
+    # Comment-only lines cleanly terminate the fold; the comment is then discarded.
+    if (line ~ /^[[:space:]]*#/) {
+      _ds_flush_string_fold(lineno)
+      return
+    }
+    if (_ds_is_pure_string_line(line)) {
+      _DS_str_fold_content = _DS_str_fold_content _ds_pure_string_line_content(line)
+      return
+    } else {
+      _ds_flush_string_fold(lineno)
+      # Fall through to process current line normally
+    }
+  }
+  if (_ds_is_let_equals_no_rhs(line)) {
+    _DS_str_fold_active  = 1
+    _DS_str_fold_prefix  = line
+    _DS_str_fold_content = ""
+    _DS_str_fold_lineno  = lineno
+    return
+  }
+
   if (_DS_brace_depth <= 0) {
+    if (_DS_str_fold_active) _ds_flush_string_fold(lineno)
     _DS_in_function = 0
     print _ds_rewrite_sig(_DS_func_sig)
     for (i = 1; i <= _DS_body_count; i++) print _DS_body_buf[i]
     print _ds_dot_transform(line)
     return
   }
+
+  # Same-line adjacent string literal folding
+  line = _ds_fold_adjacent_strings_inline(line)
 
   pipe_result = _ds_pipe_transform(line, pipe_pre)
   for (p = 1; p in pipe_pre; p++)
@@ -119,6 +148,35 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
   _ds_typecheck_plain_call(nc_result)
   _ds_check_return(dot_transformed, lineno)
   transformed = _ds_let_transform(nc_result, lineno, line)
+  if (transformed != "") _DS_body_buf[++_DS_body_count] = transformed
+}
+
+# Flush accumulated multi-line string fold as a single synthetic let line.
+# NOTE: deliberately avoids recursive _ds_process_line to prevent brace-depth
+# race conditions when the triggering line is a closing brace.
+function _ds_flush_string_fold(lineno,    prefix_line, synthetic_line, fold_lineno, pipe_pre, nc_pre, pipe_result, dot_transformed, nc_result, transformed, p) {
+  prefix_line  = _DS_str_fold_prefix
+  fold_lineno  = _DS_str_fold_lineno
+  sub(/=[[:space:]]*$/, "", prefix_line)
+  synthetic_line = prefix_line "= \"" _DS_str_fold_content "\""
+  _DS_str_fold_active  = 0
+  _DS_str_fold_prefix  = ""
+  _DS_str_fold_content = ""
+  _DS_str_fold_lineno  = 0
+  # Process the synthetic line directly (no recursion) — same path as normal body lines.
+  # This avoids the brace-depth race condition that occurs when the trigger line
+  # is a closing brace: brace_depth is already decremented before we get here.
+  synthetic_line = _ds_fold_adjacent_strings_inline(synthetic_line)
+  pipe_result = _ds_pipe_transform(synthetic_line, pipe_pre)
+  for (p = 1; p in pipe_pre; p++)
+    _DS_body_buf[++_DS_body_count] = pipe_pre[p]
+  dot_transformed = _ds_dot_transform(pipe_result)
+  nc_result = _ds_nc_transform(dot_transformed, nc_pre)
+  for (p = 1; p in nc_pre; p++)
+    _DS_body_buf[++_DS_body_count] = nc_pre[p]
+  _ds_typecheck_plain_call(nc_result)
+  _ds_check_return(dot_transformed, fold_lineno)
+  transformed = _ds_let_transform(nc_result, fold_lineno, synthetic_line)
   if (transformed != "") _DS_body_buf[++_DS_body_count] = transformed
 }
 
