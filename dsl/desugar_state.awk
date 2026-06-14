@@ -34,4 +34,9 @@ function _ds_init() {
   delete _DS_FUNC_CLASS
   # Re-register built-in function classes (cleared above)
   _DS_FUNC_CLASS["escape_html"] = "sanitizer"
+  # String folding state
+  _DS_str_fold_active  = 0   # 1 when accumulating multi-line string fold
+  _DS_str_fold_prefix  = ""  # the "let varname = ..." prefix line
+  _DS_str_fold_content = ""  # accumulated string content (without outer quotes)
+  _DS_str_fold_lineno  = 0   # source line number of the fold-start line
 }
