@@ -29,7 +29,7 @@ function todo_list_html() -> Response {
   for (i = 1; i <= n; i++) {
     out = out _todo_tr(rows[i, "id"], rows[i, "title"])
   }
-  return ctx.res.html(out)
+  return ctx.res.html(html_raw(out))
 }
 
 function todo_add() -> Response {
@@ -48,7 +48,7 @@ function todo_add() -> Response {
   row["title"] = title
   append_tsv("data/todos.tsv", row)
   ctx.res.status(201)
-  return ctx.res.html(_todo_tr(row["id"], row["title"]))
+  return ctx.res.html(html_raw(_todo_tr(row["id"], row["title"])))
 }
 
 function todo_delete() -> Response {
@@ -59,7 +59,7 @@ function todo_delete() -> Response {
     return ctx.res.text("not found")
   }
   ctx.res.status(200)
-  return ctx.res.html("")
+  return ctx.res.html(html_raw(""))
 }
 
 function todo_list_json() -> Response {
