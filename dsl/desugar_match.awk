@@ -50,16 +50,23 @@ function _ds_match_collect(line, lineno,    m) {
 function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i) {
     if (!_DS_match_has_ng) {
         print "dsl error: " _DS_src_file ":" lineno \
-            ": match on Result missing ng or default branch" > "/dev/stderr"
+            ": match block missing ng/none/default branch" > "/dev/stderr"
         _DS_had_error = 1
+        _DS_match_ok_count = 0; _DS_match_ng_count = 0
+        _DS_match_ok_var = ""; _DS_match_ng_var = ""
+        _DS_match_has_ng = 0; _DS_match_branch = ""
+        _DS_match_expr = ""; _DS_match_indent = ""
+        delete _DS_match_ok_body; delete _DS_match_ng_body
         return
     }
 
     _DS_mc_count++
     tmpvar = "_ds_mc_" _DS_mc_count
-    _DS_let_locals[++_DS_let_count] = tmpvar
-    if (_DS_match_ok_var != "") _DS_let_locals[++_DS_let_count] = _DS_match_ok_var
-    if (_DS_match_ng_var != "") _DS_let_locals[++_DS_let_count] = _DS_match_ng_var
+    if (_DS_in_function) {
+        _DS_let_locals[++_DS_let_count] = tmpvar
+        if (_DS_match_ok_var != "") _DS_let_locals[++_DS_let_count] = _DS_match_ok_var
+        if (_DS_match_ng_var != "") _DS_let_locals[++_DS_let_count] = _DS_match_ng_var
+    }
 
     type_t = _ds_infer_type(_DS_match_expr)
     if (type_t ~ /^Option</) {
@@ -80,10 +87,17 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i) 
     for (i = 1; i <= _DS_match_ng_count; i++)
         _ds_match_process_body(_DS_match_ng_body[i], lineno)
     _DS_body_buf[++_DS_body_count] = _DS_match_indent "}"
+
+    _DS_match_ok_count = 0; _DS_match_ng_count = 0
+    _DS_match_ok_var = ""; _DS_match_ng_var = ""
+    _DS_match_has_ng = 0; _DS_match_branch = ""
+    _DS_match_expr = ""; _DS_match_indent = ""
+    delete _DS_match_ok_body; delete _DS_match_ng_body
 }
 
 # Process a collected body line through the full pipeline, push to _DS_body_buf.
 function _ds_match_process_body(line, lineno,    pipe_pre, nc_pre, p, pipe_r, dot_r, nc_r, xf) {
+    _DS_current_lineno = lineno
     pipe_r = _ds_pipe_transform(line, pipe_pre)
     for (p = 1; p in pipe_pre; p++) _DS_body_buf[++_DS_body_count] = pipe_pre[p]
     dot_r = _ds_dot_transform(pipe_r)
