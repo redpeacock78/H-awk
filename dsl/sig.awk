@@ -29,26 +29,26 @@ BEGIN {
     _DS_SIG_ARG["env.has", 1]     = "Str"
 
     # ctx.req.*
-    _DS_SIG_RET["ctx.req.form"]      = "Str"
+    _DS_SIG_RET["ctx.req.form"]      = "Result<Untrusted<Str>, ParseError>"
     _DS_SIG_ARITY["ctx.req.form"]    = 1
     _DS_SIG_ARG["ctx.req.form", 1]   = "Str"
 
-    _DS_SIG_RET["ctx.req.query"]     = "Str"
+    _DS_SIG_RET["ctx.req.query"]     = "Result<Untrusted<Str>, ParseError>"
     _DS_SIG_ARITY["ctx.req.query"]   = 1
     _DS_SIG_ARG["ctx.req.query", 1]  = "Str"
 
-    _DS_SIG_RET["ctx.req.param"]     = "Str"
+    _DS_SIG_RET["ctx.req.param"]     = "Result<Untrusted<Str>, ParseError>"
     _DS_SIG_ARITY["ctx.req.param"]   = 1
     _DS_SIG_ARG["ctx.req.param", 1]  = "Str"
 
-    _DS_SIG_RET["ctx.req.header"]    = "Str"
+    _DS_SIG_RET["ctx.req.header"]    = "Result<Untrusted<Str>, ParseError>"
     _DS_SIG_ARITY["ctx.req.header"]  = 1
     _DS_SIG_ARG["ctx.req.header", 1] = "Str"
 
-    _DS_SIG_RET["ctx.req.body"]      = "Str"
+    _DS_SIG_RET["ctx.req.body"]      = "Result<Untrusted<Str>, ParseError>"
     _DS_SIG_ARITY["ctx.req.body"]    = 0
 
-    _DS_SIG_RET["ctx.req.json"]      = "Result<Map, Error>"
+    _DS_SIG_RET["ctx.req.json"]      = "Result<Untrusted<Map>, ParseError>"
     _DS_SIG_ARITY["ctx.req.json"]    = 0
 
     # ctx.res.*
