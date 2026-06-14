@@ -71,7 +71,7 @@ function add_todo() {
 function delete_todo() {
   delete_tsv("data/todos.tsv", "id", ctx.req.param("id"))
   ctx.res.status(200)
-  return ctx.res.html("")
+  return ctx.res.html(html_raw(""))
 }
 ```
 
@@ -174,7 +174,9 @@ let port: Int | Str = true
 
 The `??` operator infers a union type from its two operands (`Str | Int` from `env.get("PORT") ?? 8080`). The built-in `Port` type alias expands to `Int|NumericStr|Str`, so `hawk.app.listen(env.get("PORT") ?? 8080)` passes type checking.
 
-Supported types: `Int`, `Float`, `Str`, `Bool`, `NumericStr`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Untrusted<T>`, `Safe<T>`, `Void`, `Any`, and any union `A | B`. Type inference works for literals and known DSL functions — `ctx.req.form` → `Result<Untrusted<Str>, ParseError>`, `ctx.req.json` → `Result<Untrusted<Map>, ParseError>`, `ctx.res.text` → `Response`, etc.
+Supported types: `Int`, `Float`, `Str`, `Bool`, `NumericStr`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Untrusted<T>`, `HtmlEscapedStr`, `Void`, `Any`, and any union `A | B`. Type inference works for literals and known DSL functions — `ctx.req.form` → `Result<Untrusted<Str>, ParseError>`, `ctx.req.json` → `Result<Untrusted<Map>, ParseError>`, `ctx.res.text` → `Response`, `escape_html` → `HtmlEscapedStr`, `html_raw` → `HtmlEscapedStr`, etc.
+
+`ctx.res.html` requires `HtmlEscapedStr|HtmlFragment` — pass the result of `escape_html(s)` for user-supplied strings, or `html_raw(s)` for pre-built trusted HTML. This prevents XSS by making HTML output a tracked brand type that cannot be forged by plain string assignment.
 
 **Function type annotations**
 
@@ -310,7 +312,7 @@ function strip(s: Str) -> Str {
 Marks a function's role in the dataflow:
 - `transform` — accepts `Untrusted<T>` input; strips Untrusted wrapper from output
 - `validator` — accepts `Untrusted<T>` input; output is plain `T` (checked, not sanitized)
-- `sanitizer` — accepts plain `T`; produces `Safe<T>` output
+- `sanitizer` — accepts `Untrusted<T>` input; produces a brand-safe output (e.g. `HtmlEscapedStr`)
 - `sink` — terminal consumer (no output)
 
 `classify:` lines are stripped from gawk output — annotation only.
