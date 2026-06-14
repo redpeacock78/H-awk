@@ -174,7 +174,7 @@ let port: Int | Str = true
 
 The `??` operator infers a union type from its two operands (`Str | Int` from `env.get("PORT") ?? 8080`). The built-in `Port` type alias expands to `Int|NumericStr|Str`, so `hawk.app.listen(env.get("PORT") ?? 8080)` passes type checking.
 
-Supported types: `Int`, `Float`, `Str`, `Bool`, `NumericStr`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Void`, `Any`, and any union `A | B`. Type inference works for literals and known DSL functions (`ctx.req.form` → `Str`, `ctx.req.json` → `Result<Map, Error>`, `ctx.res.text` → `Response`, etc.).
+Supported types: `Int`, `Float`, `Str`, `Bool`, `NumericStr`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Untrusted<T>`, `Safe<T>`, `Void`, `Any`, and any union `A | B`. Type inference works for literals and known DSL functions — `ctx.req.form` → `Result<Untrusted<Str>, ParseError>`, `ctx.req.json` → `Result<Untrusted<Map>, ParseError>`, `ctx.res.text` → `Response`, etc.
 
 **Function type annotations**
 
@@ -245,6 +245,76 @@ hawk::dispatch("app.listen", (_ds_tc_1 != "" ? _ds_tc_1 : 8080))
 
 Rule: `expr ?? default` — if `expr` evaluates to empty string, use `default`. Works inside function arguments.
 
+**`|>` pipe operator**
+
+```awk
+# DSL
+function handler() {
+  let raw  ?= ctx.req.form("title")
+  let safe  = raw |> strip()
+}
+
+# Desugared — temp var injected, inserted as first arg
+function handler(    _ds_tc_1, raw, _ds_p_1, safe) {
+  _ds_tc_1 = ctx::dispatch("req.form", "title")
+  if (!result_ok(_ds_tc_1)) {
+    return ctx::dispatch("res.status", 500)
+  }
+  raw = result_val(_ds_tc_1)
+  _ds_p_1 = strip(raw)
+  safe = _ds_p_1
+}
+```
+
+Rule: `expr |> f(args)` → temp var for `expr`, then `f(tempvar, args)`. Chains left-to-right. LHS must be a plain identifier (use `let tmp = expr` first for complex expressions).
+
+Sealed-pipe rule: `Result<T, E>` and `Option<T>` values cannot be piped directly — use `?=` or `match...of` to unwrap first.
+
+**`match...of...end` expression**
+
+```awk
+# DSL
+function handler() {
+  match ctx.req.json() of
+    ok body:
+      return ctx.res.text(body["title"])
+    ng err:
+      return ctx.res.status(500)
+  end
+}
+
+# Desugared
+function handler(    _ds_mc_1, body, err) {
+  _ds_mc_1 = ctx::dispatch("req.json")
+  if (result_ok(_ds_mc_1)) {
+    body = result_val(_ds_mc_1)
+    return ctx::dispatch("res.text", body["title"])
+  } else {
+    err = result_err(_ds_mc_1)
+    return ctx::dispatch("res.status", 500)
+  }
+}
+```
+
+Branch keywords: `ok VAR:` / `ng VAR:` for `Result<T,E>`, `some VAR:` / `none:` for `Option<T>`, `default:` as catch-all. Missing `ng`/`none`/`default` is a desugar-time error.
+
+**`classify:` annotation**
+
+```awk
+function strip(s: Str) -> Str {
+  classify: transform
+  return s
+}
+```
+
+Marks a function's role in the dataflow:
+- `transform` — accepts `Untrusted<T>` input; strips Untrusted wrapper from output
+- `validator` — accepts `Untrusted<T>` input; output is plain `T` (checked, not sanitized)
+- `sanitizer` — accepts plain `T`; produces `Safe<T>` output
+- `sink` — terminal consumer (no output)
+
+`classify:` lines are stripped from gawk output — annotation only.
+
 **`?=` safe unwrap operator**
 
 Unwrap an `Option<T>` or `Result<T, E>` value. If the call fails, automatically returns a 500 response. Only valid for functions whose return type is `Option` or `Result`.
@@ -268,7 +338,7 @@ function create_todo(    _ds_tc_1, body) {
 Desugar-time error if the RHS type is not Option or Result:
 
 ```sh
-let title ?= ctx.req.form("title")
+let port ?= env.get("PORT")
 # dsl error: app.awk:5: ?= requires Option or Result, got Str
 ```
 

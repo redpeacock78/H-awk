@@ -33,9 +33,13 @@ function todo_list_html() -> Response {
 }
 
 function todo_add() -> Response {
-  let title: Str = ctx.req.form("title")
+  let raw_title ?= ctx.req.form("title")
+  let title: Str = result_val(raw_title)
   let row = []
-  if (title == "") title = ctx.req.query("title")
+  if (title == "") {
+    let raw_q ?= ctx.req.query("title")
+    title = result_val(raw_q)
+  }
   if (title == "") {
     ctx.res.status(400)
     return ctx.res.text("title required")
@@ -48,7 +52,8 @@ function todo_add() -> Response {
 }
 
 function todo_delete() -> Response {
-  let deleted: Int = delete_tsv("data/todos.tsv", "id", ctx.req.param("id"))
+  let raw_id ?= ctx.req.param("id")
+  let deleted: Int = delete_tsv("data/todos.tsv", "id", result_val(raw_id))
   if (deleted == 0) {
     ctx.res.status(404)
     return ctx.res.text("not found")
