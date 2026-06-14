@@ -11,5 +11,5 @@ function non_empty(s: Str) -> Str {
 function handler() {
   let raw ?= ctx.req.form("title")
   let t   = raw |> trim()
-  let v  ?= t   |> non_empty()
+  let v   = t   |> non_empty()
 }

@@ -32,6 +32,9 @@ function _ds_infer_type(expr,    m) {
     if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\(/, m)) {
         if (m[1] in _DS_SIG_RET) return _DS_SIG_RET[m[1]]
     }
+    # 変数参照: _DS_VAR_TYPES から型を取得
+    if (_DS_in_function && (_DS_func_name SUBSEP expr) in _DS_VAR_TYPES)
+        return _DS_VAR_TYPES[_DS_func_name, expr]
     return ""
 }
 
