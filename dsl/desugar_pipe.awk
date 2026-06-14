@@ -32,7 +32,7 @@ function _ds_pipe_left_start(masked, pipe_pos,    i) {
 
 function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
     left_start, left_op, rhs, fname, open_pos, close_pos, fargs, tmpvar, pb,
-    rhs_abs_end, indent) {
+    rhs_abs_end, indent, left_type, cls) {
     delete pre_buf
     pb = 0
 
@@ -48,6 +48,21 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
         left_start = _ds_pipe_left_start(masked, pipe_pos)
         left_op    = _ds_trim(substr(line, left_start, pipe_pos - left_start))
 
+        # Sealed-pipe check: Result/Option cannot be piped directly
+        left_type = _ds_infer_type(left_op)
+        # If the type cannot be inferred from the expression, try looking it up as a variable
+        if (left_type == "" && _DS_in_function) {
+            if ((_DS_func_name, left_op) in _DS_VAR_TYPES) {
+                left_type = _DS_VAR_TYPES[_DS_func_name, left_op]
+            }
+        }
+        if (_ds_is_nullable(left_type)) {
+            print "dsl error: " _DS_src_file ":" _DS_current_lineno \
+                ": pipe input is " left_type " — use ?= or match to unwrap first" > "/dev/stderr"
+            _DS_had_error = 1
+            return line
+        }
+
         rhs = substr(line, pipe_pos + 2)
         if (!match(rhs, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\(/, m))
             return line
@@ -56,6 +71,17 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
         open_pos  = index(rhs, "(")
         close_pos = _ds_pipe_find_close(rhs, open_pos)
         fargs     = _ds_trim(substr(rhs, open_pos + 1, close_pos - open_pos - 1))
+
+        # Untrusted-propagation check: only classify:transform accepts Untrusted input
+        if (_ds_is_untrusted(left_type)) {
+            cls = _DS_FUNC_CLASS[fname]
+            if (cls != "transform") {
+                print "dsl error: " _DS_src_file ":" _DS_current_lineno \
+                    ": " fname " does not accept Untrusted input — classify as transform or unwrap first" > "/dev/stderr"
+                _DS_had_error = 1
+                return line
+            }
+        }
 
         rhs_abs_end = (pipe_pos + 2 - 1) + close_pos
 
@@ -67,6 +93,11 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
             pre_buf[++pb] = indent tmpvar " = " fname "(" left_op ")"
         else
             pre_buf[++pb] = indent tmpvar " = " fname "(" left_op ", " fargs ")"
+
+        # Track propagated type for this temp var
+        if (_DS_in_function) {
+            _DS_VAR_TYPES[_DS_func_name, tmpvar] = _DS_SIG_RET[fname]
+        }
 
         line = substr(line, 1, left_start - 1) tmpvar substr(line, rhs_abs_end + 1)
 
