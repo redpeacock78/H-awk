@@ -9,6 +9,7 @@
 @include "dsl/sig.awk"
 @include "dsl/typecheck.awk"
 @include "dsl/type.awk"
+@include "dsl/desugar_pipe.awk"
 
 BEGIN {
   _ds_init()
@@ -43,7 +44,7 @@ END {
   }
 }
 
-function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed) {
+function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result) {
   _DS_current_lineno = lineno
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
@@ -65,7 +66,9 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
       delete _DS_let_type_map
       return
     }
-    nc_result = _ds_nc_transform(_ds_dot_transform(line), nc_pre)
+    pipe_result = _ds_pipe_transform(line, pipe_pre)
+    for (p = 1; p in pipe_pre; p++) print pipe_pre[p]
+    nc_result = _ds_nc_transform(_ds_dot_transform(pipe_result), nc_pre)
     for (p = 1; p in nc_pre; p++) print nc_pre[p]
     print nc_result
     return
@@ -82,7 +85,11 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
     return
   }
 
-  dot_transformed = _ds_dot_transform(line)
+  pipe_result = _ds_pipe_transform(line, pipe_pre)
+  for (p = 1; p in pipe_pre; p++)
+    _DS_body_buf[++_DS_body_count] = pipe_pre[p]
+
+  dot_transformed = _ds_dot_transform(pipe_result)
   nc_result = _ds_nc_transform(dot_transformed, nc_pre)
   for (p = 1; p in nc_pre; p++)
     _DS_body_buf[++_DS_body_count] = nc_pre[p]
