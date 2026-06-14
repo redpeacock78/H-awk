@@ -1,5 +1,3 @@
-# integration: requires desugar_match.awk @include (added in Task 4)
-# note: find_item not in sig table; _ds_infer_type returns "" -> falls through to Result path
 function handler(    _ds_mc_1, val) {
   _ds_mc_1 = find_item(id)
   if (result_ok(_ds_mc_1)) {

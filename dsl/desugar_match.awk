@@ -50,7 +50,7 @@ function _ds_match_collect(line, lineno,    m) {
 function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i) {
     if (!_DS_match_has_ng) {
         print "dsl error: " _DS_src_file ":" lineno \
-            ": match block missing ng/none/default branch" > "/dev/stderr"
+            ": match on Result missing ng or default branch" > "/dev/stderr"
         _DS_had_error = 1
         _DS_match_ok_count = 0; _DS_match_ng_count = 0
         _DS_match_ok_var = ""; _DS_match_ng_var = ""
@@ -96,8 +96,11 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i) 
 }
 
 # Process a collected body line through the full pipeline, push to _DS_body_buf.
+# Normalizes indentation: strips original leading whitespace and prepends _DS_match_indent "  ".
 function _ds_match_process_body(line, lineno,    pipe_pre, nc_pre, p, pipe_r, dot_r, nc_r, xf) {
     _DS_current_lineno = lineno
+    # Normalize indentation: strip original leading whitespace, apply canonical indent
+    sub(/^[[:space:]]*/, _DS_match_indent "  ", line)
     pipe_r = _ds_pipe_transform(line, pipe_pre)
     for (p = 1; p in pipe_pre; p++) _DS_body_buf[++_DS_body_count] = pipe_pre[p]
     dot_r = _ds_dot_transform(pipe_r)
