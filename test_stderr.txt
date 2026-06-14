@@ -1,0 +1,5 @@
+[WARN]  test warn message
+[ERROR] request: multipart/form-data received but libs/multipart not loaded
+gawk: core/request.awk:71: fatal error: internal error
+/bin/sh: line 1: 74509 Abort trap: 6           HAWK_NO_SERVE=1 gawk -b $libs_args $libs_vars -f hawk.awk -f tests/unit/run.awk
+make: *** [test-unit] Error 134

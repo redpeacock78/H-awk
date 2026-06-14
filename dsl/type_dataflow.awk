@@ -24,3 +24,10 @@ function _ds_dataflow_ret(fname, input_type,    cls, ret) {
         return "Untrusted<" ret ">"
     return ret
 }
+
+function _ds_type_kind(t,    expanded) {
+    expanded = (t in awk::_DS_TYPE_ALIAS) ? awk::_DS_TYPE_ALIAS[t] : t
+    return awk::_DS_TYPE_KIND[expanded]
+}
+
+function _ds_is_brand(t) { return _ds_type_kind(t) == "brand" }

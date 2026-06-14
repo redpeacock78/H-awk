@@ -1,1 +1,1 @@
-ctx.res.html argument 1 expects Safe<HtmlStr>, got NonEmptyStr
+ctx.res.html argument 1 expects HtmlEscapedStr|HtmlFragment, got NonEmptyStr
