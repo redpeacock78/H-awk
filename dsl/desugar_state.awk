@@ -32,4 +32,6 @@ function _ds_init() {
   delete _DS_match_ok_body
   delete _DS_match_ng_body
   delete _DS_FUNC_CLASS
+  # Re-register built-in function classes (cleared above)
+  _DS_FUNC_CLASS["escape_html"] = "sanitizer"
 }

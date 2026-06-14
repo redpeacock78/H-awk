@@ -20,7 +20,7 @@ function _ds_safe_inner(t,    m) {
 function _ds_dataflow_ret(fname, input_type,    cls, ret) {
     cls = _DS_FUNC_CLASS[fname]
     ret = _DS_SIG_RET[fname]
-    if (cls == "transform" && _ds_is_untrusted(input_type))
+    if ((cls == "transform" || cls == "validator") && _ds_is_untrusted(input_type))
         return "Untrusted<" ret ">"
     return ret
 }

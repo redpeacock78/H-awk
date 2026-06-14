@@ -1,0 +1,1 @@
+ctx.res.html argument 1 expects HtmlEscapedStr|HtmlFragment, got Untrusted<Str>
