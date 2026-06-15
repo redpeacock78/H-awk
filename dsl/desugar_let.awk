@@ -28,8 +28,8 @@ function _ds_infer_type(expr,    m) {
         key = m[1] "." m[2]
         if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
     }
-    # ユーザー定義関数呼び出し: f(...) 形式 — plain function call
-    if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\(/, m)) {
+    # ユーザー定義関数呼び出し: f(...) 形式 — plain function call (no space before `(`)
+    if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)\(/, m)) {
         fname = m[1]
         if (fname in _DS_SIG_RET) return _DS_SIG_RET[fname]
         # awk builtins that produce Str (e.g. sprintf from interpolation expansion)

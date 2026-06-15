@@ -66,7 +66,7 @@ BEGIN {
     # ctx.res.*
     _DS_SIG_RET["ctx.res.json"]      = "Response"
     _DS_SIG_ARITY["ctx.res.json"]    = 1
-    _DS_SIG_ARG["ctx.res.json", 1]   = "Safe<JsonStr>"
+    _DS_SIG_ARG["ctx.res.json", 1]   = "Str"
 
     _DS_SIG_RET["ctx.res.text"]      = "Response"
     _DS_SIG_ARITY["ctx.res.text"]    = 1
@@ -167,4 +167,25 @@ BEGIN {
     _DS_SIG_RET["hawk.app.listen"]    = "Void"
     _DS_SIG_ARITY["hawk.app.listen"]  = 1
     _DS_SIG_ARG["hawk.app.listen", 1] = "Port"
+
+    # app runtime helpers (TSV storage + JSON)
+    _DS_SIG_RET["read_tsv"]        = "Int"
+    _DS_SIG_ARITY["read_tsv"]      = 2
+    _DS_SIG_ARG["read_tsv", 1]     = "Str"
+    _DS_SIG_ARG["read_tsv", 2]     = "Array"
+
+    _DS_SIG_RET["delete_tsv"]      = "Int"
+    _DS_SIG_ARITY["delete_tsv"]    = 3
+    _DS_SIG_ARG["delete_tsv", 1]   = "Str"
+    _DS_SIG_ARG["delete_tsv", 2]   = "Str"
+    _DS_SIG_ARG["delete_tsv", 3]   = "Str|Untrusted<Str>"
+
+    _DS_SIG_RET["append_tsv"]      = "Void"
+    _DS_SIG_ARITY["append_tsv"]    = 2
+    _DS_SIG_ARG["append_tsv", 1]   = "Str"
+    _DS_SIG_ARG["append_tsv", 2]   = "Array"
+
+    _DS_SIG_RET["json_encode"]     = "Str"
+    _DS_SIG_ARITY["json_encode"]   = 1
+    _DS_SIG_ARG["json_encode", 1]  = "Array"
 }
