@@ -29,7 +29,7 @@ function todo_list_html() -> Response {
   for (i = 1; i <= n; i++) {
     out = out _todo_tr(rows[i, "id"], rows[i, "title"])
   }
-  return ctx.res.html(html_raw(out))
+  return ctx.res.html(safe.html.raw(out))
 }
 
 function todo_add() -> Response {
@@ -48,7 +48,7 @@ function todo_add() -> Response {
   row["title"] = title
   append_tsv("data/todos.tsv", row)
   ctx.res.status(201)
-  return ctx.res.html(html_raw(_todo_tr(row["id"], row["title"])))
+  return ctx.res.html(_todo_tr(row["id"], row["title"]))
 }
 
 function todo_delete() -> Response {
@@ -59,7 +59,7 @@ function todo_delete() -> Response {
     return ctx.res.text("not found")
   }
   ctx.res.status(200)
-  return ctx.res.html(html_raw(""))
+  return ctx.res.html(safe.html.raw(""))
 }
 
 function todo_list_json() -> Response {
@@ -76,8 +76,8 @@ function todo_list_json() -> Response {
   return ctx.res.json(sprintf("{\"count\":%d,\"items\":[%s]}", n, items_json))
 }
 
-function _todo_tr(id: Str, title: Str) -> Str {
-  return sprintf( \
+function _todo_tr(id: Str, title: Str) -> HtmlFragment {
+  return safe.html.raw(sprintf( \
     "<tr class=\"group border-b border-zinc-800/60 last:border-0\">" \
       "<td class=\"py-3 pr-4 text-sm text-zinc-200\">%s</td>" \
       "<td class=\"py-3 text-right\">" \
@@ -90,5 +90,5 @@ function _todo_tr(id: Str, title: Str) -> Str {
         ">&#x2715;</button>" \
       "</td>" \
     "</tr>", \
-    escape_html(title), escape_html(id))
+    safe.html.escape(title), safe.attr.escape(id)))
 }
