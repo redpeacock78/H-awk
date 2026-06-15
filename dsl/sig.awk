@@ -19,6 +19,9 @@ BEGIN {
     _DS_TYPE_KIND["HtmlFragment"]        = "brand"
     _DS_TYPE_KIND["HtmlAttrEscapedStr"]  = "brand"
 
+    # HtmlPart alias: union of all HTML-related brand types
+    _DS_TYPE_ALIAS["HtmlPart"] = "HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr"
+
     # env.*
     _DS_SIG_RET["env.get"]        = "Str"
     _DS_SIG_ARITY["env.get"]      = 1
@@ -73,18 +76,35 @@ BEGIN {
     _DS_SIG_ARITY["ctx.res.html"]    = 1
     _DS_SIG_ARG["ctx.res.html", 1]   = "HtmlEscapedStr|HtmlFragment"
 
-    # escape_html: built-in trusted sanitizer
-    _DS_SIG_RET["escape_html"]       = "HtmlEscapedStr"
-    _DS_SIG_ARITY["escape_html"]     = 1
-    _DS_SIG_ARG["escape_html", 1]    = "Str|Untrusted<Str>"
-    _DS_FUNC_CLASS["escape_html"]    = "sanitizer"
-    _DS_SIG_TRUSTED["escape_html"]   = 1
+    # safe.html.escape: sanitizer — Str|Untrusted<Str> → HtmlEscapedStr
+    _DS_SIG_RET["safe.html.escape"]         = "HtmlEscapedStr"
+    _DS_SIG_ARITY["safe.html.escape"]       = 1
+    _DS_SIG_ARG["safe.html.escape", 1]      = "Str|Untrusted<Str>"
+    _DS_FUNC_CLASS["safe.html.escape"]      = "sanitizer"
+    _DS_SIG_TRUSTED["safe.html.escape"]     = 1
 
-    # html_raw: assert-trust escape hatch for pre-built HTML strings
-    _DS_SIG_RET["html_raw"]          = "HtmlEscapedStr"
-    _DS_SIG_ARITY["html_raw"]        = 1
-    _DS_SIG_ARG["html_raw", 1]       = "Str"
-    _DS_SIG_TRUSTED["html_raw"]      = 1
+    # safe.attr.escape: sanitizer — Str|Untrusted<Str> → HtmlAttrEscapedStr
+    _DS_SIG_RET["safe.attr.escape"]         = "HtmlAttrEscapedStr"
+    _DS_SIG_ARITY["safe.attr.escape"]       = 1
+    _DS_SIG_ARG["safe.attr.escape", 1]      = "Str|Untrusted<Str>"
+    _DS_FUNC_CLASS["safe.attr.escape"]      = "sanitizer"
+    _DS_SIG_TRUSTED["safe.attr.escape"]     = 1
+
+    # safe.html.raw: trust assertion — Str → HtmlFragment (does not escape)
+    _DS_SIG_RET["safe.html.raw"]            = "HtmlFragment"
+    _DS_SIG_ARITY["safe.html.raw"]          = 1
+    _DS_SIG_ARG["safe.html.raw", 1]         = "Str"
+    _DS_FUNC_CLASS["safe.html.raw"]         = "trusted"
+    _DS_SIG_TRUSTED["safe.html.raw"]        = 1
+
+    # safe.html.fragment: builder — up to 3 HtmlPart args → HtmlFragment
+    _DS_SIG_RET["safe.html.fragment"]       = "HtmlFragment"
+    _DS_SIG_ARITY["safe.html.fragment"]     = 3
+    _DS_SIG_ARG["safe.html.fragment", 1]    = "HtmlPart"
+    _DS_SIG_ARG["safe.html.fragment", 2]    = "HtmlPart"
+    _DS_SIG_ARG["safe.html.fragment", 3]    = "HtmlPart"
+    _DS_FUNC_CLASS["safe.html.fragment"]    = "builder"
+    _DS_SIG_TRUSTED["safe.html.fragment"]   = 1
 
     _DS_SIG_RET["ctx.res.render"]    = "Response"
     _DS_SIG_ARITY["ctx.res.render"]  = 1
