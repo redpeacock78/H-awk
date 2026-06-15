@@ -64,7 +64,7 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
         }
 
         rhs = substr(line, pipe_pos + 2)
-        if (!match(rhs, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\(/, m))
+        if (!match(rhs, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*)[[:space:]]*\(/, m))
             return line
 
         fname     = m[1]

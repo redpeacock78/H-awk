@@ -33,7 +33,11 @@ function _ds_init() {
   delete _DS_match_ng_body
   delete _DS_FUNC_CLASS
   # Re-register built-in function classes (cleared above)
-  _DS_FUNC_CLASS["escape_html"] = "sanitizer"
+  _DS_FUNC_CLASS["escape_html"]       = "sanitizer"
+  _DS_FUNC_CLASS["safe.html.escape"]  = "sanitizer"
+  _DS_FUNC_CLASS["safe.attr.escape"]  = "sanitizer"
+  _DS_FUNC_CLASS["safe.html.raw"]     = "trusted"
+  _DS_FUNC_CLASS["safe.html.fragment"] = "builder"
   # String folding state
   _DS_str_fold_active  = 0   # 1 when accumulating multi-line string fold
   _DS_str_fold_prefix  = ""  # the "let varname = ..." prefix line

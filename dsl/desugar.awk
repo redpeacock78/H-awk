@@ -73,7 +73,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
       return
     }
     pipe_result = _ds_pipe_transform(line, pipe_pre)
-    for (p = 1; p in pipe_pre; p++) print pipe_pre[p]
+    for (p = 1; p in pipe_pre; p++) print _ds_dot_transform(pipe_pre[p])
     nc_result = _ds_nc_transform(_ds_dot_transform(pipe_result), nc_pre)
     for (p = 1; p in nc_pre; p++) print nc_pre[p]
     print nc_result
@@ -139,7 +139,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
 
   pipe_result = _ds_pipe_transform(line, pipe_pre)
   for (p = 1; p in pipe_pre; p++)
-    _DS_body_buf[++_DS_body_count] = pipe_pre[p]
+    _DS_body_buf[++_DS_body_count] = _ds_dot_transform(pipe_pre[p])
 
   dot_transformed = _ds_dot_transform(pipe_result)
   nc_result = _ds_nc_transform(dot_transformed, nc_pre)
@@ -169,7 +169,7 @@ function _ds_flush_string_fold(lineno,    prefix_line, synthetic_line, fold_line
   synthetic_line = _ds_fold_adjacent_strings_inline(synthetic_line)
   pipe_result = _ds_pipe_transform(synthetic_line, pipe_pre)
   for (p = 1; p in pipe_pre; p++)
-    _DS_body_buf[++_DS_body_count] = pipe_pre[p]
+    _DS_body_buf[++_DS_body_count] = _ds_dot_transform(pipe_pre[p])
   dot_transformed = _ds_dot_transform(pipe_result)
   nc_result = _ds_nc_transform(dot_transformed, nc_pre)
   for (p = 1; p in nc_pre; p++)
