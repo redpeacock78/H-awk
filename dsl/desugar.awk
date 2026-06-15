@@ -136,6 +136,16 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
 
   # Same-line adjacent string literal folding
   line = _ds_fold_adjacent_strings_inline(line)
+  # Fragment interpolation: expand #{...} inside safe.html.fragment("...") arg
+  if (line ~ /safe\.html\.fragment\(/) {
+    _DS_last_interp_untrusted = 0
+    line = _ds_expand_fragment_interp(line, lineno)
+  }
+  # Normal string interpolation: expand #{...} in remaining strings → sprintf(...)
+  if (line ~ /#{/) {
+    _DS_last_interp_untrusted = 0
+    line = _ds_expand_interp(line, lineno)
+  }
 
   pipe_result = _ds_pipe_transform(line, pipe_pre)
   for (p = 1; p in pipe_pre; p++)
@@ -167,6 +177,14 @@ function _ds_flush_string_fold(lineno,    prefix_line, synthetic_line, fold_line
   # This avoids the brace-depth race condition that occurs when the trigger line
   # is a closing brace: brace_depth is already decremented before we get here.
   synthetic_line = _ds_fold_adjacent_strings_inline(synthetic_line)
+  if (synthetic_line ~ /safe\.html\.fragment\(/) {
+    _DS_last_interp_untrusted = 0
+    synthetic_line = _ds_expand_fragment_interp(synthetic_line, fold_lineno)
+  }
+  if (synthetic_line ~ /#{/) {
+    _DS_last_interp_untrusted = 0
+    synthetic_line = _ds_expand_interp(synthetic_line, fold_lineno)
+  }
   pipe_result = _ds_pipe_transform(synthetic_line, pipe_pre)
   for (p = 1; p in pipe_pre; p++)
     _DS_body_buf[++_DS_body_count] = _ds_dot_transform(pipe_pre[p])

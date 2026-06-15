@@ -32,6 +32,8 @@ function _ds_infer_type(expr,    m) {
     if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\(/, m)) {
         fname = m[1]
         if (fname in _DS_SIG_RET) return _DS_SIG_RET[fname]
+        # awk builtins that produce Str (e.g. sprintf from interpolation expansion)
+        if (fname == "sprintf") return "Str"
         # Unknown function: report error
         print "dsl error: " _DS_src_file ":" _DS_current_lineno \
             ": unknown function " fname > "/dev/stderr"
@@ -180,6 +182,11 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
     if (!(arr[2] in _DS_let_type_map))
       _DS_let_locals[++_DS_let_count] = arr[2]
     _DS_VAR_TYPES[_DS_func_name, arr[2]] = _ds_infer_type(arr[3])
+    # Override: if interpolation produced sprintf(...) and any expr was Untrusted, mark as Untrusted<Str>
+    if (_DS_last_interp_untrusted && (_DS_VAR_TYPES[_DS_func_name, arr[2]] == "Str" || _DS_VAR_TYPES[_DS_func_name, arr[2]] == "")) {
+        _DS_VAR_TYPES[_DS_func_name, arr[2]] = "Untrusted<Str>"
+        _DS_last_interp_untrusted = 0
+    }
     _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(_DS_VAR_TYPES[_DS_func_name, arr[2]])
     return arr[1] arr[2] " = " arr[3]
   }
