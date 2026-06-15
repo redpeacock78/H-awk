@@ -129,3 +129,129 @@ function _ds_fold_adjacent_strings_inline(line,    segs, n, i, j, k, out, merged
   for (i = 1; i <= n; i++) out = out segs[i, "text"]
   return out
 }
+
+# _ds_parse_interp(content, parts): split string content at #{...} boundaries
+# parts[1], parts[2], ... alternate: literal, expr, literal, expr, literal
+# odd indices = literal text, even indices = expression text
+# returns total count (always odd: at least 1 literal part)
+function _ds_parse_interp(content, parts,    i, c, n, cur, depth) {
+  n = 0; cur = ""; depth = 0
+  for (i = 1; i <= length(content); i++) {
+    c = substr(content, i, 1)
+    if (depth == 0) {
+      if (c == "#" && i < length(content) && substr(content, i+1, 1) == "{") {
+        parts[++n] = cur; cur = ""
+        depth = 1; i++  # skip "{"
+      } else if (c == "\\" && i < length(content)) {
+        cur = cur c substr(content, ++i, 1)  # pass escape sequence through
+      } else {
+        cur = cur c
+      }
+    } else {
+      if      (c == "{") { depth++; cur = cur c }
+      else if (c == "}") {
+        depth--
+        if (depth == 0) { parts[++n] = cur; cur = "" }
+        else              cur = cur c
+      } else { cur = cur c }
+    }
+  }
+  parts[++n] = cur  # trailing literal (may be empty)
+  return n
+}
+
+# _ds_interp_expr_type(expr): infer the type of an interpolation expression
+# for pipe chains, traces the return type of the rightmost call
+function _ds_interp_expr_type(expr,    m, fname) {
+  # Rightmost pipe call: "expr |> fname()" — return type of fname
+  if (match(expr, /\|>[[:space:]]*([a-zA-Z_][a-zA-Z0-9_.]*)[[:space:]]*\([^)]*\)[[:space:]]*$/, m)) {
+    fname = m[1]
+    if (fname in _DS_SIG_RET) return _DS_SIG_RET[fname]
+  }
+  return _ds_infer_type(_ds_trim(expr))
+}
+
+# _ds_expand_interp(line, lineno): rewrite string literals containing #{...} to sprintf(...)
+# sets _DS_last_interp_untrusted = 1 if any interpolated expression is Untrusted<T>
+function _ds_expand_interp(line, lineno,    segs, n, i, content, parts, np, j, \
+                                             fmt, args, expr_type, result, any_untrusted, \
+                                             pfx, new_line) {
+  n = _ds_split_code_segs(line, segs)
+  new_line = ""
+  for (i = 1; i <= n; i++) {
+    if (segs[i, "safe"] == 0 && segs[i, "text"] ~ /^"/ && segs[i, "text"] ~ /#{/) {
+      content = _ds_string_literal_content(segs[i, "text"])
+      np = _ds_parse_interp(content, parts)
+      if (np == 1) {
+        new_line = new_line segs[i, "text"]
+      } else {
+        fmt = ""; args = ""; any_untrusted = 0
+        for (j = 1; j <= np; j++) {
+          if (j % 2 == 1) {
+            pfx = parts[j]; gsub(/%/, "%%", pfx)
+            fmt = fmt pfx
+          } else {
+            expr_type = _ds_interp_expr_type(parts[j])
+            if (_ds_is_nullable(expr_type)) {
+              print "dsl error: " _DS_src_file ":" lineno \
+                  ": cannot interpolate sealed " expr_type \
+                  "; use ?= or match first" > "/dev/stderr"
+              _DS_had_error = 1
+            }
+            if (_ds_is_untrusted(expr_type)) any_untrusted = 1
+            fmt = fmt "%s"
+            args = args ", " _ds_trim(parts[j])
+          }
+        }
+        result = "sprintf(\"" fmt "\"" args ")"
+        new_line = new_line result
+        _DS_last_interp_untrusted = any_untrusted
+      }
+      delete parts
+    } else {
+      new_line = new_line segs[i, "text"]
+    }
+  }
+  return new_line
+}
+
+# _ds_expand_fragment_interp(line, lineno): rewrite safe.html.fragment("..#{expr}..") to
+# multi-arg form, type-checking each expression against HtmlPart
+function _ds_expand_fragment_interp(line, lineno,    m, prefix, str_arg, content, \
+                                                      parts, np, j, new_args, expr_type) {
+  if (!match(line, /safe\.html\.fragment\("([^"]*)"\)/, m)) return line
+  if (index(m[0], "#{") == 0) return line
+
+  str_arg = m[0]
+  content = m[1]
+  np = _ds_parse_interp(content, parts)
+  if (np == 1) return line
+
+  new_args = ""
+  for (j = 1; j <= np; j++) {
+    if (j % 2 == 1) {
+      if (parts[j] != "") {
+        if (new_args != "") new_args = new_args ", "
+        new_args = new_args "\"" parts[j] "\""
+      }
+    } else {
+      if (new_args != "") new_args = new_args ", "
+      expr_type = _ds_interp_expr_type(_ds_trim(parts[j]))
+      if (!type::accepts("HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr", expr_type) &&
+          expr_type != "") {
+        print "dsl error: " _DS_src_file ":" lineno \
+            ": safe.html.fragment interpolation expects HtmlPart, got " expr_type \
+            > "/dev/stderr"
+        if (_ds_is_untrusted(expr_type))
+          print "  help: use safe.html.escape()" > "/dev/stderr"
+        _DS_had_error = 1
+      }
+      new_args = new_args _ds_trim(parts[j])
+    }
+  }
+  delete parts
+
+  prefix = substr(line, 1, index(line, str_arg) - 1)
+  return prefix "safe.html.fragment(" new_args ")" \
+         substr(line, index(line, str_arg) + length(str_arg))
+}

@@ -43,4 +43,6 @@ function _ds_init() {
   _DS_str_fold_prefix  = ""  # the "let varname = ..." prefix line
   _DS_str_fold_content = ""  # accumulated string content (without outer quotes)
   _DS_str_fold_lineno  = 0   # source line number of the fold-start line
+  # String interpolation state
+  _DS_last_interp_untrusted = 0  # 1 if last _ds_expand_interp had Untrusted<T> expr
 }
