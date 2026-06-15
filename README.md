@@ -54,30 +54,33 @@ BEGIN {
 
 function list_todos() {
   let rows = []
-  let n = read_tsv("data/todos.tsv", rows)
-  return ctx.res.json(sprintf("[%d items]", n))
+  let n: Int = read_tsv("data/todos.tsv", rows)
+  return ctx.res.json(sprintf("{\"count\":%d}", n))
 }
 
 function add_todo() {
-  let title = ctx.req.form("title")
-  if (title == "") {
+  let raw_title ?= ctx.req.form("title")
+  if (raw_title == "") {
     ctx.res.status(400)
     return ctx.res.text("title required")
   }
   ctx.res.status(201)
-  return ctx.res.text("added: " title)
+  return ctx.res.html(safe.html.fragment(
+    "<li>", safe.html.escape(raw_title), "</li>"
+  ))
 }
 
-function delete_todo() {
-  delete_tsv("data/todos.tsv", "id", ctx.req.param("id"))
+function delete_todo() -> Response {
+  let raw_id ?= ctx.req.param("id")
+  delete_tsv("data/todos.tsv", "id", raw_id)
   ctx.res.status(200)
-  return ctx.res.html(html_raw(""))
+  return ctx.res.html(safe.html.raw(""))
 }
 ```
 
 ## DSL Preprocessing
 
-`bin/hawk` runs every app file through `dsl/desugar.awk` before passing it to gawk. Two transforms are applied:
+`bin/hawk` runs every app file through `dsl/desugar.awk` before passing it to gawk. The following transforms are applied.
 
 **Dot-notation → dispatch**
 
@@ -174,9 +177,7 @@ let port: Int | Str = true
 
 The `??` operator infers a union type from its two operands (`Str | Int` from `env.get("PORT") ?? 8080`). The built-in `Port` type alias expands to `Int|NumericStr|Str`, so `hawk.app.listen(env.get("PORT") ?? 8080)` passes type checking.
 
-Supported types: `Int`, `Float`, `Str`, `Bool`, `NumericStr`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Untrusted<T>`, `HtmlEscapedStr`, `Void`, `Any`, and any union `A | B`. Type inference works for literals and known DSL functions — `ctx.req.form` → `Result<Untrusted<Str>, ParseError>`, `ctx.req.json` → `Result<Untrusted<Map>, ParseError>`, `ctx.res.text` → `Response`, `escape_html` → `HtmlEscapedStr`, `html_raw` → `HtmlEscapedStr`, etc.
-
-`ctx.res.html` requires `HtmlEscapedStr|HtmlFragment` — pass the result of `escape_html(s)` for user-supplied strings, or `html_raw(s)` for pre-built trusted HTML. This prevents XSS by making HTML output a tracked brand type that cannot be forged by plain string assignment.
+Supported types: `Int`, `Float`, `Str`, `Bool`, `NumericStr`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Untrusted<T>`, `HtmlEscapedStr`, `HtmlFragment`, `HtmlAttrEscapedStr`, `Void`, `Any`, and any union `A | B`. The `HtmlPart` alias expands to `HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr`. Type inference works for literals and known DSL functions.
 
 **Function type annotations**
 
@@ -234,6 +235,87 @@ function setup() -> Void {
 # dsl error: app.awk:2: function setup expects Void, got Response
 ```
 
+**Safe HTML output (`safe.*`)**
+
+`ctx.res.html()` requires `HtmlEscapedStr` or `HtmlFragment` — plain `Str` values are rejected at desugar time. This makes XSS a compile-time error rather than a runtime surprise.
+
+Four sanitizers in the `safe.*` namespace produce these brand types:
+
+| Function | Input | Output | Use |
+|---|---|---|---|
+| `safe.html.escape(s)` | `Str\|Untrusted<Str>` | `HtmlEscapedStr` | Escape user-supplied text for HTML body |
+| `safe.attr.escape(s)` | `Str\|Untrusted<Str>` | `HtmlAttrEscapedStr` | Escape user-supplied text for HTML attributes |
+| `safe.html.raw(s)` | `Str` | `HtmlFragment` | Trust assertion — use only for known-safe strings |
+| `safe.html.fragment(parts...)` | `HtmlPart` args | `HtmlFragment` | Compose brand-typed HTML parts into a fragment |
+
+`HtmlPart` is an alias for `HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr`. Literal string arguments to `safe.html.fragment` are also accepted as trusted static HTML.
+
+```awk
+function render_item(id: Str, title: Str) -> HtmlFragment {
+  # safe.html.escape: Untrusted<Str> → HtmlEscapedStr
+  # safe.attr.escape: Untrusted<Str> → HtmlAttrEscapedStr
+  return safe.html.raw(sprintf(
+    "<li id=\"item-%s\">%s</li>",
+    safe.attr.escape(id),
+    safe.html.escape(title)
+  ))
+}
+```
+
+Brand types cannot be forged by plain string assignment — only the `safe.*` sanitizers can produce them:
+
+```sh
+# Desugar-time error: plain Str cannot be passed to ctx.res.html
+let html: Str = "<b>hello</b>"
+return ctx.res.html(html)
+# dsl error: app.awk:3: ctx.res.html argument 1 expects HtmlEscapedStr|HtmlFragment, got Str
+
+# Desugar-time error: brand type cannot be created by annotation alone
+let frag: HtmlFragment = user_input
+# dsl error: app.awk:4: brand type HtmlFragment cannot be assigned Untrusted<Str>
+```
+
+**String interpolation (`#{...}`)**
+
+Embed expressions inside strings with `#{expr}`. The desugar expands them to `sprintf` calls:
+
+```awk
+# DSL
+let greeting: Str = "Hello, #{name}!"
+
+# Desugared
+greeting = sprintf("Hello, %s!", name)
+```
+
+Multiple expressions work in one string:
+
+```awk
+let msg: Str = "#{first} #{last} (#{age})"
+# → sprintf("%s %s (%s)", first, last, age)
+```
+
+If any embedded expression is `Untrusted<T>`, the resulting variable is inferred as `Untrusted<Str>`:
+
+```awk
+let raw_name ?= ctx.req.form("name")
+let greeting: Str = "Hello, #{raw_name}!"
+# → greeting is Untrusted<Str> — raw_name is Untrusted<Str>
+
+# Desugar-time error: cannot pass Untrusted<Str> to ctx.res.text without sanitizing
+return ctx.res.text(greeting)
+# dsl error: app.awk:3: ctx.res.text argument 1 expects Str|Untrusted<Str>, got Untrusted<Str>
+```
+
+Interpolation also works inside `safe.html.fragment(...)` calls. Literal text between `#{...}` markers is treated as trusted static HTML; embedded expressions are type-checked as `HtmlPart`:
+
+```awk
+# Each #{...} expression must produce HtmlEscapedStr, HtmlFragment, or HtmlAttrEscapedStr
+let raw_title ?= ctx.req.form("title")
+return ctx.res.html(safe.html.fragment(
+  "<li class=\"item\">#{safe.html.escape(raw_title)}</li>"
+))
+```
+
 **`??` null-coalescing operator**
 
 ```awk
@@ -271,6 +353,13 @@ function handler(    _ds_tc_1, raw, _ds_p_1, safe) {
 Rule: `expr |> f(args)` → temp var for `expr`, then `f(tempvar, args)`. Chains left-to-right. LHS must be a plain identifier (use `let tmp = expr` first for complex expressions).
 
 Sealed-pipe rule: `Result<T, E>` and `Option<T>` values cannot be piped directly — use `?=` or `match...of` to unwrap first.
+
+Dot-notation functions work as pipe RHS:
+
+```awk
+let escaped = raw_title |> safe.html.escape()
+# → _ds_p_1 = safe::dispatch("html.escape", raw_title)
+```
 
 **`match...of...end` expression**
 
@@ -343,6 +432,8 @@ Desugar-time error if the RHS type is not Option or Result:
 let port ?= env.get("PORT")
 # dsl error: app.awk:5: ?= requires Option or Result, got Str
 ```
+
+After `?=` unwrap, the variable holds `Untrusted<T>` — pass it to a `safe.*` sanitizer before using in HTML output.
 
 **DSL function call checking**
 
@@ -424,7 +515,7 @@ hawk::all(ps, "handler")
 | `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | Form field |
 | `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | Respond with JSON |
 | `ctx.res.text(data)` | `ctx::dispatch("res.text", data)` | Respond with plain text |
-| `ctx.res.html(data)` | `ctx::dispatch("res.html", data)` | Respond with HTML |
+| `ctx.res.html(data)` | `ctx::dispatch("res.html", data)` | Respond with HTML (`HtmlEscapedStr\|HtmlFragment` required) |
 | `ctx.res.render(path)` | `ctx::dispatch("res.render", path)` | Render a static HTML file |
 | `ctx.res.status(code)` | `ctx::dispatch("res.status", code)` | Set HTTP status code |
 | `ctx.res.header(name, val)` | `ctx::dispatch("res.header", name, val)` | Set response header |
