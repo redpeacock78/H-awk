@@ -1,5 +1,5 @@
 function handler() -> Response {
   let raw ?= ctx.req.form("title")
-  let safe = escape_html(raw)
+  let safe = raw |> safe.html.escape()
   return ctx.res.html(safe)
 }

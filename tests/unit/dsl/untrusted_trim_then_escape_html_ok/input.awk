@@ -7,6 +7,6 @@ function trim(s: Str) -> Str {
 function handler() -> Response {
   let raw ?= ctx.req.form("title")
   let trimmed = raw |> trim()
-  let safe = trimmed |> escape_html()
+  let safe = trimmed |> safe.html.escape()
   return ctx.res.html(safe)
 }

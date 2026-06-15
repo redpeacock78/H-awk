@@ -11,7 +11,7 @@ function handler(    _ds_tc_1, raw, _ds_p_1, trimmed, _ds_p_2, safe) {
   raw = result_val(_ds_tc_1)
   _ds_p_1 = trim(raw)
   trimmed = _ds_p_1
-  _ds_p_2 = escape_html(trimmed)
+  _ds_p_2 = safe::dispatch("html.escape", trimmed)
   safe = _ds_p_2
   return ctx::dispatch("res.html", safe)
 }
