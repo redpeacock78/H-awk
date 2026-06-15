@@ -31,7 +31,11 @@ function _ds_infer_type(expr,    m) {
     # ユーザー定義関数呼び出し: f(...) 形式 — plain function call (no space before `(`)
     if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)\(/, m)) {
         fname = m[1]
-        if (fname in _DS_SIG_RET) return _DS_SIG_RET[fname]
+        if (fname in _DS_SIG_RET) {
+            if ((fname in _DS_SIG_ARITY) && match(expr, /^[a-zA-Z_][a-zA-Z0-9_]*\((.*)\)[[:space:]]*$/, m))
+                _ds_typecheck_call(fname, m[1])
+            return _DS_SIG_RET[fname]
+        }
         # awk builtins — Str return
         if (fname == "sprintf" || fname == "gensub" || fname == "substr" || \
             fname == "tolower" || fname == "toupper" || fname == "strftime") return "Str"
@@ -218,6 +222,13 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
       _ds_check_type(declared, _ds_infer_type(rhs), lineno)
       return arr[1] arr[2] " = type::coerce(" rhs ", \"" declared "\")"
     }
+  }
+  # Array element assignment: arr["key"] = expr → track inferred type for later lookup
+  if (_DS_in_function && \
+      match(line, /^([[:space:]]*)([a-zA-Z_][a-zA-Z0-9_]*)\[([^\]]+)\][[:space:]]*=([^=<>!~].*)$/, arr)) {
+    declared = _ds_infer_type(_ds_trim(arr[4]))
+    if (declared != "")
+      _DS_VAR_TYPES[_DS_func_name, arr[2] "[" arr[3] "]"] = declared
   }
   return line
 }

@@ -75,6 +75,13 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i) 
         check_fn = "result_ok"; val_fn = "result_val"; err_fn = "result_err"
     }
 
+    if (_DS_in_function) {
+        if (_DS_match_ok_var != "")
+            _DS_VAR_TYPES[_DS_func_name, _DS_match_ok_var] = _ds_inner_type(type_t)
+        if (_DS_match_ng_var != "" && type_t ~ /^Result</)
+            _DS_VAR_TYPES[_DS_func_name, _DS_match_ng_var] = _ds_result_err_type(type_t)
+    }
+
     _DS_body_buf[++_DS_body_count] = _DS_match_indent tmpvar " = " _ds_dot_transform(_DS_match_expr)
     _DS_body_buf[++_DS_body_count] = _DS_match_indent "if (" check_fn "(" tmpvar ")) {"
     if (_DS_match_ok_var != "")

@@ -46,7 +46,7 @@ function todo_add() -> Response {
       }
       let row = []
       row["id"] = "#{systime()}_#{int(rand() * 100000)}"
-      row["title"] = raw
+      row["title"] = safe.str.trust(raw)
       append_tsv("data/todos.tsv", row)
       ctx.res.status(201)
       return ctx.res.html(_todo_tr(row["id"], row["title"]))

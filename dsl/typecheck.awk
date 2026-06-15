@@ -28,6 +28,11 @@ function _ds_inner_type(t,    m) {
     return "Any"
 }
 
+function _ds_result_err_type(t,    m) {
+    if (match(t, /^Result<[^,]+,[[:space:]]*(.+)>$/, m)) return m[1]
+    return ""
+}
+
 function _ds_count_args(args_str,    n, i, c, depth, in_str) {
     if (_ds_trim(args_str) == "") return 0
     n = 1; depth = 0; in_str = 0

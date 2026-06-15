@@ -8,10 +8,12 @@ BEGIN {
     _SAFE_ROUTES["html.raw"]      = "safe::html_raw"
     _SAFE_ROUTES["html.fragment"] = "safe::html_fragment"
     _SAFE_ROUTES["attr.escape"]   = "safe::attr_escape"
+    _SAFE_ROUTES["str.trust"]     = "safe::str_trust"
     _SAFE_ARITY["html.escape"]    = 1
     _SAFE_ARITY["html.raw"]       = 1
     _SAFE_ARITY["html.fragment"]  = 3
     _SAFE_ARITY["attr.escape"]    = 1
+    _SAFE_ARITY["str.trust"]      = 1
 }
 
 function html_escape(s) {
@@ -34,6 +36,10 @@ function attr_escape(s) {
 
 function html_raw(s) {
     return s
+}
+
+function str_trust(s) {
+    return s ""
 }
 
 function html_fragment(a, b, c) {

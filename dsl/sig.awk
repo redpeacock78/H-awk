@@ -90,6 +90,13 @@ BEGIN {
     _DS_FUNC_CLASS["safe.attr.escape"]      = "sanitizer"
     _DS_SIG_TRUSTED["safe.attr.escape"]     = 1
 
+    # safe.str.trust: explicit trust assertion — Untrusted<Str> → Str (no transformation)
+    _DS_SIG_RET["safe.str.trust"]           = "Str"
+    _DS_SIG_ARITY["safe.str.trust"]         = 1
+    _DS_SIG_ARG["safe.str.trust", 1]        = "Untrusted<Str>"
+    _DS_FUNC_CLASS["safe.str.trust"]        = "trusted"
+    _DS_SIG_TRUSTED["safe.str.trust"]       = 1
+
     # safe.html.raw: trust assertion — Str → HtmlFragment (does not escape)
     _DS_SIG_RET["safe.html.raw"]            = "HtmlFragment"
     _DS_SIG_ARITY["safe.html.raw"]          = 1
