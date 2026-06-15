@@ -101,6 +101,15 @@ function _ds_match_process_body(line, lineno,    pipe_pre, nc_pre, p, pipe_r, do
     _DS_current_lineno = lineno
     # Normalize indentation: strip original leading whitespace, apply canonical indent
     sub(/^[[:space:]]*/, _DS_match_indent "  ", line)
+    line = _ds_fold_adjacent_strings_inline(line)
+    if (line ~ /safe\.html\.fragment\(/) {
+        _DS_last_interp_untrusted = 0
+        line = _ds_expand_fragment_interp(line, lineno)
+    }
+    if (line ~ /#{/) {
+        _DS_last_interp_untrusted = 0
+        line = _ds_expand_interp(line, lineno)
+    }
     pipe_r = _ds_pipe_transform(line, pipe_pre)
     for (p = 1; p in pipe_pre; p++) _DS_body_buf[++_DS_body_count] = pipe_pre[p]
     dot_r = _ds_dot_transform(pipe_r)

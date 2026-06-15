@@ -32,8 +32,18 @@ function _ds_infer_type(expr,    m) {
     if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)\(/, m)) {
         fname = m[1]
         if (fname in _DS_SIG_RET) return _DS_SIG_RET[fname]
-        # awk builtins that produce Str (e.g. sprintf from interpolation expansion)
-        if (fname == "sprintf") return "Str"
+        # awk builtins — Str return
+        if (fname == "sprintf" || fname == "gensub" || fname == "substr" || \
+            fname == "tolower" || fname == "toupper" || fname == "strftime") return "Str"
+        # awk builtins — Int return
+        if (fname == "int" || fname == "systime" || fname == "mktime" || \
+            fname == "length" || fname == "split"  || fname == "sub"   || \
+            fname == "gsub"   || fname == "index"  || fname == "match" || \
+            fname == "patsplit") return "Int"
+        # awk builtins — Float return
+        if (fname == "rand" || fname == "sin" || fname == "cos" || \
+            fname == "atan2" || fname == "exp" || fname == "log" || \
+            fname == "sqrt") return "Float"
         # Unknown function: report error
         print "dsl error: " _DS_src_file ":" _DS_current_lineno \
             ": unknown function " fname > "/dev/stderr"
