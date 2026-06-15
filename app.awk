@@ -34,25 +34,25 @@ function todo_list_html() -> Response {
 
 function todo_add() -> Response {
   let raw_title = ctx.req.form("title")
-match raw_title of
-  ok raw:
-    if (raw == "") {
-      let raw_q ?= ctx.req.query("title")
-      raw = raw_q
-    }
-    if (raw == "") {
+  match raw_title of
+    ok raw:
+      if (raw == "") {
+        let raw_q ?= ctx.req.query("title")
+        raw = raw_q
+      }
+      if (raw == "") {
+        ctx.res.status(400)
+        return ctx.res.text("title required")
+      }
+      let row = []
+      row["id"] = "#{systime()}_#{int(rand() * 100000)}"
+      row["title"] = raw
+      append_tsv("data/todos.tsv", row)
+      ctx.res.status(201)
+      return ctx.res.html(_todo_tr(row["id"], row["title"]))
+    ng err:
       ctx.res.status(400)
-      return ctx.res.text("title required")
-    }
-    let row = []
-    row["id"] = "#{systime()}_#{int(rand() * 100000)}"
-    row["title"] = raw
-    append_tsv("data/todos.tsv", row)
-    ctx.res.status(201)
-    return ctx.res.html(_todo_tr(row["id"], row["title"]))
-  ng err:
-    ctx.res.status(400)
-    return ctx.res.text("bad request")
+      return ctx.res.text("bad request")
   end
 }
 
