@@ -89,6 +89,9 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
         if (!((path, i) in _DS_SIG_ARG)) continue
         expected = _DS_SIG_ARG[path, i]
         actual   = _ds_infer_type(split_args[i])
+        # safe.html.fragment: literal string args are trusted static HTML chunks
+        if (path == "safe.html.fragment" && actual == "Str" && \
+            split_args[i] ~ /^"[^"]*"$/) continue
         if (actual == "" || type::accepts(expected, actual)) continue
         print "dsl error: " _DS_src_file ":" lineno \
             ": " path " argument " i " expects " expected ", got " actual > "/dev/stderr"
