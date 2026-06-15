@@ -33,21 +33,27 @@ function todo_list_html() -> Response {
 }
 
 function todo_add() -> Response {
-  let raw_title ?= ctx.req.form("title")
-  let row = []
-  if (raw_title == "") {
-    let raw_q ?= ctx.req.query("title")
-    raw_title = raw_q
-  }
-  if (raw_title == "") {
+  let raw_title = ctx.req.form("title")
+match raw_title of
+  ok raw:
+    if (raw == "") {
+      let raw_q ?= ctx.req.query("title")
+      raw = raw_q
+    }
+    if (raw == "") {
+      ctx.res.status(400)
+      return ctx.res.text("title required")
+    }
+    let row = []
+    row["id"] = "#{systime()}_#{int(rand() * 100000)}"
+    row["title"] = raw
+    append_tsv("data/todos.tsv", row)
+    ctx.res.status(201)
+    return ctx.res.html(_todo_tr(row["id"], row["title"]))
+  ng err:
     ctx.res.status(400)
-    return ctx.res.text("title required")
-  }
-  row["id"]    = systime() "_" int(rand() * 100000)
-  row["title"] = raw_title
-  append_tsv("data/todos.tsv", row)
-  ctx.res.status(201)
-  return ctx.res.html(_todo_tr(row["id"], row["title"]))
+    return ctx.res.text("bad request")
+  end
 }
 
 function todo_delete() -> Response {
@@ -68,16 +74,17 @@ function todo_list_json() -> Response {
   let items_json: Str = ""
   let i: Int
   for (i = 1; i <= n; i++) {
-    item["id"]    = rows[i, "id"]
+    item["id"] = rows[i, "id"]
     item["title"] = rows[i, "title"]
-    items_json = items_json (i > 1 ? "," : "") json_encode(item)
+    let sep: Str = (i > 1 ? "," : "")
+    items_json = "#{items_json}#{sep}#{json_encode(item)}"
   }
-  return ctx.res.json(sprintf("{\"count\":%d,\"items\":[%s]}", n, items_json))
+  return ctx.res.json("{\"count\":#{n},\"items\":[#{items_json}]}")
 }
 
 function _todo_tr(id: Str, title: Str) -> HtmlFragment {
   let safe_title = safe.html.escape(title)
-  let safe_id    = safe.attr.escape(id)
+  let safe_id = safe.attr.escape(id)
   let html: Str =
     "<tr class=\"group border-b border-zinc-800/60 last:border-0\">"
       "<td class=\"py-3 pr-4 text-sm text-zinc-200\">#{safe_title}</td>"
