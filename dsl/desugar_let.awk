@@ -28,9 +28,15 @@ function _ds_infer_type(expr,    m) {
         key = m[1] "." m[2]
         if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
     }
-    # ユーザー定義関数呼び出し: f(...) 形式
+    # ユーザー定義関数呼び出し: f(...) 形式 — plain function call
     if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\(/, m)) {
-        if (m[1] in _DS_SIG_RET) return _DS_SIG_RET[m[1]]
+        fname = m[1]
+        if (fname in _DS_SIG_RET) return _DS_SIG_RET[fname]
+        # Unknown function: report error
+        print "dsl error: " _DS_src_file ":" _DS_current_lineno \
+            ": unknown function " fname > "/dev/stderr"
+        _DS_had_error = 1
+        return ""
     }
     # 変数参照: _DS_VAR_TYPES から型を取得
     if (_DS_in_function && (_DS_func_name SUBSEP expr) in _DS_VAR_TYPES)
