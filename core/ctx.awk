@@ -12,10 +12,10 @@
 
 # --- Request helpers ---
 
-function query(key)       { return ctx::req["query:" key] }
-function param(key)       { return ctx::req["params:" key] }
-function get_header(key)  { return ctx::req["header:" awk::to_lower(key)] }
-function body()           { return ctx::req["body"] }
+function query(key,       v) { v = ctx::req["query:" key];                   return v != "" ? awk::result_ok_make(v) : awk::result_ng("ParseError", "missing " key) }
+function param(key,       v) { v = ctx::req["params:" key];                  return v != "" ? awk::result_ok_make(v) : awk::result_ng("ParseError", "missing " key) }
+function get_header(key,  v) { v = ctx::req["header:" awk::to_lower(key)];   return v != "" ? awk::result_ok_make(v) : awk::result_ng("ParseError", "missing " key) }
+function body(            v) { v = ctx::req["body"];                          return v != "" ? awk::result_ok_make(v) : awk::result_ng("ParseError", "empty body") }
 
 # --- Response helpers ---
 
@@ -34,10 +34,12 @@ function redirect(url, c)    { awk::redirect(ctx::res, url, c); return 1 }
 function status(code)        { awk::status(ctx::res, code);     return 1 }
 function set_header(name, v) { awk::header(ctx::res, name, v);  return 1 }
 
-function req_form(key)   { return req["form:" key] }
+function req_form(key,    v) { v = ctx::req["form:" key];                    return v != "" ? awk::result_ok_make(v) : awk::result_ng("ParseError", "missing " key) }
+function req_json(        v) { v = ctx::req["body"];                         return v != "" ? awk::result_ok_make(v) : awk::result_ng("ParseError", "empty body") }
 
 BEGIN {
     _CTX_ROUTES["req.form"]     = "ctx::req_form";   _CTX_ARITY["req.form"]     = 1
+    _CTX_ROUTES["req.json"]     = "ctx::req_json";   _CTX_ARITY["req.json"]     = 0
     _CTX_ROUTES["req.query"]    = "ctx::query";      _CTX_ARITY["req.query"]    = 1
     _CTX_ROUTES["req.param"]    = "ctx::param";      _CTX_ARITY["req.param"]    = 1
     _CTX_ROUTES["req.header"]   = "ctx::get_header"; _CTX_ARITY["req.header"]   = 1
