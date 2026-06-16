@@ -122,7 +122,7 @@ function _ds_match_reset() {
 }
 
 # Emit desugared if/else into _DS_body_buf.
-function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars) {
+function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered) {
   if (_DS_match_ng_arms == 0) {
     print "dsl error: " _DS_src_file ":" lineno \
       ": when...of missing ng/none/default branch" > "/dev/stderr"
@@ -152,6 +152,35 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, 
     check_fn = "option_some"; val_fn = "option_val"; err_fn = ""
   } else {
     check_fn = "result_ok"; val_fn = "result_val"; err_fn = "result_err"
+  }
+
+  # Exhaustiveness check: Result<T, E1|E2|...> with typed arms must cover every member
+  # OR have a catch-all (default:/ng:) arm.
+  if (type_t ~ /^Result</ && _DS_match_ng_arms > 0) {
+    delete _ds_union_members
+    _ds_n_union = _ds_result_err_union(type_t, _ds_union_members)
+    if (_ds_n_union > 1) {
+      _ds_has_catchall = 0
+      for (i = 1; i <= _DS_match_ng_arms; i++) {
+        if (_DS_match_ng_is_default[i] || _DS_match_ng_type[i] == "") {
+          _ds_has_catchall = 1; break
+        }
+      }
+      if (!_ds_has_catchall) {
+        delete _ds_covered
+        for (i = 1; i <= _DS_match_ng_arms; i++)
+          if (_DS_match_ng_type[i] != "") _ds_covered[_DS_match_ng_type[i]] = 1
+        for (i = 1; i <= _ds_n_union; i++) {
+          if (!(_ds_union_members[i] in _ds_covered)) {
+            print "dsl error: " _DS_src_file ":" lineno \
+              ": when...of missing arm for " _ds_union_members[i] \
+              " (add 'ng e: " _ds_union_members[i] ":' or 'default:')" > "/dev/stderr"
+            _DS_had_error = 1
+          }
+        }
+        if (_DS_had_error) { _ds_match_reset(); return }
+      }
+    }
   }
 
   if (_DS_in_function) {
