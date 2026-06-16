@@ -93,6 +93,12 @@ function _ds_match_collect(line, lineno,    m, i) {
     _DS_match_ok_body[++_DS_match_ok_count] = line
   } else {
     i = _DS_match_cur_ng_arm
+    if (i == 0) {
+      print "dsl error: " _DS_src_file ":" lineno \
+        ": when...of body line before any arm" > "/dev/stderr"
+      _DS_had_error = 1
+      return ""
+    }
     _DS_match_ng_body[i, ++_DS_match_ng_body_count[i]] = line
   }
   return ""
