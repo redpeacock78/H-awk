@@ -4,7 +4,7 @@ function _todo_tr(id: Str, title: Str) -> Str {
 
 function handler() -> Str {
   let raw_title = ctx.req.form("title")
-  match raw_title of
+  when raw_title of
     ok raw:
       let row = []
       row["id"] = "abc"

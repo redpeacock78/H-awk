@@ -34,7 +34,7 @@ function todo_list_html() -> Response {
 
 function todo_add() -> Response {
   let raw_title = ctx.req.form("title")
-  match raw_title of
+  when raw_title of
     ok raw:
       if (raw == "") {
         let raw_q ?= ctx.req.query("title")
