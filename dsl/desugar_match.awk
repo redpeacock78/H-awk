@@ -90,7 +90,9 @@ function _ds_match_collect(line, lineno,    m, i) {
   }
   # Body line — buffer under current branch
   if (_DS_match_branch == "ok" || _DS_match_branch == "some") {
-    _DS_match_ok_body[++_DS_match_ok_count] = line
+    ++_DS_match_ok_count
+    _DS_match_ok_body[_DS_match_ok_count]   = line
+    _DS_match_ok_lineno[_DS_match_ok_count] = lineno
   } else {
     i = _DS_match_cur_ng_arm
     if (i == 0) {
@@ -98,7 +100,9 @@ function _ds_match_collect(line, lineno,    m, i) {
           "move this line inside an ok:, ng:, or default: arm")
       return ""
     }
-    _DS_match_ng_body[i, ++_DS_match_ng_body_count[i]] = line
+    ++_DS_match_ng_body_count[i]
+    _DS_match_ng_body[i, _DS_match_ng_body_count[i]]   = line
+    _DS_match_ng_lineno[i, _DS_match_ng_body_count[i]] = lineno
   }
   return ""
 }
@@ -113,7 +117,9 @@ function _ds_match_reset() {
   _DS_match_ng_arms    = 0
   _DS_match_cur_ng_arm = 0
   delete _DS_match_ok_body
+  delete _DS_match_ok_lineno
   delete _DS_match_ng_body
+  delete _DS_match_ng_lineno
   delete _DS_match_ng_type
   delete _DS_match_ng_var_name
   delete _DS_match_ng_is_default
@@ -194,7 +200,7 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, 
   if (_DS_match_ok_var != "")
     _DS_body_buf[++_DS_body_count] = _DS_match_indent "  " _DS_match_ok_var " = " val_fn "(" tmpvar ")"
   for (j = 1; j <= _DS_match_ok_count; j++)
-    _ds_match_process_body(_DS_match_ok_body[j], lineno)
+    _ds_match_process_body(_DS_match_ok_body[j], _DS_match_ok_lineno[j])
 
   for (i = 1; i <= _DS_match_ng_arms; i++) {
     arm_type    = _DS_match_ng_type[i]
@@ -211,7 +217,7 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, 
       _DS_body_buf[++_DS_body_count] = _DS_match_indent "  " arm_var " = " err_fn "(" tmpvar ")"
 
     for (j = 1; j <= _DS_match_ng_body_count[i]; j++)
-      _ds_match_process_body(_DS_match_ng_body[i, j], lineno)
+      _ds_match_process_body(_DS_match_ng_body[i, j], _DS_match_ng_lineno[i, j])
   }
 
   _DS_body_buf[++_DS_body_count] = _DS_match_indent "}"
