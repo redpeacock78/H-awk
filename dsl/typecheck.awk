@@ -33,6 +33,15 @@ function _ds_result_err_type(t,    m) {
     return ""
 }
 
+# _ds_result_err_union(type_str, out_arr)
+# "Result<T, AuthError | NotFoundError>" → out_arr[1]="AuthError", out_arr[2]="NotFoundError"
+# Returns member count (0 if not a Result type).
+function _ds_result_err_union(type_str, out_arr,    err_part) {
+    err_part = _ds_result_err_type(type_str)
+    if (err_part == "") return 0
+    return type::split_union(err_part, out_arr)
+}
+
 function _ds_count_args(args_str,    n, i, c, depth, in_str) {
     if (_ds_trim(args_str) == "") return 0
     n = 1; depth = 0; in_str = 0
