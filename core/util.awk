@@ -133,9 +133,3 @@ function _all_impl(paths, handler,    std_ms, ps, i, j) {
   for (i in std_ms) for (j in ps) _route_add(std_ms[i], ps[j], handler)
 }
 
-# DSL Result/Option ADT runtime (scalar encoding: "" = ng/none, non-empty = ok/some)
-function result_ok(v)   { return v != "" }
-function result_val(v)  { return v }
-function result_err(v)  { return v }
-function option_some(v) { return v != "" }
-function option_val(v)  { return v }
