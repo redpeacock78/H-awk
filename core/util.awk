@@ -11,11 +11,6 @@
 #   log_error(msg)         -- stderr に "[ERROR] ..." 出力
 #   now_ms()               -- 起動時間からのミリ秒 (リクエスト計測用)
 #   trim(s)                -- 前後空白除去
-#   result_ok(v)           -- DSL Result ADT: "" = ng, 非空 = ok
-#   result_val(v)          -- ok 値を返す (= v)
-#   result_err(v)          -- ng エラーを返す (= v)
-#   option_some(v)         -- DSL Option ADT: "" = none, 非空 = some
-#   option_val(v)          -- some 値を返す (= v)
 #
 # 副作用: BEGIN で UTIL_LOWER / UTIL_UPPER テーブルを初期化
 
