@@ -18,12 +18,11 @@ function _ds_init() {
   _DS_in_match       = 0
   _DS_match_expr     = ""
   _DS_match_indent   = ""
-  _DS_match_ok_var   = ""
-  _DS_match_ng_var   = ""
-  _DS_match_branch   = ""
-  _DS_match_has_ng   = 0
-  _DS_match_ok_count = 0
-  _DS_match_ng_count = 0
+  _DS_match_ok_var     = ""
+  _DS_match_branch     = ""
+  _DS_match_ok_count   = 0
+  _DS_match_ng_arms    = 0
+  _DS_match_cur_ng_arm = 0
   delete _DS_let_locals
   delete _DS_body_buf
   delete _DS_let_type_map
@@ -31,6 +30,11 @@ function _ds_init() {
   delete _DS_VAR_KIND
   delete _DS_match_ok_body
   delete _DS_match_ng_body
+  delete _DS_match_ng_type
+  delete _DS_match_ng_var_name
+  delete _DS_match_ng_is_default
+  delete _DS_match_ng_body_count
+  delete _DS_ERROR_TYPES
   delete _DS_FUNC_CLASS
   # Re-register built-in function classes (cleared above)
   _DS_FUNC_CLASS["escape_html"]       = "sanitizer"
