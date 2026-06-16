@@ -44,7 +44,7 @@ function test_ctx_query_helper(    req, res) {
   delete res
   req["query:page"] = "3"
   _ctx_load(req, res)
-  assert_eq(ctx::query("page"), "3", "ctx::query reads query param")
+  assert_eq(result_val(ctx::query("page")), "3", "ctx::query reads query param")
 }
 
 function test_ctx_param_helper(    req, res) {
@@ -52,7 +52,7 @@ function test_ctx_param_helper(    req, res) {
   delete res
   req["params:id"] = "99"
   _ctx_load(req, res)
-  assert_eq(ctx::param("id"), "99", "ctx::param reads path param")
+  assert_eq(result_val(ctx::param("id")), "99", "ctx::param reads path param")
 }
 
 function test_ctx_get_header_helper(    req, res) {
@@ -60,8 +60,8 @@ function test_ctx_get_header_helper(    req, res) {
   delete res
   req["header:accept"] = "text/html"
   _ctx_load(req, res)
-  assert_eq(ctx::get_header("Accept"), "text/html", "ctx::get_header normalizes to lowercase")
-  assert_eq(ctx::get_header("accept"), "text/html", "ctx::get_header lowercase input works")
+  assert_eq(result_val(ctx::get_header("Accept")), "text/html", "ctx::get_header normalizes to lowercase")
+  assert_eq(result_val(ctx::get_header("accept")), "text/html", "ctx::get_header lowercase input works")
 }
 
 function test_ctx_body_helper(    req, res) {
@@ -69,7 +69,7 @@ function test_ctx_body_helper(    req, res) {
   delete res
   req["body"] = "raw body content"
   _ctx_load(req, res)
-  assert_eq(ctx::body(), "raw body content", "ctx::body returns raw body")
+  assert_eq(result_val(ctx::body()), "raw body content", "ctx::body returns raw body")
 }
 
 function test_ctx_json_helper(    req, res) {
