@@ -193,10 +193,8 @@ function _ds_expand_interp(line, lineno,    segs, n, i, content, parts, np, j, \
           } else {
             expr_type = _ds_interp_expr_type(parts[j])
             if (_ds_is_nullable(expr_type)) {
-              print "dsl error: " _DS_src_file ":" lineno \
-                  ": cannot interpolate sealed " expr_type \
-                  "; use ?= or match first" > "/dev/stderr"
-              _DS_had_error = 1
+              _ds_error(lineno, "cannot interpolate sealed " expr_type, \
+                  "use ?= or match to unwrap before interpolating")
             }
             if (_ds_is_untrusted(expr_type)) any_untrusted = 1
             fmt = fmt "%s"
@@ -239,12 +237,9 @@ function _ds_expand_fragment_interp(line, lineno,    m, prefix, str_arg, content
       expr_type = _ds_interp_expr_type(_ds_trim(parts[j]))
       if (!type::accepts("HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr", expr_type) &&
           expr_type != "") {
-        print "dsl error: " _DS_src_file ":" lineno \
-            ": safe.html.fragment interpolation expects HtmlPart, got " expr_type \
-            > "/dev/stderr"
-        if (_ds_is_untrusted(expr_type))
-          print "  help: use safe.html.escape()" > "/dev/stderr"
-        _DS_had_error = 1
+        _ds_error(lineno, "safe.html.fragment interpolation expects HtmlPart, got " expr_type, \
+            (_ds_is_untrusted(expr_type) ? "use safe.html.escape() to sanitize the value" \
+                                         : "use an HtmlEscapedStr, HtmlFragment, or HtmlAttrEscapedStr"))
       }
       new_args = new_args _ds_trim(parts[j])
     }

@@ -90,9 +90,7 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
 
     n = _ds_count_args(args_str)
     if (n != _DS_SIG_ARITY[path]) {
-        print "dsl error: " _DS_src_file ":" lineno \
-            ": " path " expects " _DS_SIG_ARITY[path] " argument(s), got " n > "/dev/stderr"
-        _DS_had_error = 1
+        _ds_error(lineno, path " expects " _DS_SIG_ARITY[path] " argument(s), got " n, "")
         return
     }
 
@@ -107,9 +105,8 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
         if (path == "safe.html.fragment" && actual == "Str" && \
             split_args[i] ~ /^"[^"]*"$/) continue
         if (actual == "" || type::accepts(expected, actual)) continue
-        print "dsl error: " _DS_src_file ":" lineno \
-            ": " path " argument " i " expects " expected ", got " actual > "/dev/stderr"
-        _DS_had_error = 1
+        _ds_error(lineno, path " argument " i " expects " expected ", got " actual, \
+            "sanitize or unwrap the value to get " expected)
     }
 }
 

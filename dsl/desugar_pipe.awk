@@ -57,9 +57,8 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
             }
         }
         if (_ds_is_nullable(left_type)) {
-            print "dsl error: " _DS_src_file ":" _DS_current_lineno \
-                ": pipe input is " left_type " — use ?= or match to unwrap first" > "/dev/stderr"
-            _DS_had_error = 1
+            _ds_error(_DS_current_lineno, "pipe input is " left_type, \
+                "use ?= or match to unwrap before piping")
             return line
         }
 
@@ -76,9 +75,8 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
         if (_ds_is_untrusted(left_type)) {
             cls = _DS_FUNC_CLASS[fname]
             if (cls != "transform" && cls != "validator" && cls != "sanitizer") {
-                print "dsl error: " _DS_src_file ":" _DS_current_lineno \
-                    ": " fname " does not accept Untrusted input — classify as transform or unwrap first" > "/dev/stderr"
-                _DS_had_error = 1
+                _ds_error(_DS_current_lineno, fname " does not accept Untrusted input", \
+                    "classify the function as transform/sanitizer, or unwrap the value first")
                 return line
             }
         }
