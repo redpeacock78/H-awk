@@ -12,6 +12,9 @@ set -e
 
 # Parse --workers / -w before APP argument
 WORKERS="${HAWK_WORKERS:-4}"
+NO_EMIT=0
+EMIT=0
+STRICT=0
 args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -27,6 +30,18 @@ while [[ $# -gt 0 ]]; do
       HAWK_DEBUG=1
       shift
       ;;
+    --no-emit)
+      NO_EMIT=1
+      shift
+      ;;
+    --emit)
+      EMIT=1
+      shift
+      ;;
+    --strict)
+      STRICT=1
+      shift
+      ;;
     *)
       args+=("$1")
       shift
@@ -37,6 +52,11 @@ done
 APP="${args[0]:-app.awk}"
 if [[ ! -f "$APP" ]]; then
   echo "[hawk] app file not found: $APP" >&2
+  exit 1
+fi
+
+if [[ "$NO_EMIT" -eq 1 && "$EMIT" -eq 1 ]]; then
+  echo "[hawk] --no-emit and --emit are mutually exclusive" >&2
   exit 1
 fi
 
@@ -117,6 +137,7 @@ shutdown() {
   for pid in "${WORKER_PIDS[@]}"; do
     wait "$pid" 2>/dev/null || true
   done
+  rm -f "$APP_AWK"
   rm -f "$HAWK_PIDFILE"
   exit 0
 }
@@ -144,6 +165,25 @@ _hawk_desugar_app() {
 APP_AWK=$(_hawk_desugar_app "$APP")
 # shellcheck disable=SC2064
 [[ -z "${HAWK_DEBUG}" ]] && trap "rm -f '$APP_AWK'" EXIT
+
+# --strict: gawk syntax validation (shared by --emit and --no-emit)
+if [[ ("$EMIT" -eq 1 || "$NO_EMIT" -eq 1) && "$STRICT" -eq 1 ]]; then
+  if ! gawk --sandbox -f "${HAWK_LIB}/dsl/strict_stubs.awk" -f "$APP_AWK" < /dev/null 2>&1 >/dev/null; then
+    echo "[hawk] --strict: gawk syntax error in desugared output" >&2
+    exit 1
+  fi
+fi
+
+# --emit: print desugared AWK to stdout, exit
+if [[ "$EMIT" -eq 1 ]]; then
+  cat "$APP_AWK"
+  exit 0
+fi
+
+# --no-emit: type-check only, exit without starting server
+if [[ "$NO_EMIT" -eq 1 ]]; then
+  exit 0
+fi
 
 # Start N workers
 for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do

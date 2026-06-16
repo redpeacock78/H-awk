@@ -39,6 +39,8 @@ FNR == 1 {
   print "# line 1 \"" FILENAME "\""
 }
 
+{ _DS_src_lines[FNR] = $0 }
+
 { _ds_process_line($0, FNR) }
 
 END {
@@ -54,9 +56,8 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
   _DS_current_lineno = lineno
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
-      print "dsl error: " _DS_src_file ":" lineno \
-        ": 'let' outside function body" > "/dev/stderr"
-      _DS_had_error = 1
+      _ds_error(lineno, "'let' outside function body", \
+        "move 'let' declarations inside a function")
       exit 1
     }
     # type X = Error → emit constructor + register error type
@@ -216,6 +217,21 @@ function _ds_net_braces(line,    n, i, c) {
     else if (c == "}") n--
   }
   return n
+}
+
+function _ds_error(lineno, msg, help,    src, use_color, r, b, n) {
+    use_color = (ENVIRON["TERM"] != "" && ENVIRON["NO_COLOR"] == "")
+    r = use_color ? "\033[31m" : ""
+    b = use_color ? "\033[1m"  : ""
+    n = use_color ? "\033[0m"  : ""
+    src = (lineno in _DS_src_lines) ? _DS_src_lines[lineno] : ""
+    printf "%serror%s: %s\n", b r, n, msg > "/dev/stderr"
+    printf "  --> %s:%d\n", _DS_src_file, lineno > "/dev/stderr"
+    print "   |" > "/dev/stderr"
+    if (src != "") printf "%3d | %s\n", lineno, src > "/dev/stderr"
+    print "   |" > "/dev/stderr"
+    if (help != "") printf "   = help: %s\n", help > "/dev/stderr"
+    _DS_had_error = 1
 }
 
 # Extract return type from "function f(...) -> ReturnType {"
