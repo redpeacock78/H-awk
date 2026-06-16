@@ -137,6 +137,7 @@ shutdown() {
   for pid in "${WORKER_PIDS[@]}"; do
     wait "$pid" 2>/dev/null || true
   done
+  rm -f "$APP_AWK"
   rm -f "$HAWK_PIDFILE"
   exit 0
 }
@@ -165,26 +166,22 @@ APP_AWK=$(_hawk_desugar_app "$APP")
 # shellcheck disable=SC2064
 [[ -z "${HAWK_DEBUG}" ]] && trap "rm -f '$APP_AWK'" EXIT
 
+# --strict: gawk syntax validation (shared by --emit and --no-emit)
+if [[ ("$EMIT" -eq 1 || "$NO_EMIT" -eq 1) && "$STRICT" -eq 1 ]]; then
+  if ! gawk --sandbox -f "${HAWK_LIB}/dsl/strict_stubs.awk" -f "$APP_AWK" < /dev/null 2>&1 >/dev/null; then
+    echo "[hawk] --strict: gawk syntax error in desugared output" >&2
+    exit 1
+  fi
+fi
+
 # --emit: print desugared AWK to stdout, exit
 if [[ "$EMIT" -eq 1 ]]; then
-  if [[ "$STRICT" -eq 1 ]]; then
-    gawk --sandbox -f "$APP_AWK" < /dev/null 2>/dev/null || {
-      echo "[hawk] --strict: gawk syntax error in desugared output" >&2
-      exit 1
-    }
-  fi
   cat "$APP_AWK"
   exit 0
 fi
 
 # --no-emit: type-check only, exit without starting server
 if [[ "$NO_EMIT" -eq 1 ]]; then
-  if [[ "$STRICT" -eq 1 ]]; then
-    gawk --sandbox -f "$APP_AWK" < /dev/null 2>/dev/null || {
-      echo "[hawk] --strict: gawk syntax error in desugared output" >&2
-      exit 1
-    }
-  fi
   exit 0
 fi
 

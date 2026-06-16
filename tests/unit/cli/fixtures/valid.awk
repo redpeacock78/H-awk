@@ -1,8 +1,8 @@
 BEGIN {
-  hawk.app.get("/", "index")
+  hawk.app.get("/", "handle_index")
   hawk.app.listen(8080)
 }
 
-function index() {
+function handle_index() {
   return ctx.res.text("ok")
 }
