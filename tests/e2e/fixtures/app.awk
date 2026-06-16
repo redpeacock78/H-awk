@@ -12,7 +12,7 @@ function e_index() {
 }
 
 function e_show() {
-  ctx::text("user=" ctx::param("id"))
+  ctx::text("user=" result_val(ctx::param("id")))
 }
 
 function e_echo(    data) {

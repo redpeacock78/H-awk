@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # テスト用ハンドラ (ctx:: スタイル — @handler() でゼロ引数呼び出し)
 function _t_hello() { ctx::text("hello") }
-function _t_show()  { ctx::text("id=" ctx::param("id")) }
+function _t_show()  { ctx::text("id=" result_val(ctx::param("id"))) }
 function _t_add()   { ctx::status(201); ctx::text("added") }
 
 function _router_reset() {
