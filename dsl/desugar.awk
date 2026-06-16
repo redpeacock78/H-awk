@@ -50,7 +50,7 @@ END {
   }
 }
 
-function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m) {
+function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m, _ds_type_m) {
   _DS_current_lineno = lineno
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
@@ -58,6 +58,12 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
         ": 'let' outside function body" > "/dev/stderr"
       _DS_had_error = 1
       exit 1
+    }
+    # type X = Error → emit constructor + register error type
+    if (match(line, /^([[:space:]]*)type[[:space:]]+([A-Z][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*Error[[:space:]]*$/, _ds_type_m)) {
+      _DS_ERROR_TYPES[_ds_type_m[2]] = 1
+      print _ds_type_m[1] "function " _ds_type_m[2] "(msg) { return result_ng(\"" _ds_type_m[2] "\", msg) }"
+      return
     }
     if (_ds_is_func_def(line)) {
       _DS_in_function  = 1
