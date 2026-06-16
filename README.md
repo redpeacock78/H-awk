@@ -59,22 +59,32 @@ function list_todos() {
 }
 
 function add_todo() {
-  let raw_title ?= ctx.req.form("title")
-  if (raw_title == "") {
-    ctx.res.status(400)
-    return ctx.res.text("title required")
-  }
-  ctx.res.status(201)
-  return ctx.res.html(safe.html.fragment(
-    "<li>", safe.html.escape(raw_title), "</li>"
-  ))
+  when ctx.req.form("title") of
+    ok raw:
+      if (raw == "") {
+        ctx.res.status(400)
+        return ctx.res.text("title required")
+      }
+      ctx.res.status(201)
+      return ctx.res.html(safe.html.fragment(
+        "<li>", safe.html.escape(raw), "</li>"
+      ))
+    ng:
+      ctx.res.status(400)
+      return ctx.res.text("title required")
+  end
 }
 
 function delete_todo() -> Response {
-  let raw_id ?= ctx.req.param("id")
-  delete_tsv("data/todos.tsv", "id", raw_id)
-  ctx.res.status(200)
-  return ctx.res.html(safe.html.raw(""))
+  when ctx.req.param("id") of
+    ok raw_id:
+      delete_tsv("data/todos.tsv", "id", raw_id)
+      ctx.res.status(200)
+      return ctx.res.html(safe.html.raw(""))
+    ng:
+      ctx.res.status(400)
+      return ctx.res.text("missing id")
+  end
 }
 ```
 
@@ -101,7 +111,7 @@ Rule: `ns.a.b.c(args)` → `ns::dispatch("a.b.c", args)`. First segment is the d
 ```awk
 # DSL
 function handler() {
-  let title = ctx.req.form("title")
+  let title = "hello"
   let items = []
   let tmp
   ...
@@ -109,7 +119,7 @@ function handler() {
 
 # Desugared
 function handler(    title, items, tmp) {
-  title = ctx::dispatch("req.form", "title")
+  title = "hello"
   delete items
   ...
 }
@@ -123,13 +133,11 @@ function handler(    title, items, tmp) {
 # Typed let with initializer — static check at desugar time
 function handler() {
   let n: Int = 42
-  let title: Str = ctx.req.form("title")
 }
 
-# Desugared (coerce only when type can't be statically confirmed)
-function handler(    n, title) {
-  n     = 42
-  title = ctx::dispatch("req.form", "title")
+# Desugared
+function handler(    n) {
+  n = 42
 }
 ```
 
@@ -161,12 +169,6 @@ let port: Int = "hello"
 function handler() {
   let port: Int | Str = env.get("PORT") ?? 8080
 }
-
-# Desugared
-function handler(    port) {
-  _ds_tc_1 = env::dispatch("get", "PORT")
-  port = (_ds_tc_1 != "" ? _ds_tc_1 : 8080)
-}
 ```
 
 ```sh
@@ -188,7 +190,7 @@ function normalize(text: Str) -> Str {
 }
 
 function handler() -> Response {
-  let result: Str = normalize(ctx.req.form("title"))
+  let result: Str = normalize("hello")
   return ctx.res.text(result)
 }
 
@@ -198,7 +200,7 @@ function normalize(text) {
 }
 
 function handler(    result) {
-  result = normalize(ctx::dispatch("req.form", "title"))
+  result = normalize("hello")
   return ctx::dispatch("res.text", result)
 }
 ```
@@ -247,13 +249,12 @@ Four sanitizers in the `safe.*` namespace produce these brand types:
 | `safe.attr.escape(s)` | `Str\|Untrusted<Str>` | `HtmlAttrEscapedStr` | Escape user-supplied text for HTML attributes |
 | `safe.html.raw(s)` | `Str` | `HtmlFragment` | Trust assertion — use only for known-safe strings |
 | `safe.html.fragment(parts...)` | `HtmlPart` args | `HtmlFragment` | Compose brand-typed HTML parts into a fragment |
+| `safe.str.trust(s)` | `Untrusted<Str>` | `Str` | Explicit trust assertion — strips Untrusted wrapper without transformation |
 
 `HtmlPart` is an alias for `HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr`. Literal string arguments to `safe.html.fragment` are also accepted as trusted static HTML.
 
 ```awk
 function render_item(id: Str, title: Str) -> HtmlFragment {
-  # safe.html.escape: Untrusted<Str> → HtmlEscapedStr
-  # safe.attr.escape: Untrusted<Str> → HtmlAttrEscapedStr
   return safe.html.raw(sprintf(
     "<li id=\"item-%s\">%s</li>",
     safe.attr.escape(id),
@@ -297,23 +298,26 @@ let msg: Str = "#{first} #{last} (#{age})"
 If any embedded expression is `Untrusted<T>`, the resulting variable is inferred as `Untrusted<Str>`:
 
 ```awk
-let raw_name ?= ctx.req.form("name")
-let greeting: Str = "Hello, #{raw_name}!"
-# → greeting is Untrusted<Str> — raw_name is Untrusted<Str>
-
-# Desugar-time error: cannot pass Untrusted<Str> to ctx.res.text without sanitizing
-return ctx.res.text(greeting)
-# dsl error: app.awk:3: ctx.res.text argument 1 expects Str|Untrusted<Str>, got Untrusted<Str>
+when ctx.req.form("name") of
+  ok raw_name:
+    let greeting: Str = "Hello, #{raw_name}!"
+    # → greeting is Untrusted<Str> because raw_name is Untrusted<Str>
+  ng:
+    return ctx.res.status(400)
+end
 ```
 
 Interpolation also works inside `safe.html.fragment(...)` calls. Literal text between `#{...}` markers is treated as trusted static HTML; embedded expressions are type-checked as `HtmlPart`:
 
 ```awk
-# Each #{...} expression must produce HtmlEscapedStr, HtmlFragment, or HtmlAttrEscapedStr
-let raw_title ?= ctx.req.form("title")
-return ctx.res.html(safe.html.fragment(
-  "<li class=\"item\">#{safe.html.escape(raw_title)}</li>"
-))
+when ctx.req.form("title") of
+  ok raw_title:
+    return ctx.res.html(safe.html.fragment(
+      "<li class=\"item\">#{safe.html.escape(raw_title)}</li>"
+    ))
+  ng:
+    return ctx.res.status(400)
+end
 ```
 
 **`??` null-coalescing operator**
@@ -334,25 +338,32 @@ Rule: `expr ?? default` — if `expr` evaluates to empty string, use `default`. 
 ```awk
 # DSL
 function handler() {
-  let raw  ?= ctx.req.form("title")
-  let safe  = raw |> strip()
+  when ctx.req.form("title") of
+    ok raw:
+      let safe = raw |> strip()
+      return ctx.res.text(safe)
+    ng:
+      return ctx.res.status(400)
+  end
 }
 
 # Desugared — temp var injected, inserted as first arg
-function handler(    _ds_tc_1, raw, _ds_p_1, safe) {
-  _ds_tc_1 = ctx::dispatch("req.form", "title")
-  if (!result_ok(_ds_tc_1)) {
-    return ctx::dispatch("res.status", 500)
+function handler(    _ds_mc_1, raw, _ds_p_1, safe) {
+  _ds_mc_1 = ctx::dispatch("req.form", "title")
+  if (result_ok(_ds_mc_1)) {
+    raw = result_val(_ds_mc_1)
+    _ds_p_1 = strip(raw)
+    safe = _ds_p_1
+    return ctx::dispatch("res.text", safe)
+  } else {
+    return ctx::dispatch("res.status", 400)
   }
-  raw = result_val(_ds_tc_1)
-  _ds_p_1 = strip(raw)
-  safe = _ds_p_1
 }
 ```
 
 Rule: `expr |> f(args)` → temp var for `expr`, then `f(tempvar, args)`. Chains left-to-right. LHS must be a plain identifier (use `let tmp = expr` first for complex expressions).
 
-Sealed-pipe rule: `Result<T, E>` and `Option<T>` values cannot be piped directly — use `?=` or `match...of` to unwrap first.
+Sealed-pipe rule: `Result<T, E>` and `Option<T>` values cannot be piped directly — use `?=` or `when...of` to unwrap first.
 
 Dot-notation functions work as pipe RHS:
 
@@ -361,14 +372,16 @@ let escaped = raw_title |> safe.html.escape()
 # → _ds_p_1 = safe::dispatch("html.escape", raw_title)
 ```
 
-**`match...of...end` expression**
+**`when...of...end` expression**
+
+Pattern-match on `Result<T, E>` and `Option<T>` values. Desugars to an if/else chain.
 
 ```awk
 # DSL
 function handler() {
-  match ctx.req.json() of
+  when ctx.req.json() of
     ok body:
-      return ctx.res.text(body["title"])
+      return ctx.res.json(body)
     ng err:
       return ctx.res.status(500)
   end
@@ -379,7 +392,7 @@ function handler(    _ds_mc_1, body, err) {
   _ds_mc_1 = ctx::dispatch("req.json")
   if (result_ok(_ds_mc_1)) {
     body = result_val(_ds_mc_1)
-    return ctx::dispatch("res.text", body["title"])
+    return ctx::dispatch("res.json", body)
   } else {
     err = result_err(_ds_mc_1)
     return ctx::dispatch("res.status", 500)
@@ -387,7 +400,162 @@ function handler(    _ds_mc_1, body, err) {
 }
 ```
 
-Branch keywords: `ok VAR:` / `ng VAR:` for `Result<T,E>`, `some VAR:` / `none:` for `Option<T>`, `default:` as catch-all. Missing `ng`/`none`/`default` is a desugar-time error.
+**All arm forms:**
+
+```
+when EXPR of
+  # Result<T, E> arms
+  ok name:           # ok — bind value to name
+  ok:                # ok — no bind
+  ng e: TypeName:    # ng — typed, bind error to e (dispatch by type)
+  ng TypeName:       # ng — typed, no bind
+  ng name:           # ng — untyped, bind error to name
+  ng:                # ng — untyped, no bind
+  default name:      # catch-all, bind to name
+  default:           # catch-all, no bind
+
+  # Option<T> arms
+  some name:         # some — bind value to name
+  some:              # some — no bind
+  none:              # none — no bind (treated as catch-all for Option)
+end
+```
+
+Type names start with an uppercase letter (`[A-Z]`); bind variable names start with a lowercase letter or underscore (`[a-z_]`).
+
+**Multiple typed `ng` arms** — dispatch by error type at runtime:
+
+```awk
+type AuthError    = Error
+type NotFoundError = Error
+
+function handler() {
+  when fetch_user(id) of
+    ok user:
+      return ctx.res.json(user)
+    ng e: AuthError:
+      return ctx.res.status(401)
+    ng e: NotFoundError:
+      return ctx.res.status(404)
+    default:
+      return ctx.res.status(500)
+  end
+}
+
+# Desugared
+function handler(    _ds_mc_1, user, e) {
+  _ds_mc_1 = fetch_user(id)
+  if (result_ok(_ds_mc_1)) {
+    user = result_val(_ds_mc_1)
+    return ctx::dispatch("res.json", user)
+  } else if (result_err_type(_ds_mc_1) == "AuthError") {
+    e = result_err(_ds_mc_1)
+    return ctx::dispatch("res.status", 401)
+  } else if (result_err_type(_ds_mc_1) == "NotFoundError") {
+    e = result_err(_ds_mc_1)
+    return ctx::dispatch("res.status", 404)
+  } else {
+    return ctx::dispatch("res.status", 500)
+  }
+}
+```
+
+Missing `ng`/`none`/`default` is a desugar-time error.
+
+**Exhaustiveness check for union error types:** When a function is annotated `-> Result<T, E1 | E2>`, typed `ng` arms must cover every union member, or a `default:`/`ng:` catch-all arm must be present:
+
+```sh
+# Desugar-time error: NotFoundError arm is missing
+function handler() {
+  when fetch_user(id) of
+    ok user:
+      return ctx.res.json(user)
+    ng e: AuthError:
+      return ctx.res.status(401)
+  end
+}
+# dsl error: app.awk:9: when...of missing arm for NotFoundError (add 'ng e: NotFoundError:' or 'default:')
+```
+
+**`type X = Error` — custom error constructors**
+
+Define custom error types and use them in `ng` arms:
+
+```awk
+# DSL
+type AuthError    = Error
+type NotFoundError = Error
+
+# Desugared
+function AuthError(msg)     { return result_ng("AuthError", msg) }
+function NotFoundError(msg) { return result_ng("NotFoundError", msg) }
+```
+
+Use in functions:
+
+```awk
+function fetch_user(id) -> Result<Str, AuthError | NotFoundError> {
+  if (!authenticated()) return AuthError("token expired")
+  if (!found(id))       return NotFoundError("user " id)
+  return result_ok_make(id)
+}
+```
+
+**ADT encoding**
+
+`Result` and `Option` values are encoded as strings using ASCII Unit Separator (`\x1F`, U+001F):
+
+| State | Encoding |
+|---|---|
+| `ok(val)` | `"ok\x1F" val` |
+| `ng(TypeName)` | `"ng\x1F" TypeName` |
+| `ng(TypeName, msg)` | `"ng\x1F" TypeName "\x1F" msg` |
+| `some(val)` | `val` (non-empty string) |
+| `none` | `""` (empty string) |
+
+Runtime helpers (defined in `dsl/adt.awk`, always available):
+
+```awk
+result_ok(v)              # → 1 if v is ok
+result_val(v)             # → inner value of ok
+result_ok_make(val)       # → ok-encoded string
+result_ng(type, msg)      # → ng-encoded string
+result_err_type(v)        # → TypeName of ng value
+result_err(v)             # → "TypeName" or "TypeName\x1Fmsg"
+
+option_some(v)            # → 1 if non-empty
+option_val(v)             # → v (identity)
+```
+
+**`?=` safe unwrap operator**
+
+Unwrap an `Option<T>` or `Result<T, E>` value. If the value is `ng`/`none`, automatically returns a 500 response. Only valid when the RHS type is `Option` or `Result`.
+
+```awk
+# DSL
+function create_todo() {
+  let body ?= ctx.req.json()
+  # body is now the unwrapped Untrusted<Map> value
+}
+
+# Desugared
+function create_todo(    _ds_tc_1, body) {
+  _ds_tc_1 = ctx::dispatch("req.json")
+  if (!result_ok(_ds_tc_1)) {
+    return ctx::dispatch("res.status", 500)
+  }
+  body = result_val(_ds_tc_1)
+}
+```
+
+Desugar-time error if the RHS type is not `Option` or `Result`:
+
+```sh
+let port ?= env.get("PORT")
+# dsl error: app.awk:5: ?= requires Option or Result, got Str
+```
+
+After `?=` unwrap, the variable holds `Untrusted<T>` — pass it to a `safe.*` sanitizer before using in HTML output.
 
 **`classify:` annotation**
 
@@ -405,35 +573,6 @@ Marks a function's role in the dataflow:
 - `sink` — terminal consumer (no output)
 
 `classify:` lines are stripped from gawk output — annotation only.
-
-**`?=` safe unwrap operator**
-
-Unwrap an `Option<T>` or `Result<T, E>` value. If the call fails, automatically returns a 500 response. Only valid for functions whose return type is `Option` or `Result`.
-
-```awk
-# DSL
-function create_todo() {
-  let body ?= ctx.req.json()
-}
-
-# Desugared
-function create_todo(    _ds_tc_1, body) {
-  _ds_tc_1 = ctx::dispatch("req.json")
-  if (!result_ok(_ds_tc_1)) {
-    return ctx::dispatch("res.status", 500)
-  }
-  body = result_val(_ds_tc_1)
-}
-```
-
-Desugar-time error if the RHS type is not Option or Result:
-
-```sh
-let port ?= env.get("PORT")
-# dsl error: app.awk:5: ?= requires Option or Result, got Str
-```
-
-After `?=` unwrap, the variable holds `Untrusted<T>` — pass it to a `safe.*` sanitizer before using in HTML output.
 
 **DSL function call checking**
 
@@ -506,20 +645,23 @@ hawk::all(ps, "handler")
 
 ### Context API reference
 
-| DSL | Desugared | Description |
+Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` or `?=` to unwrap.
+
+| DSL | Desugared | Return type |
 |---|---|---|
-| `ctx.req.query(key)` | `ctx::dispatch("req.query", key)` | URL query parameter |
-| `ctx.req.param(key)` | `ctx::dispatch("req.param", key)` | Path parameter (`:id`) |
-| `ctx.req.header(key)` | `ctx::dispatch("req.header", key)` | Request header (lowercase normalized) |
-| `ctx.req.body()` | `ctx::dispatch("req.body")` | Raw request body |
-| `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | Form field |
-| `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | Respond with JSON |
-| `ctx.res.text(data)` | `ctx::dispatch("res.text", data)` | Respond with plain text |
-| `ctx.res.html(data)` | `ctx::dispatch("res.html", data)` | Respond with HTML (`HtmlEscapedStr\|HtmlFragment` required) |
-| `ctx.res.render(path)` | `ctx::dispatch("res.render", path)` | Render a static HTML file |
-| `ctx.res.status(code)` | `ctx::dispatch("res.status", code)` | Set HTTP status code |
-| `ctx.res.header(name, val)` | `ctx::dispatch("res.header", name, val)` | Set response header |
-| `ctx.res.redirect(url[, code])` | `ctx::dispatch("res.redirect", url[, code])` | HTTP redirect |
+| `ctx.req.query(key)` | `ctx::dispatch("req.query", key)` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.param(key)` | `ctx::dispatch("req.param", key)` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.header(key)` | `ctx::dispatch("req.header", key)` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.body()` | `ctx::dispatch("req.body")` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Map>, ParseError>` |
+| `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | `Response` |
+| `ctx.res.text(data)` | `ctx::dispatch("res.text", data)` | `Response` |
+| `ctx.res.html(data)` | `ctx::dispatch("res.html", data)` | `Response` (`HtmlEscapedStr\|HtmlFragment` required) |
+| `ctx.res.render(path)` | `ctx::dispatch("res.render", path)` | `Response` |
+| `ctx.res.status(code)` | `ctx::dispatch("res.status", code)` | `Response` |
+| `ctx.res.header(name, val)` | `ctx::dispatch("res.header", name, val)` | `Response` |
+| `ctx.res.redirect(url)` | `ctx::dispatch("res.redirect", url)` | `Response` |
 
 ### Router files
 
@@ -536,9 +678,13 @@ function routes() {
 
 function index() { ctx::json("[]") }
 
-function show(id) {
-  id = ctx::param("id")
-  return ctx::json("{\"id\":\"" id "\"}")
+function show() {
+  when ctx::param("id") of
+    ok id:
+      return ctx::json("{\"id\":\"" result_val(id) "\"}")
+    ng:
+      return ctx::status(400)
+  end
 }
 ```
 
@@ -566,10 +712,10 @@ env::has("KEY")          # 1 if set, 0 if not
 DSL-style (dot-notation) invocations are also supported:
 
 ```awk
-env.get("KEY")          # returns ENVIRON["KEY"]; "" if unset
-env.set("KEY", "val")   # ENVIRON["KEY"] = "val"
-env.del("KEY")          # delete ENVIRON["KEY"]
-env.has("KEY")          # 1 if set, 0 if not
+env.get("KEY")
+env.set("KEY", "val")
+env.del("KEY")
+env.has("KEY")
 ```
 
 Variables set or deleted via `env::set` / `env::del` are visible to subsequent `env::get` calls within the same gawk process, but are **not** propagated to child processes spawned via `system()` or pipes.
