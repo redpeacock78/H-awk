@@ -16,6 +16,7 @@
 #   http       -- END でリッスンループ起動
 
 @include "core/util.awk"
+@include "dsl/adt.awk"
 @include "core/dispatch.awk"
 @include "core/libs.awk"
 @include "core/json.awk"
