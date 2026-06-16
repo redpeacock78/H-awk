@@ -49,9 +49,8 @@ function _ds_infer_type(expr,    m) {
             fname == "atan2" || fname == "exp" || fname == "log" || \
             fname == "sqrt") return "Float"
         # Unknown function: report error
-        print "dsl error: " _DS_src_file ":" _DS_current_lineno \
-            ": unknown function " fname > "/dev/stderr"
-        _DS_had_error = 1
+        _ds_error(_DS_current_lineno, "unknown function " fname, \
+            "define the function before use, or check the spelling")
         return ""
     }
     # 変数参照: _DS_VAR_TYPES から型を取得
@@ -65,16 +64,13 @@ function _ds_check_type(declared, inferred, lineno) {
     if (inferred == "" || inferred == declared) return
     # Brand forgery prevention: brand types cannot be created by annotation
     if (_ds_is_brand(declared) && inferred != declared) {
-        print "dsl error: " _DS_src_file ":" lineno \
-            ": safe/brand type cannot be created by annotation" > "/dev/stderr"
-        print "  " declared " must be constructed by trusted sanitizer" > "/dev/stderr"
-        _DS_had_error = 1
+        _ds_error(lineno, "safe/brand type cannot be created by annotation", \
+            declared " must be constructed by a trusted sanitizer function")
         return
     }
     if (type::accepts(declared, inferred)) return
-    print "dsl error: " _DS_src_file ":" lineno \
-        ": type mismatch: cannot assign " inferred " to " declared > "/dev/stderr"
-    _DS_had_error = 1
+    _ds_error(lineno, "type mismatch: cannot assign " inferred " to " declared, \
+        "use a value of type " declared ", or remove the type annotation")
 }
 
 # _ds_kind_of: 型文字列から変数の kind を取得する
@@ -129,9 +125,8 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
     rhs = _ds_trim(arr[3])
     declared = _ds_infer_type(rhs)
     if (declared != "" && !_ds_is_nullable(declared) && !_ds_all_nullable(declared)) {
-      print "dsl error: " _DS_src_file ":" lineno \
-          ": ?= requires Option or Result, got " declared > "/dev/stderr"
-      _DS_had_error = 1
+      _ds_error(lineno, "?= requires Option or Result, got " declared, \
+          "use ?= only with Option<T> or Result<T,E> types")
       return ""
     }
     _DS_tc_count++

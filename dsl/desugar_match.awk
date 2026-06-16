@@ -94,9 +94,8 @@ function _ds_match_collect(line, lineno,    m, i) {
   } else {
     i = _DS_match_cur_ng_arm
     if (i == 0) {
-      print "dsl error: " _DS_src_file ":" lineno \
-        ": when...of body line before any arm" > "/dev/stderr"
-      _DS_had_error = 1
+      _ds_error(lineno, "when...of body line before any arm", \
+          "move this line inside an ok:, ng:, or default: arm")
       return ""
     }
     _DS_match_ng_body[i, ++_DS_match_ng_body_count[i]] = line
@@ -124,9 +123,8 @@ function _ds_match_reset() {
 # Emit desugared if/else into _DS_body_buf.
 function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered) {
   if (_DS_match_ng_arms == 0) {
-    print "dsl error: " _DS_src_file ":" lineno \
-      ": when...of missing ng/none/default branch" > "/dev/stderr"
-    _DS_had_error = 1
+    _ds_error(lineno, "when...of missing ng/none/default branch", \
+        "add an ng: or default: arm to handle the error case")
     _ds_match_reset()
     return
   }
@@ -172,10 +170,9 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, 
           if (_DS_match_ng_type[i] != "") _ds_covered[_DS_match_ng_type[i]] = 1
         for (i = 1; i <= _ds_n_union; i++) {
           if (!(_ds_union_members[i] in _ds_covered)) {
-            print "dsl error: " _DS_src_file ":" lineno \
-              ": when...of missing arm for " _ds_union_members[i] \
-              " (add 'ng e: " _ds_union_members[i] ":' or 'default:')" > "/dev/stderr"
-            _DS_had_error = 1
+            _ds_error(lineno, \
+              "when...of missing arm for " _ds_union_members[i], \
+              "add 'ng e: " _ds_union_members[i] ":' or 'default:'")
           }
         }
         if (_DS_had_error) { _ds_match_reset(); return }

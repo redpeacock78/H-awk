@@ -46,8 +46,9 @@ FNR == 1 {
 END {
   if (_DS_had_error) exit 1
   if (_DS_in_function) {
-    print "dsl error: " _DS_src_file ": unclosed function '" _DS_func_name "'" \
-      > "/dev/stderr"
+    _ds_error(_DS_current_lineno, \
+      "unclosed function '" _DS_func_name "'", \
+      "add a closing '}' to end the function body")
     exit 1
   }
 }
@@ -284,15 +285,15 @@ function _ds_check_return(line, lineno,    m, actual) {
   actual = _ds_infer_type(_ds_trim(m[1]))
   if (actual == "") return
   if (_DS_func_ret_type == "Void") {
-    print "dsl error: " _DS_src_file ":" lineno \
-        ": function " _DS_func_name " expects Void, got " actual > "/dev/stderr"
-    _DS_had_error = 1
+    _ds_error(lineno, \
+      "function " _DS_func_name " expects Void, got " actual, \
+      "remove the return value, or change the function's return type")
     return
   }
   if (!type::accepts(_DS_func_ret_type, actual)) {
-    print "dsl error: " _DS_src_file ":" lineno \
-        ": function " _DS_func_name " expects return " _DS_func_ret_type ", got " actual > "/dev/stderr"
-    _DS_had_error = 1
+    _ds_error(lineno, \
+      "function " _DS_func_name " expects return " _DS_func_ret_type ", got " actual, \
+      "return a value of type " _DS_func_ret_type ", or update the return type annotation")
   }
 }
 
