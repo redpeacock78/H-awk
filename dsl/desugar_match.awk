@@ -1,129 +1,219 @@
 # SPDX-License-Identifier: MIT
-# dsl/desugar_match.awk -- match...of...end expression transform
+# dsl/desugar_match.awk -- when...of...end expression transform
 #
 # Syntax:
-#   match EXPR of
-#     ok VAR:       -- Result ok branch (binds VAR to result_val)
-#     ng VAR:       -- Result error branch (binds VAR to result_err)
-#     some VAR:     -- Option some branch (binds VAR to option_val)
-#     none:         -- Option none branch (no binding)
-#     default:      -- catch-all (no binding; replaces ng/none)
+#   when EXPR of
+#     ok VAR:           -- Result ok branch (binds VAR to result_val)
+#     ok:               -- Result ok branch (no binding)
+#     some VAR:         -- Option some branch (binds VAR to option_val)
+#     some:             -- Option some branch (no binding)
+#     ng e: TypeName:   -- typed ng, bind e to result_err, match by type
+#     ng TypeName:      -- typed ng, no bind, match by type
+#     ng VAR:           -- untyped ng, bind VAR to result_err
+#     ng:               -- untyped ng, no bind
+#     none:             -- Option none branch (catch-all for option)
+#     default VAR:      -- catch-all, bind VAR to result_err
+#     default:          -- catch-all, no binding
 #   end
 #
-# Desugars to: tmpvar = EXPR; if (...) { ... } else { ... }
+# Desugars to: tmpvar = EXPR; if (...) { ... } else if (...) { ... } else { ... }
 
-# Returns 1 if the line starts a match block; captures indent in m[1], expr in m[2]
+# Returns 1 if the line starts a when block; captures indent in m[1], expr in m[2]
 function _ds_match_starts(line, m) {
-    return match(line, /^([[:space:]]*)match[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)
+  return match(line, /^([[:space:]]*)when[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)
 }
 
-# Collect a line while inside a match block. Returns "" always.
+# Collect a line while inside a when block. Returns "" always.
 # Branch headers set state; body lines are buffered; "end" triggers emit.
-function _ds_match_collect(line, lineno,    m) {
-    if (match(line, /^[[:space:]]*ok[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
-        _DS_match_ok_var = m[1]; _DS_match_branch = "ok"; return ""
+function _ds_match_collect(line, lineno,    m, i) {
+  # ok name:  (ok, bind)
+  if (match(line, /^[[:space:]]*ok[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+    _DS_match_ok_var = m[1]; _DS_match_branch = "ok"; return ""
+  }
+  # ok:  (ok, no bind)
+  if (line ~ /^[[:space:]]*ok:[[:space:]]*$/) {
+    _DS_match_ok_var = ""; _DS_match_branch = "ok"; return ""
+  }
+  # some name:  (some, bind)
+  if (match(line, /^[[:space:]]*some[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+    _DS_match_ok_var = m[1]; _DS_match_branch = "some"; return ""
+  }
+  # some:  (some, no bind)
+  if (line ~ /^[[:space:]]*some:[[:space:]]*$/) {
+    _DS_match_ok_var = ""; _DS_match_branch = "some"; return ""
+  }
+  # none:  (none, no bind — treated as default arm for option)
+  if (line ~ /^[[:space:]]*none:[[:space:]]*$/) {
+    i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
+    _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = ""
+    _DS_match_ng_is_default[i] = 1; _DS_match_branch = "ng"; return ""
+  }
+  # ng e: TypeName:  (typed ng, bind — check BEFORE plain "ng name:")
+  if (match(line, /^[[:space:]]*ng[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*([A-Z][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+    i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
+    _DS_match_ng_type[i] = m[2]; _DS_match_ng_var_name[i] = m[1]
+    _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
+  }
+  # ng TypeName:  (typed ng, no bind)
+  if (match(line, /^[[:space:]]*ng[[:space:]]+([A-Z][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+    i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
+    _DS_match_ng_type[i] = m[1]; _DS_match_ng_var_name[i] = ""
+    _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
+  }
+  # ng name:  (untyped ng, bind)
+  if (match(line, /^[[:space:]]*ng[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+    i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
+    _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = m[1]
+    _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
+  }
+  # ng:  (untyped ng, no bind)
+  if (line ~ /^[[:space:]]*ng:[[:space:]]*$/) {
+    i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
+    _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = ""
+    _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
+  }
+  # default name:  (catch-all, bind)
+  if (match(line, /^[[:space:]]*default[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+    i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
+    _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = m[1]
+    _DS_match_ng_is_default[i] = 1; _DS_match_branch = "ng"; return ""
+  }
+  # default:  (catch-all, no bind)
+  if (line ~ /^[[:space:]]*default:[[:space:]]*$/) {
+    i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
+    _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = ""
+    _DS_match_ng_is_default[i] = 1; _DS_match_branch = "ng"; return ""
+  }
+  # end
+  if (line ~ /^[[:space:]]*end[[:space:]]*$/) {
+    _DS_in_match = 0; _ds_match_emit(lineno); return ""
+  }
+  # Body line — buffer under current branch
+  if (_DS_match_branch == "ok" || _DS_match_branch == "some") {
+    _DS_match_ok_body[++_DS_match_ok_count] = line
+  } else {
+    i = _DS_match_cur_ng_arm
+    if (i == 0) {
+      print "dsl error: " _DS_src_file ":" lineno \
+        ": when...of body line before any arm" > "/dev/stderr"
+      _DS_had_error = 1
+      return ""
     }
-    if (match(line, /^[[:space:]]*ng[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
-        _DS_match_ng_var = m[1]; _DS_match_branch = "ng"; _DS_match_has_ng = 1; return ""
-    }
-    if (match(line, /^[[:space:]]*some[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
-        _DS_match_ok_var = m[1]; _DS_match_branch = "some"; return ""
-    }
-    if (line ~ /^[[:space:]]*none:[[:space:]]*$/) {
-        _DS_match_branch = "none"; _DS_match_has_ng = 1; return ""
-    }
-    if (line ~ /^[[:space:]]*default:[[:space:]]*$/) {
-        _DS_match_branch = "default"; _DS_match_has_ng = 1; return ""
-    }
-    if (line ~ /^[[:space:]]*end[[:space:]]*$/) {
-        _DS_in_match = 0; _ds_match_emit(lineno); return ""
-    }
-    # Body line — buffer under current branch
-    if (_DS_match_branch == "ok" || _DS_match_branch == "some")
-        _DS_match_ok_body[++_DS_match_ok_count] = line
-    else
-        _DS_match_ng_body[++_DS_match_ng_count] = line
-    return ""
+    _DS_match_ng_body[i, ++_DS_match_ng_body_count[i]] = line
+  }
+  return ""
+}
+
+# Reset all match state variables and arrays
+function _ds_match_reset() {
+  _DS_match_ok_count   = 0
+  _DS_match_ok_var     = ""
+  _DS_match_branch     = ""
+  _DS_match_expr       = ""
+  _DS_match_indent     = ""
+  _DS_match_ng_arms    = 0
+  _DS_match_cur_ng_arm = 0
+  delete _DS_match_ok_body
+  delete _DS_match_ng_body
+  delete _DS_match_ng_type
+  delete _DS_match_ng_var_name
+  delete _DS_match_ng_is_default
+  delete _DS_match_ng_body_count
 }
 
 # Emit desugared if/else into _DS_body_buf.
-function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i) {
-    if (!_DS_match_has_ng) {
-        print "dsl error: " _DS_src_file ":" lineno \
-            ": match on Result missing ng or default branch" > "/dev/stderr"
-        _DS_had_error = 1
-        _DS_match_ok_count = 0; _DS_match_ng_count = 0
-        _DS_match_ok_var = ""; _DS_match_ng_var = ""
-        _DS_match_has_ng = 0; _DS_match_branch = ""
-        _DS_match_expr = ""; _DS_match_indent = ""
-        delete _DS_match_ok_body; delete _DS_match_ng_body
-        return
-    }
+function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars) {
+  if (_DS_match_ng_arms == 0) {
+    print "dsl error: " _DS_src_file ":" lineno \
+      ": when...of missing ng/none/default branch" > "/dev/stderr"
+    _DS_had_error = 1
+    _ds_match_reset()
+    return
+  }
 
-    _DS_mc_count++
-    tmpvar = "_ds_mc_" _DS_mc_count
-    if (_DS_in_function) {
-        _DS_let_locals[++_DS_let_count] = tmpvar
-        if (_DS_match_ok_var != "") _DS_let_locals[++_DS_let_count] = _DS_match_ok_var
-        if (_DS_match_ng_var != "") _DS_let_locals[++_DS_let_count] = _DS_match_ng_var
-    }
+  _DS_mc_count++
+  tmpvar = "_ds_mc_" _DS_mc_count
 
-    type_t = _ds_infer_type(_DS_match_expr)
-    if (type_t ~ /^Option</) {
-        check_fn = "option_some"; val_fn = "option_val"; err_fn = ""
-    } else {
-        check_fn = "result_ok"; val_fn = "result_val"; err_fn = "result_err"
+  if (_DS_in_function) {
+    _DS_let_locals[++_DS_let_count] = tmpvar
+    if (_DS_match_ok_var != "") _DS_let_locals[++_DS_let_count] = _DS_match_ok_var
+    # Deduplicate: multiple arms may bind to the same var name
+    delete _ds_emit_added_vars
+    for (i = 1; i <= _DS_match_ng_arms; i++) {
+      if (_DS_match_ng_var_name[i] != "" && !(_DS_match_ng_var_name[i] in _ds_emit_added_vars)) {
+        _DS_let_locals[++_DS_let_count] = _DS_match_ng_var_name[i]
+        _ds_emit_added_vars[_DS_match_ng_var_name[i]] = 1
+      }
     }
+  }
 
-    if (_DS_in_function) {
-        if (_DS_match_ok_var != "")
-            _DS_VAR_TYPES[_DS_func_name, _DS_match_ok_var] = _ds_inner_type(type_t)
-        if (_DS_match_ng_var != "" && type_t ~ /^Result</)
-            _DS_VAR_TYPES[_DS_func_name, _DS_match_ng_var] = _ds_result_err_type(type_t)
-    }
+  type_t = _ds_infer_type(_DS_match_expr)
+  if (type_t ~ /^Option</) {
+    check_fn = "option_some"; val_fn = "option_val"; err_fn = ""
+  } else {
+    check_fn = "result_ok"; val_fn = "result_val"; err_fn = "result_err"
+  }
 
-    _DS_body_buf[++_DS_body_count] = _DS_match_indent tmpvar " = " _ds_dot_transform(_DS_match_expr)
-    _DS_body_buf[++_DS_body_count] = _DS_match_indent "if (" check_fn "(" tmpvar ")) {"
+  if (_DS_in_function) {
     if (_DS_match_ok_var != "")
-        _DS_body_buf[++_DS_body_count] = _DS_match_indent "  " _DS_match_ok_var " = " val_fn "(" tmpvar ")"
-    for (i = 1; i <= _DS_match_ok_count; i++)
-        _ds_match_process_body(_DS_match_ok_body[i], lineno)
-    _DS_body_buf[++_DS_body_count] = _DS_match_indent "} else {"
-    if (_DS_match_ng_var != "" && err_fn != "")
-        _DS_body_buf[++_DS_body_count] = _DS_match_indent "  " _DS_match_ng_var " = " err_fn "(" tmpvar ")"
-    for (i = 1; i <= _DS_match_ng_count; i++)
-        _ds_match_process_body(_DS_match_ng_body[i], lineno)
-    _DS_body_buf[++_DS_body_count] = _DS_match_indent "}"
+      _DS_VAR_TYPES[_DS_func_name, _DS_match_ok_var] = _ds_inner_type(type_t)
+    for (i = 1; i <= _DS_match_ng_arms; i++) {
+      if (_DS_match_ng_var_name[i] != "" && type_t ~ /^Result</)
+        _DS_VAR_TYPES[_DS_func_name, _DS_match_ng_var_name[i]] = _ds_result_err_type(type_t)
+    }
+  }
 
-    _DS_match_ok_count = 0; _DS_match_ng_count = 0
-    _DS_match_ok_var = ""; _DS_match_ng_var = ""
-    _DS_match_has_ng = 0; _DS_match_branch = ""
-    _DS_match_expr = ""; _DS_match_indent = ""
-    delete _DS_match_ok_body; delete _DS_match_ng_body
+  _DS_body_buf[++_DS_body_count] = _DS_match_indent tmpvar " = " _ds_dot_transform(_DS_match_expr)
+  _DS_body_buf[++_DS_body_count] = _DS_match_indent "if (" check_fn "(" tmpvar ")) {"
+  if (_DS_match_ok_var != "")
+    _DS_body_buf[++_DS_body_count] = _DS_match_indent "  " _DS_match_ok_var " = " val_fn "(" tmpvar ")"
+  for (j = 1; j <= _DS_match_ok_count; j++)
+    _ds_match_process_body(_DS_match_ok_body[j], lineno)
+
+  for (i = 1; i <= _DS_match_ng_arms; i++) {
+    arm_type    = _DS_match_ng_type[i]
+    arm_var     = _DS_match_ng_var_name[i]
+    arm_default = _DS_match_ng_is_default[i]
+
+    if (arm_type != "" && !arm_default) {
+      _DS_body_buf[++_DS_body_count] = _DS_match_indent "} else if (result_err_type(" tmpvar ") == \"" arm_type "\") {"
+    } else {
+      _DS_body_buf[++_DS_body_count] = _DS_match_indent "} else {"
+    }
+
+    if (arm_var != "" && err_fn != "")
+      _DS_body_buf[++_DS_body_count] = _DS_match_indent "  " arm_var " = " err_fn "(" tmpvar ")"
+
+    for (j = 1; j <= _DS_match_ng_body_count[i]; j++)
+      _ds_match_process_body(_DS_match_ng_body[i, j], lineno)
+  }
+
+  _DS_body_buf[++_DS_body_count] = _DS_match_indent "}"
+  _ds_match_reset()
 }
 
 # Process a collected body line through the full pipeline, push to _DS_body_buf.
 # Normalizes indentation: strips original leading whitespace and prepends _DS_match_indent "  ".
 function _ds_match_process_body(line, lineno,    pipe_pre, nc_pre, p, pipe_r, dot_r, nc_r, xf) {
-    _DS_current_lineno = lineno
-    # Normalize indentation: strip original leading whitespace, apply canonical indent
-    sub(/^[[:space:]]*/, _DS_match_indent "  ", line)
-    line = _ds_fold_adjacent_strings_inline(line)
-    if (line ~ /safe\.html\.fragment\(/) {
-        _DS_last_interp_untrusted = 0
-        line = _ds_expand_fragment_interp(line, lineno)
-    }
-    if (line ~ /#{/) {
-        _DS_last_interp_untrusted = 0
-        line = _ds_expand_interp(line, lineno)
-    }
-    pipe_r = _ds_pipe_transform(line, pipe_pre)
-    for (p = 1; p in pipe_pre; p++) _DS_body_buf[++_DS_body_count] = pipe_pre[p]
-    dot_r = _ds_dot_transform(pipe_r)
-    nc_r  = _ds_nc_transform(dot_r, nc_pre)
-    for (p = 1; p in nc_pre; p++) _DS_body_buf[++_DS_body_count] = nc_pre[p]
-    _ds_typecheck_plain_call(nc_r)
-    _ds_check_return(dot_r, lineno)
-    xf = _ds_let_transform(nc_r, lineno, line)
-    if (xf != "") _DS_body_buf[++_DS_body_count] = xf
+  _DS_current_lineno = lineno
+  # Normalize indentation: strip original leading whitespace, apply canonical indent
+  sub(/^[[:space:]]*/, _DS_match_indent "  ", line)
+  line = _ds_fold_adjacent_strings_inline(line)
+  if (line ~ /safe\.html\.fragment\(/) {
+    _DS_last_interp_untrusted = 0
+    line = _ds_expand_fragment_interp(line, lineno)
+  }
+  if (line ~ /#{/) {
+    _DS_last_interp_untrusted = 0
+    line = _ds_expand_interp(line, lineno)
+  }
+  pipe_r = _ds_pipe_transform(line, pipe_pre)
+  for (p = 1; p in pipe_pre; p++) _DS_body_buf[++_DS_body_count] = pipe_pre[p]
+  dot_r = _ds_dot_transform(pipe_r)
+  nc_r  = _ds_nc_transform(dot_r, nc_pre)
+  for (p = 1; p in nc_pre; p++) _DS_body_buf[++_DS_body_count] = nc_pre[p]
+  _ds_typecheck_plain_call(nc_r)
+  _ds_check_return(dot_r, lineno)
+  xf = _ds_let_transform(nc_r, lineno, line)
+  if (xf != "") _DS_body_buf[++_DS_body_count] = xf
 }
