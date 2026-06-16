@@ -1,5 +1,5 @@
 function handler() {
-  match find_item(id) of
+  when find_item(id) of
     some val:
       return ctx.res.json(val)
     none:
