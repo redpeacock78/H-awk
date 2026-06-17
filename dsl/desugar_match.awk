@@ -153,6 +153,7 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, 
   }
 
   type_t = _ds_infer_type(_DS_match_expr)
+  type_t = _ds_strip_effect(type_t)
   if (type_t ~ /^Option</ || (type_t == "" && _DS_match_is_option)) {
     check_fn = "option_some"; val_fn = "option_val"; err_fn = ""
   } else {
