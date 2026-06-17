@@ -86,16 +86,16 @@ function _todo_tr(id: Str, title: Str) -> HtmlFragment {
   let safe_title = safe.html.escape(title)
   let safe_id = safe.attr.escape(id)
   let html: Str =
-    "<tr class=\"group border-b border-zinc-800/60 last:border-0\">"
-      "<td class=\"py-3 pr-4 text-sm text-zinc-200\">#{safe_title}</td>"
-      "<td class=\"py-3 text-right\">"
+    "<tr class=\"task-row\">"
+      "<td class=\"task-bullet\">&#x25C6;</td>"
+      "<td class=\"task-title\">#{safe_title}</td>"
+      "<td class=\"task-del\">"
         "<button"
           " hx-delete=\"/todos/#{safe_id}\""
           " hx-target=\"closest tr\""
           " hx-swap=\"outerHTML\""
-          " class=\"text-zinc-600 hover:text-red-400 text-base leading-none"
-            " opacity-0 group-hover:opacity-100 transition-all duration-150 cursor-pointer\""
-        ">&#x2715;</button>"
+          " class=\"btn-del\""
+        ">[ rm ]</button>"
       "</td>"
     "</tr>"
   return safe.html.raw(html)
