@@ -407,8 +407,8 @@ when EXPR of
   # Result<T, E> arms
   ok name:           # ok — bind value to name
   ok:                # ok — no bind
-  ng e: TypeName:    # ng — typed, bind error to e (dispatch by type)
-  ng TypeName:       # ng — typed, no bind
+  ng e<TypeName>:    # ng — typed, bind error to e (dispatch by type)
+  ng <TypeName>:     # ng — typed, no bind
   ng name:           # ng — untyped, bind error to name
   ng:                # ng — untyped, no bind
   default name:      # catch-all, bind to name
@@ -421,8 +421,6 @@ when EXPR of
 end
 ```
 
-Type names start with an uppercase letter (`[A-Z]`); bind variable names start with a lowercase letter or underscore (`[a-z_]`).
-
 **Multiple typed `ng` arms** — dispatch by error type at runtime:
 
 ```awk
@@ -433,9 +431,9 @@ function handler() {
   when fetch_user(id) of
     ok user:
       return ctx.res.json(user)
-    ng e: AuthError:
+    ng e<AuthError>:
       return ctx.res.status(401)
-    ng e: NotFoundError:
+    ng e<NotFoundError>:
       return ctx.res.status(404)
     default:
       return ctx.res.status(500)
@@ -470,14 +468,14 @@ function handler() {
   when fetch_user(id) of
     ok user:
       return ctx.res.json(user)
-    ng e: AuthError:
+    ng e<AuthError>:
       return ctx.res.status(401)
   end
 }
-# dsl error: app.awk:9: when...of missing arm for NotFoundError (add 'ng e: NotFoundError:' or 'default:')
+# dsl error: app.awk:9: when...of missing arm for NotFoundError (add 'ng e<NotFoundError>:' or 'default:')
 ```
 
-**`type X = Error` — custom error constructors**
+**`type` declarations**
 
 Define custom error types and use them in `ng` arms:
 
@@ -498,6 +496,36 @@ function fetch_user(id) -> Result<Str, AuthError | NotFoundError> {
   if (!authenticated()) return AuthError("token expired")
   if (!found(id))       return NotFoundError("user " id)
   return result_ok_make(id)
+}
+```
+
+**Union and Intersection type aliases**
+
+Define type aliases with `|` (Union) or `&` (Intersection):
+
+```awk
+type Status   = Int | Str          # Status accepts Int or Str
+type Config   = Str | Int | Bool   # multi-member union
+type Precise  = Int & Str          # Precise requires both Int and Str
+```
+
+Each generates a validator function and registers a type alias:
+```awk
+# Desugared
+function Status(val) { if (type::accepts("Int|Str", val)) return val; return result_ng("TypeError:Status", "expected Int|Str, got " val) }
+```
+
+Use in function signatures:
+```awk
+function parse(raw: Str) -> Int | Str {
+  return 42
+}
+```
+
+Use as let annotation:
+```awk
+function handler() {
+  let port: Int | Str = env.get("PORT")
 }
 ```
 
