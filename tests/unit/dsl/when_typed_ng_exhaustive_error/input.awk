@@ -9,7 +9,7 @@ function handler() {
   when fetch() of
     ok v:
       return ctx.res.json(v)
-    ng e: AuthError:
+    ng e<AuthError>:
       return ctx.res.status(401)
   end
 }
