@@ -64,6 +64,15 @@ function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
 
   _ds_typecheck_call(ns "." path, args)
 
+  # option constructors emit direct function calls, not ns::dispatch
+  if (ns == "option" && path == "some") {
+    return "option_some_make(" (args != "" ? _ds_dot_transform(args) : "") ")" \
+           _ds_dot_transform(after_close)
+  }
+  if (ns == "option" && path == "none") {
+    return "option_none_make()" _ds_dot_transform(after_close)
+  }
+
   # Now recursively transform after_close (it's the tail of the line)
   # We need to re-segment after_close and transform it
   # But after_close may start mid-way through a segment — just transform it as a new line
