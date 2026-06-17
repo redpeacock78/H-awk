@@ -115,3 +115,9 @@ function _ds_extract_func_name(sig,    m) {
         return m[1]
     return ""
 }
+
+# _ds_strip_effect: strip Effect<T> wrapper, return T. Pass-through if not Effect.
+function _ds_strip_effect(t,    m) {
+    if (match(t, /^Effect<(.+)>$/, m)) return m[1]
+    return t
+}

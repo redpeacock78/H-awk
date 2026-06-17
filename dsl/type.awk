@@ -126,7 +126,7 @@ function expand_alias(t) {
 }
 
 # type::accepts -- returns 1 if expected accepts actual, 0 if not
-function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n) {
+function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n, _eg, _ag) {
     if (expected == actual)  return 1
     if (expected == "Any")   return 1
     if (actual   == "Any")   return 1
@@ -142,6 +142,12 @@ function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n)
         for (i = 1; i <= ei_n; i++)
             if (!accepts(einter[i], actual)) return 0
         return 1
+    }
+
+    # covariant generic types: Option<T> accepts Option<U> if T accepts U
+    if (match(expected, /^([A-Za-z_][A-Za-z0-9_]*)<(.+)>$/, _eg) && \
+        match(actual,   /^([A-Za-z_][A-Za-z0-9_]*)<(.+)>$/, _ag)) {
+        if (_eg[1] == _ag[1]) return accepts(_eg[2], _ag[2])
     }
 
     en = split_union(expected, eparts)

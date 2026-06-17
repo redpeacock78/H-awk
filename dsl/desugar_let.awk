@@ -2,7 +2,7 @@
 # dsl/desugar_let.awk -- let declaration transform + function signature hoisting
 
 # _ds_infer_type: 式の静的型を推論する。不明な場合は "" を返す
-function _ds_infer_type(expr,    m) {
+function _ds_infer_type(expr,    m, _m, arg_type) {
     # 数字のみの文字列リテラル: "8080" 形式 → NumericStr
     if (expr ~ /^"[0-9]+"$/) return "NumericStr"
     # 文字列リテラル: "..." 形式
@@ -27,6 +27,15 @@ function _ds_infer_type(expr,    m) {
     if (match(expr, /^([a-z][a-zA-Z0-9_]*)::dispatch\("([^"]+)"/, m)) {
         key = m[1] "." m[2]
         if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
+    }
+    # option_some_make(arg) → Option<T> where T is inferred from arg
+    if (match(expr, /^option_some_make\((.+)\)[[:space:]]*$/, _m)) {
+        arg_type = _ds_infer_type(_ds_trim(_m[1]))
+        return "Option<" (arg_type != "" ? arg_type : "Any") ">"
+    }
+    # option_none_make() → Option<Any>
+    if (expr ~ /^option_none_make\(\)[[:space:]]*$/) {
+        return "Option<Any>"
     }
     # ユーザー定義関数呼び出し: f(...) 形式 — plain function call (no space before `(`)
     if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)\(/, m)) {
