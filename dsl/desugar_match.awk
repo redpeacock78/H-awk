@@ -36,11 +36,11 @@ function _ds_match_collect(line, lineno,    m, i) {
   }
   # some name:  (some, bind)
   if (match(line, /^[[:space:]]*some[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
-    _DS_match_ok_var = m[1]; _DS_match_branch = "some"; return ""
+    _DS_match_ok_var = m[1]; _DS_match_branch = "some"; _DS_match_is_option = 1; return ""
   }
   # some:  (some, no bind)
   if (line ~ /^[[:space:]]*some:[[:space:]]*$/) {
-    _DS_match_ok_var = ""; _DS_match_branch = "some"; return ""
+    _DS_match_ok_var = ""; _DS_match_branch = "some"; _DS_match_is_option = 1; return ""
   }
   # none:  (none, no bind — treated as default arm for option)
   if (line ~ /^[[:space:]]*none:[[:space:]]*$/) {
@@ -116,6 +116,7 @@ function _ds_match_reset() {
   _DS_match_indent     = ""
   _DS_match_ng_arms    = 0
   _DS_match_cur_ng_arm = 0
+  _DS_match_is_option  = 0
   delete _DS_match_ok_body
   delete _DS_match_ok_lineno
   delete _DS_match_ng_body
@@ -152,7 +153,7 @@ function _ds_match_emit(lineno,    tmpvar, type_t, check_fn, val_fn, err_fn, i, 
   }
 
   type_t = _ds_infer_type(_DS_match_expr)
-  if (type_t ~ /^Option</) {
+  if (type_t ~ /^Option</ || (type_t == "" && _DS_match_is_option)) {
     check_fn = "option_some"; val_fn = "option_val"; err_fn = ""
   } else {
     check_fn = "result_ok"; val_fn = "result_val"; err_fn = "result_err"
