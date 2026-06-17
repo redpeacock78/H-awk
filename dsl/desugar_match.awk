@@ -7,8 +7,8 @@
 #     ok:               -- Result ok branch (no binding)
 #     some VAR:         -- Option some branch (binds VAR to option_val)
 #     some:             -- Option some branch (no binding)
-#     ng e: TypeName:   -- typed ng, bind e to result_err, match by type
-#     ng TypeName:      -- typed ng, no bind, match by type
+#     ng VAR<TypeName>: -- typed ng, bind VAR to result_err, match by type
+#     ng <TypeName>:    -- typed ng, no bind, match by type
 #     ng VAR:           -- untyped ng, bind VAR to result_err
 #     ng:               -- untyped ng, no bind
 #     none:             -- Option none branch (catch-all for option)
@@ -48,14 +48,14 @@ function _ds_match_collect(line, lineno,    m, i) {
     _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = ""
     _DS_match_ng_is_default[i] = 1; _DS_match_branch = "ng"; return ""
   }
-  # ng e: TypeName:  (typed ng, bind — check BEFORE plain "ng name:")
-  if (match(line, /^[[:space:]]*ng[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*([A-Z][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+  # ng VAR<TypeName>:  (typed ng, bind — check BEFORE plain "ng name:")
+  if (match(line, /^[[:space:]]*ng[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = m[2]; _DS_match_ng_var_name[i] = m[1]
     _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
   }
-  # ng TypeName:  (typed ng, no bind)
-  if (match(line, /^[[:space:]]*ng[[:space:]]+([A-Z][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+  # ng <TypeName>:  (typed ng, no bind)
+  if (match(line, /^[[:space:]]*ng[[:space:]]*<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = m[1]; _DS_match_ng_var_name[i] = ""
     _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
