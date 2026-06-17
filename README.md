@@ -458,6 +458,31 @@ function handler(    _ds_mc_1, user, e) {
 }
 ```
 
+**`some`/`none` arms for `Option<T>`:**
+
+```awk
+# DSL
+function handler() {
+  when find_title(id) of
+    some title:
+      return ctx.res.text(title)
+    none:
+      return ctx.res.status(404)
+  end
+}
+
+# Desugared
+function handler(    _ds_mc_1, title) {
+  _ds_mc_1 = find_title(id)
+  if (option_some(_ds_mc_1)) {
+    title = option_val(_ds_mc_1)
+    return ctx::dispatch("res.text", title)
+  } else {
+    return ctx::dispatch("res.status", 404)
+  }
+}
+```
+
 Missing `ng`/`none`/`default` is a desugar-time error.
 
 **Exhaustiveness check for union error types:** When a function is annotated `-> Result<T, E1 | E2>`, typed `ng` arms must cover every union member, or a `default:`/`ng:` catch-all arm must be present:
@@ -538,8 +563,10 @@ function handler() {
 | `ok(val)` | `"ok\x1F" val` |
 | `ng(TypeName)` | `"ng\x1F" TypeName` |
 | `ng(TypeName, msg)` | `"ng\x1F" TypeName "\x1F" msg` |
-| `some(val)` | `val` (non-empty string) |
-| `none` | `""` (empty string) |
+| `some(val)` | `"some\x1F" val` |
+| `none` | `"none\x1F"` |
+
+The sentinel prefix means an `Option<Str>` holding an empty string is still distinguishable from `none`.
 
 Runtime helpers (defined in `dsl/adt.awk`, always available):
 
@@ -551,16 +578,43 @@ result_ng(type, msg)      # → ng-encoded string
 result_err_type(v)        # → TypeName of ng value
 result_err(v)             # → "TypeName" or "TypeName\x1Fmsg"
 
-option_some(v)            # → 1 if non-empty
-option_val(v)             # → v (identity)
+option_some(v)            # → 1 if some
+option_none(v)            # → 1 if none
+option_val(v)             # → inner value of some
+option_some_make(val)     # → some-encoded string
+option_none_make()        # → none-encoded string
 ```
 
-**`?=` safe unwrap operator**
+**`option.some` / `option.none` construction**
 
-Unwrap an `Option<T>` or `Result<T, E>` value. If the value is `ng`/`none`, automatically returns a 500 response. Only valid when the RHS type is `Option` or `Result`.
+Build `Option<T>` values in DSL code using the `option.*` namespace:
 
 ```awk
 # DSL
+function find_title(id: Str) -> Option<Str> {
+  if (!(id in rows)) {
+    return option.none()
+  }
+  return option.some(rows[id])
+}
+
+# Desugared
+function find_title(id) {
+  if (!(id in rows)) {
+    return option_none_make()
+  }
+  return option_some_make(rows[id])
+}
+```
+
+`option.some(val)` infers its return type as `Option<T>` from the type of `val` — no explicit annotation needed. `option.none()` returns `Option<Any>`, which is compatible with any `Option<T>` annotation.
+
+**`?=` safe unwrap operator**
+
+Unwrap a `Result<T, E>` or `Option<T>` value in one step. On failure the handler returns early with an error status — 500 for `Result` (`ng`) and 404 for `Option` (`none`). Only valid when the RHS type is `Option` or `Result`.
+
+```awk
+# DSL — Result<T, E> (returns 500 on ng)
 function create_todo() {
   let body ?= ctx.req.json()
   # body is now the unwrapped Untrusted<Map> value
@@ -576,6 +630,24 @@ function create_todo(    _ds_tc_1, body) {
 }
 ```
 
+```awk
+# DSL — Option<T> (returns 404 on none)
+function handler() {
+  let title ?= find_title(id)
+  return ctx.res.text(title)
+}
+
+# Desugared
+function handler(    _ds_tc_1, title) {
+  _ds_tc_1 = find_title(id)
+  if (!option_some(_ds_tc_1)) {
+    return ctx::dispatch("res.status", 404)
+  }
+  title = option_val(_ds_tc_1)
+  return ctx::dispatch("res.text", title)
+}
+```
+
 Desugar-time error if the RHS type is not `Option` or `Result`:
 
 ```sh
@@ -584,6 +656,40 @@ let port ?= env.get("PORT")
 ```
 
 After `?=` unwrap, the variable holds `Untrusted<T>` — pass it to a `safe.*` sanitizer before using in HTML output.
+
+**`Effect<T>` type annotation**
+
+`Effect<T>` is a type-level wrapper for functions that will eventually be asynchronous (e.g., cache lookups, database queries). Annotating a function `-> Effect<Option<Str>>` or `-> Effect<Result<T, E>>` signals intent without requiring any change at the call site — `?=` and `when...of` strip the `Effect` wrapper automatically before performing their usual `Option`/`Result` handling.
+
+```awk
+# DSL
+function get_cached(key: Str) -> Effect<Option<Str>> {
+  return option.none()
+}
+
+function handler() {
+  let val ?= get_cached("foo")   # Effect<Option<Str>> → Option<Str> → unwrap
+  return ctx.res.text(val)
+}
+```
+
+```awk
+# DSL — when...of also strips Effect
+function get_item(id: Str) -> Effect<Option<Str>> {
+  return option.none()
+}
+
+function handler() {
+  when get_item(id) of
+    some val:
+      return ctx.res.text(val)
+    none:
+      return ctx.res.status(404)
+  end
+}
+```
+
+At runtime, AWK is synchronous — `Effect` is a pass-through with no overhead. The annotation exists so that when async execution is added in the future, call sites need no changes.
 
 **`classify:` annotation**
 
