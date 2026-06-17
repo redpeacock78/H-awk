@@ -1,0 +1,1 @@
+type Both = Int & Str

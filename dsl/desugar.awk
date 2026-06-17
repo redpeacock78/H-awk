@@ -53,7 +53,7 @@ END {
   }
 }
 
-function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m, _ds_type_m) {
+function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m, _ds_type_m, _ds_type_expr) {
   _DS_current_lineno = lineno
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
@@ -61,10 +61,17 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
         "move 'let' declarations inside a function")
       exit 1
     }
-    # type X = Error → emit constructor + register error type
-    if (match(line, /^([[:space:]]*)type[[:space:]]+([A-Z][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*Error[[:space:]]*$/, _ds_type_m)) {
-      _DS_ERROR_TYPES[_ds_type_m[2]] = 1
-      print _ds_type_m[1] "function " _ds_type_m[2] "(msg) { return result_ng(\"" _ds_type_m[2] "\", msg) }"
+    # type X = <expr> → Error constructor, or alias + validator
+    if (match(line, /^([[:space:]]*)type[[:space:]]+([A-Z][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.+)$/, _ds_type_m)) {
+      if (_ds_trim(_ds_type_m[3]) ~ /^Error([[:space:]]|$)/) {
+        _DS_ERROR_TYPES[_ds_type_m[2]] = 1
+        print _ds_type_m[1] "function " _ds_type_m[2] "(msg) { return result_ng(\"" _ds_type_m[2] "\", msg) }"
+      } else {
+        _ds_type_expr = type::normalize(_ds_trim(_ds_type_m[3]))
+        if (_ds_type_expr == "") return
+        _DS_TYPE_ALIAS[_ds_type_m[2]] = _ds_type_expr
+        print _ds_type_m[1] "function " _ds_type_m[2] "(val) { if (type::accepts(\"" _ds_type_expr "\", val)) return val; return result_ng(\"TypeError:" _ds_type_m[2] "\", \"expected " _ds_type_expr ", got \" val) }"
+      }
       return
     }
     if (_ds_is_func_def(line)) {
