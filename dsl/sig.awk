@@ -195,4 +195,12 @@ BEGIN {
     _DS_SIG_RET["json_encode"]     = "Str"
     _DS_SIG_ARITY["json_encode"]   = 1
     _DS_SIG_ARG["json_encode", 1]  = "Array"
+
+    # option constructors
+    _DS_SIG_RET["option.some"]    = "Option<Any>"
+    _DS_SIG_ARITY["option.some"]  = 1
+    _DS_SIG_ARG["option.some", 1] = "Any"
+
+    _DS_SIG_RET["option.none"]    = "Option<Any>"
+    _DS_SIG_ARITY["option.none"]  = 0
 }
