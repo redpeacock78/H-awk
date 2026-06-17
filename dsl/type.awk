@@ -62,15 +62,41 @@ function _ds_trim_type(s) {
     return s
 }
 
+# type::split_intersection -- split at top-level & only (respects <...> depth)
+# stores results in out[], returns count
+function split_intersection(t, out,    i, c, depth, cur, n) {
+    n = 0; depth = 0; cur = ""
+    for (i = 1; i <= length(t); i++) {
+        c = substr(t, i, 1)
+        if      (c == "<") depth++
+        else if (c == ">") depth--
+        else if (c == "&" && depth == 0) {
+            out[++n] = _ds_trim_type(cur)
+            cur = ""
+            continue
+        }
+        cur = cur c
+    }
+    if (length(_ds_trim_type(cur)) > 0) out[++n] = _ds_trim_type(cur)
+    return n
+}
+
 # type::is_union -- returns 1 if t is a Union type
 function is_union(t,    out, n) {
     n = split_union(t, out)
     return (n > 1)
 }
 
-# type::normalize -- sort members, deduplicate, join with | (no spaces)
-function normalize(t,    out, n, i, j, sorted, seen, result, tmp) {
+# type::normalize -- sort members, deduplicate, join with | or & (no spaces)
+function normalize(t,    out, n, i, j, sorted, seen, result, tmp, sep) {
+    # try | (union) first
     n = split_union(t, out)
+    sep = "|"
+    if (n == 1) {
+        # try & (intersection)
+        n = split_intersection(t, out)
+        sep = "&"
+    }
     if (n == 1) return expand_alias(out[1])
     # deduplicate
     for (i = 1; i <= n; i++) seen[expand_alias(out[i])] = 1
@@ -81,7 +107,7 @@ function normalize(t,    out, n, i, j, sorted, seen, result, tmp) {
         for (j = i+1; j <= n; j++)
             if (sorted[i] > sorted[j]) { tmp = sorted[i]; sorted[i] = sorted[j]; sorted[j] = tmp }
     result = sorted[1]
-    for (i = 2; i <= n; i++) result = result "|" sorted[i]
+    for (i = 2; i <= n; i++) result = result sep sorted[i]
     return result
 }
 
@@ -100,7 +126,7 @@ function expand_alias(t) {
 }
 
 # type::accepts -- returns 1 if expected accepts actual, 0 if not
-function accepts(expected, actual,    eparts, apart, en, an, i, j) {
+function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n) {
     if (expected == actual)  return 1
     if (expected == "Any")   return 1
     if (actual   == "Any")   return 1
@@ -109,6 +135,14 @@ function accepts(expected, actual,    eparts, apart, en, an, i, j) {
     # aliases must not be circular (table is hardcoded in sig.awk)
     if (expected in awk::_DS_TYPE_ALIAS) return accepts(awk::_DS_TYPE_ALIAS[expected], actual)
     if (actual   in awk::_DS_TYPE_ALIAS) return accepts(expected, awk::_DS_TYPE_ALIAS[actual])
+
+    # intersection in expected: actual must satisfy ALL members
+    ei_n = split_intersection(expected, einter)
+    if (ei_n > 1) {
+        for (i = 1; i <= ei_n; i++)
+            if (!accepts(einter[i], actual)) return 0
+        return 1
+    }
 
     en = split_union(expected, eparts)
     an = split_union(actual,   apart)
