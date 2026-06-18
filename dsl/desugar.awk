@@ -15,21 +15,72 @@
 
 BEGIN {
   _ds_init()
-  # Pass 1: collect user function signatures for forward-reference support
+  # Pass 1a: collect user function signatures, type aliases, and error types for
+  # forward-reference support.
   if (ARGC > 1) {
     _pass1_fname = ""
     while ((getline _pass1_line < ARGV[1]) > 0) {
       if (_ds_is_func_def(_pass1_line)) {
         _pass1_fname = _ds_extract_func_name(_pass1_line)
         _pass1_ret   = _ds_extract_return_type(_pass1_line)
-        _DS_SIG_RET[_pass1_fname] = (_pass1_ret != "" ? _pass1_ret : "Any")
+        _DS_SIG_RET[_pass1_fname] = _pass1_ret
         if (match(_pass1_line, /\(([^)]*)\)[[:space:]]*(->.*)?[[:space:]]*\{/, _pass1_m))
           _ds_parse_func_params(_pass1_fname, _pass1_m[1])
       } else if (_pass1_fname != "" && \
           match(_pass1_line, /^[[:space:]]*classify:[[:space:]]*(transform|validator|sanitizer|sink)[[:space:]]*$/, _pass1_m)) {
         _DS_FUNC_CLASS[_pass1_fname] = _pass1_m[1]
+      } else if (match(_pass1_line, /^[[:space:]]*type[[:space:]]+([A-Z][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.+)$/, _pass1_m)) {
+        if (_ds_trim(_pass1_m[2]) ~ /^Error([[:space:]]|$)/) {
+          _DS_ERROR_TYPES[_pass1_m[1]] = 1
+          _DS_SIG_RET[_pass1_m[1]] = "Result<Any, " _pass1_m[1] ">"
+          _DS_SIG_ARITY[_pass1_m[1]] = 1
+          _DS_SIG_ARG[_pass1_m[1], 1] = "Str"
+        } else {
+          _DS_TYPE_ALIAS[_pass1_m[1]] = type::normalize(_ds_trim(_pass1_m[2]))
+        }
       }
     }
+    close(ARGV[1])
+
+    # Pass 1b: infer return types for unannotated functions from return statements.
+    _pass1_fname = ""
+    _pass1_brace_depth = 0
+    _DS_pass1_lineno = 0
+    while ((getline _pass1_line < ARGV[1]) > 0) {
+      _DS_pass1_lineno++
+      if (_pass1_fname == "") {
+        if (_ds_is_func_def(_pass1_line)) {
+          _pass1_fname = _ds_extract_func_name(_pass1_line)
+          _pass1_brace_depth = _ds_net_braces(_pass1_line)
+          _pass1_seen_return = 0
+          _pass1_inferred_ret = ""
+          _pass1_conflict = 0
+          if (_pass1_brace_depth <= 0)
+            _ds_pass1b_finalize(_pass1_fname, _pass1_seen_return, _pass1_inferred_ret, _pass1_conflict)
+        }
+        continue
+      }
+
+      if (match(_pass1_line, /^[[:space:]]*return[[:space:]]+(.+)$/, _pass1_m)) {
+        _pass1_ret = _ds_infer_type_safe(_ds_trim(_pass1_m[1]))
+        _pass1_seen_return = 1
+        if (_pass1_ret == "") {
+          _pass1_conflict = 1
+        } else if (_pass1_inferred_ret == "") {
+          _pass1_inferred_ret = _pass1_ret
+        } else if (_pass1_inferred_ret != _pass1_ret) {
+          _pass1_conflict = 1
+        }
+      }
+
+      _pass1_brace_depth += _ds_net_braces(_pass1_line)
+      if (_pass1_brace_depth <= 0) {
+        _ds_pass1b_finalize(_pass1_fname, _pass1_seen_return, _pass1_inferred_ret, _pass1_conflict)
+        _pass1_fname = ""
+      }
+    }
+    if (_pass1_fname != "")
+      _ds_pass1b_finalize(_pass1_fname, _pass1_seen_return, _pass1_inferred_ret, _pass1_conflict)
     close(ARGV[1])
   }
 }
@@ -227,6 +278,14 @@ function _ds_net_braces(line,    n, i, c) {
     else if (c == "}") n--
   }
   return n
+}
+
+function _ds_pass1b_finalize(fname, seen_return, inferred_ret, conflict) {
+  if (_DS_SIG_RET[fname] != "") return
+  if (seen_return && !conflict && inferred_ret != "")
+    _DS_SIG_RET[fname] = inferred_ret
+  else
+    _DS_SIG_RET[fname] = "Any"
 }
 
 function _ds_error(lineno, msg, help,    src, use_color, r, b, n) {

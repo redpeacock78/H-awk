@@ -68,6 +68,51 @@ function _ds_infer_type(expr,    m, _m, arg_type) {
     return ""
 }
 
+# Side-effect-free variant: returns "" instead of calling _ds_error for unknown
+# functions. Used during Pass 1b body scan where error output is not appropriate.
+function _ds_infer_type_safe(expr,    m, _m, m2, key, fname, arg_type) {
+    if (expr ~ /^"[0-9]+"$/) return "NumericStr"
+    if (expr ~ /^".*"$/) return "Str"
+    if (expr ~ /^-?[0-9]+$/) return "Int"
+    if (expr ~ /^-?[0-9]*\.[0-9]+([eE][+-]?[0-9]+)?$/) return "Float"
+    if (expr == "true" || expr == "false") return "Bool"
+    if (match(expr, /^((ctx\.)?[a-z][a-zA-Z0-9_]*(\.[a-z][a-zA-Z0-9_]*)*)\(/, m)) {
+        if (m[1] in _DS_SIG_RET) return _DS_SIG_RET[m[1]]
+        if (match(m[1], /([a-z][a-zA-Z0-9_]*)\.([a-z][a-zA-Z0-9_]*)$/, m2)) {
+            key = m2[1] "." m2[2]
+            if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
+        }
+    }
+    if (match(expr, /^([a-z][a-zA-Z0-9_]*)::dispatch\("([^"]+)"/, m)) {
+        key = m[1] "." m[2]
+        if (key in _DS_SIG_RET) return _DS_SIG_RET[key]
+    }
+    if (match(expr, /^option_some_make\((.+)\)[[:space:]]*$/, _m)) {
+        arg_type = _ds_infer_type_safe(_ds_trim(_m[1]))
+        return "Option<" (arg_type != "" ? arg_type : "Any") ">"
+    }
+    if (expr ~ /^option_none_make\(\)[[:space:]]*$/) {
+        return "Option<Any>"
+    }
+    if (match(expr, /^([a-zA-Z_][a-zA-Z0-9_]*)\(/, m)) {
+        fname = m[1]
+        if (fname in _DS_SIG_RET) return _DS_SIG_RET[fname]
+        if (fname == "sprintf" || fname == "gensub" || fname == "substr" || \
+            fname == "tolower" || fname == "toupper" || fname == "strftime") return "Str"
+        if (fname == "int" || fname == "systime" || fname == "mktime" || \
+            fname == "length" || fname == "split"  || fname == "sub"   || \
+            fname == "gsub"   || fname == "index"  || fname == "match" || \
+            fname == "patsplit") return "Int"
+        if (fname == "rand" || fname == "sin" || fname == "cos" || \
+            fname == "atan2" || fname == "exp" || fname == "log" || \
+            fname == "sqrt") return "Float"
+        return ""
+    }
+    if (_DS_in_function && (_DS_func_name SUBSEP expr) in _DS_VAR_TYPES)
+        return _DS_VAR_TYPES[_DS_func_name, expr]
+    return ""
+}
+
 # _ds_check_type: declared と inferred が不一致ならエラーを記録する
 function _ds_check_type(declared, inferred, lineno) {
     if (inferred == "" || inferred == declared) return
