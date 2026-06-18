@@ -43,7 +43,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gawk curl
       - name: Install gawk (macos)
         if: matrix.os == 'macos-latest'
-        run: brew install gawk
+        run: brew install gawk bash
       - name: Run tests
         run: make test
       - name: Upload e2e server log
