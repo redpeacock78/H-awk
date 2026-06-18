@@ -3,11 +3,7 @@
 
 APP     ?= app.awk
 WORKERS ?= 4
-CHECK   ?=
-EMIT    ?=
 STRICT  ?=
-
-_HAWK_FLAGS = $(if $(CHECK),--no-emit) $(if $(EMIT),--emit) $(if $(STRICT),--strict)
 
 # Collect plugin files for gawk -f
 PLUGIN_FILES := $(foreach d,$(wildcard plugins/*/),$(if $(wildcard $(d).disabled),,-f $(d)manifest.awk -f $(d)$(notdir $(patsubst %/,%,$(d))).awk))
@@ -15,17 +11,17 @@ PLUGIN_FILES := $(foreach d,$(wildcard plugins/*/),$(if $(wildcard $(d).disabled
 help: ## 利用可能なターゲット一覧
 	@awk -F':.*##' '/^[a-z0-9_-]+:.*##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-run: ## サーバー起動 (WORKERS=N, CHECK=1, EMIT=1, STRICT=1)
-	./bin/hawk $(_HAWK_FLAGS) --workers $(WORKERS) $(APP)
+run: ## サーバー起動 (WORKERS=N, STRICT=1)
+	./bin/hawk serve --workers $(WORKERS) $(APP)
 
 dev: ## DEV=1 でログ詳細
-	DEV=1 ./bin/hawk $(_HAWK_FLAGS) --workers $(WORKERS) $(APP)
+	DEV=1 ./bin/hawk serve --workers $(WORKERS) $(APP)
 
 check: ## DSL 型検査のみ (サーバー起動なし)
-	./bin/hawk --no-emit $(if $(STRICT),--strict) $(APP)
+	./bin/hawk check $(if $(STRICT),--strict) $(APP)
 
 emit: ## desugar 済み AWK を stdout 出力
-	./bin/hawk --emit $(if $(STRICT),--strict) $(APP)
+	./bin/hawk emit $(if $(STRICT),--strict) $(APP)
 
 test: test-unit test-dsl test-e2e ## 全テスト
 
