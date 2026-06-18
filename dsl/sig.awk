@@ -2,7 +2,7 @@
 # dsl/sig.awk -- DSL function signature registry
 #
 # _DS_SIG_RET[path]        : return type string
-# _DS_SIG_ARITY[path]      : argument count (exact)
+# _DS_SIG_ARITY[path]  : argument count (-1 = variadic)
 # _DS_SIG_ARG[path, index] : argument type, 1-indexed
 
 BEGIN {
