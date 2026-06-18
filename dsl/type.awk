@@ -170,3 +170,30 @@ function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n,
     return 0
 }
 
+# DFS cycle detector for type aliases.
+# Call immediately after adding name to _DS_TYPE_ALIAS.
+# visiting[] tracks the current DFS path; pass empty array.
+function _type_check_alias_cycle(name, lineno, visiting,    target, parts, n, i, iparts, ni, j) {
+    if (!(name in awk::_DS_TYPE_ALIAS)) return
+    if (name in visiting) {
+        awk::_ds_error(lineno, "type alias cycle detected involving '" name "'", \
+            "remove the circular type alias")
+        return
+    }
+    visiting[name] = 1
+    target = awk::_DS_TYPE_ALIAS[name]
+    n = split_union(target, parts)
+    for (i = 1; i <= n; i++) {
+        if (parts[i] in awk::_DS_TYPE_ALIAS) {
+            _type_check_alias_cycle(parts[i], lineno, visiting)
+        } else {
+            # Decompose intersection within each union branch (e.g. "A | B & C" → check C)
+            ni = split_intersection(parts[i], iparts)
+            for (j = 1; j <= ni; j++) {
+                if (iparts[j] in awk::_DS_TYPE_ALIAS)
+                    _type_check_alias_cycle(iparts[j], lineno, visiting)
+            }
+        }
+    }
+    delete visiting[name]
+}

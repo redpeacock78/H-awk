@@ -70,6 +70,8 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
         _ds_type_expr = type::normalize(_ds_trim(_ds_type_m[3]))
         if (_ds_type_expr == "") return
         _DS_TYPE_ALIAS[_ds_type_m[2]] = _ds_type_expr
+        delete _type_visiting_tmp
+        type::_type_check_alias_cycle(_ds_type_m[2], FNR, _type_visiting_tmp)
         print _ds_type_m[1] "function " _ds_type_m[2] "(val) { if (type::accepts(\"" _ds_type_expr "\", val)) return val; return result_ng(\"TypeError:" _ds_type_m[2] "\", \"expected " _ds_type_expr ", got \" val) }"
       }
       return
