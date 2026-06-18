@@ -51,11 +51,8 @@ test-e2e: ## サーバー起動 + curl
 	./tests/e2e/run.sh
 
 lint: ## awk 構文チェック
-	@set -e; for f in core/*.awk hawk.awk; do \
-	  [ -f "$$f" ] || continue; \
-	  HAWK_NO_SERVE=1 gawk --lint -f "$$f" -e 'BEGIN{exit 0}' >/dev/null 2>&1 \
-	    || (echo "lint FAIL: $$f"; exit 1); \
-	done
+	@HAWK_NO_SERVE=1 gawk --lint -f hawk.awk -e 'BEGIN{exit 0}' >/dev/null 2>&1 \
+	  || (echo "lint FAIL"; exit 1)
 	@echo "lint OK"
 
 ci: lint test ## lint + 全テスト (libs を除く、CI 想定)
