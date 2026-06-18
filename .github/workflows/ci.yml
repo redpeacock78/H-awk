@@ -69,6 +69,13 @@ jobs:
           sudo apt-get update && sudo apt-get install -y gawk
           curl -fsSL https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz \
             | sudo tar xz -C /
+          # kcov v42 was built for Ubuntu 22.04 (libopcodes/libbfd 2.38); extract .so files only
+          curl -fsSL http://security.ubuntu.com/ubuntu/pool/main/b/binutils/libbinutils_2.38-4ubuntu2.12_amd64.deb \
+            -o /tmp/libbinutils.deb
+          sudo dpkg-deb -x /tmp/libbinutils.deb /tmp/libbinutils
+          sudo cp /tmp/libbinutils/usr/lib/x86_64-linux-gnu/libbfd-2.38-system.so /usr/lib/x86_64-linux-gnu/
+          sudo cp /tmp/libbinutils/usr/lib/x86_64-linux-gnu/libopcodes-2.38-system.so /usr/lib/x86_64-linux-gnu/
+          sudo ldconfig
           kcov --version
       - name: AWK coverage
         run: |
