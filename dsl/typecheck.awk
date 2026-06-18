@@ -89,7 +89,7 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
     if (!(path in _DS_SIG_ARITY)) return
 
     n = _ds_count_args(args_str)
-    if (n != _DS_SIG_ARITY[path]) {
+    if (_DS_SIG_ARITY[path] != -1 && n != _DS_SIG_ARITY[path]) {
         _ds_error(lineno, path " expects " _DS_SIG_ARITY[path] " argument(s), got " n, "")
         return
     }
@@ -98,8 +98,13 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
 
     _ds_split_args(args_str, split_args)
     for (i = 1; i <= n; i++) {
-        if (!((path, i) in _DS_SIG_ARG)) continue
-        expected = _DS_SIG_ARG[path, i]
+        if ((path, i) in _DS_SIG_ARG) {
+            expected = _DS_SIG_ARG[path, i]
+        } else if ((path, 1) in _DS_SIG_ARG && _DS_SIG_ARITY[path] == -1) {
+            expected = _DS_SIG_ARG[path, 1]
+        } else {
+            continue
+        }
         actual   = _ds_infer_type(split_args[i])
         # safe.html.fragment: literal string args are trusted static HTML chunks
         if (path == "safe.html.fragment" && actual == "Str" && \
