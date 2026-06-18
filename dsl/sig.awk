@@ -2,7 +2,7 @@
 # dsl/sig.awk -- DSL function signature registry
 #
 # _DS_SIG_RET[path]        : return type string
-# _DS_SIG_ARITY[path]      : argument count (exact)
+# _DS_SIG_ARITY[path]  : argument count (-1 = variadic)
 # _DS_SIG_ARG[path, index] : argument type, 1-indexed
 
 BEGIN {
@@ -104,12 +104,10 @@ BEGIN {
     _DS_FUNC_CLASS["safe.html.raw"]         = "trusted"
     _DS_SIG_TRUSTED["safe.html.raw"]        = 1
 
-    # safe.html.fragment: builder — up to 3 HtmlPart args → HtmlFragment
+    # safe.html.fragment: builder — variadic HtmlPart args → HtmlFragment
     _DS_SIG_RET["safe.html.fragment"]       = "HtmlFragment"
-    _DS_SIG_ARITY["safe.html.fragment"]     = 3
+    _DS_SIG_ARITY["safe.html.fragment"]     = -1
     _DS_SIG_ARG["safe.html.fragment", 1]    = "HtmlPart"
-    _DS_SIG_ARG["safe.html.fragment", 2]    = "HtmlPart"
-    _DS_SIG_ARG["safe.html.fragment", 3]    = "HtmlPart"
     _DS_FUNC_CLASS["safe.html.fragment"]    = "builder"
     _DS_SIG_TRUSTED["safe.html.fragment"]   = 1
 
