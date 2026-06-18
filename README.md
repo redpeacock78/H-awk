@@ -43,10 +43,10 @@ curl http://localhost:8080/todos.json
 ## CLI
 
 ```sh
-hawk [serve] [--workers N] [--debug] <app.awk>
-hawk emit    [--strict]              <app.awk>
-hawk check   [--strict]             <app.awk>
-hawk help
+./bin/hawk [serve] [--workers N] [--debug] <app.awk>
+./bin/hawk emit    [--strict]             <app.awk>
+./bin/hawk check   [--strict]             <app.awk>
+./bin/hawk help
 ```
 
 | Subcommand | Description |
