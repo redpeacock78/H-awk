@@ -63,8 +63,23 @@ END {
 
 ### 対象外
 
-- `core/http.awk` ソース変更（`\x1e`/`strftime` 拡張警告は非 fatal であり修正不要）
+- `core/http.awk` ソース変更（`\x1e`/`strftime` 拡張警告は `--lint` の警告であり exit code 非 0 にならない。修正不要）
 - `core/env.awk` その他 core ファイルの変更
+- プラグインファイル（`PLUGIN_FILES`）の lint（既存の lint ターゲットも対象外であり、本修正でも変更なし）
+
+### 前提条件
+
+- `make lint` は repo ルートから実行する（既存動作と同一。gawk の `@include "core/..."` はカレントディレクトリ相対）
+- `gawk --lint` の拡張警告（`\x` エスケープ、`strftime`）はすべての gawk バージョンで非 fatal（exit 0）
+
+### デバッグ方法
+
+`>/dev/null 2>&1` により stdout・stderr は通常実行時に抑制される。
+CI で `lint FAIL` が出た場合はローカルで以下を実行して診断する:
+
+```bash
+HAWK_NO_SERVE=1 gawk --lint -f hawk.awk -e 'BEGIN{exit 0}'
+```
 
 ---
 
