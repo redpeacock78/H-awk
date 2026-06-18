@@ -106,6 +106,13 @@ BEGIN {
   test_libs_crypto_argon2id_verify()
   test_libs_crypto_sha256_no_lib()
 
+  test_adt_result_ok_roundtrip()
+  test_adt_result_ok_xif_roundtrip()
+  test_adt_result_ng_roundtrip()
+  test_adt_result_ng_no_msg()
+  test_adt_option_some_roundtrip()
+  test_adt_option_none()
+
   printf "\n%d passed, %d failed, %d skipped\n", TESTS_PASSED, TESTS_FAILED, TESTS_SKIPPED
   exit (TESTS_FAILED > 0)
 }
@@ -136,3 +143,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_ctx.awk"
 @include "tests/unit/test_hawk.awk"
 @include "tests/unit/test_env.awk"
+@include "tests/unit/test_adt.awk"
