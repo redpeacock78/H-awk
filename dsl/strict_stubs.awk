@@ -12,3 +12,11 @@ function dispatch(path, a1, a2, a3) { return 0 }
 @namespace "ctx"
 function dispatch(path, a1, a2, a3) { return 0 }
 @namespace "awk"
+
+@namespace "safe"
+function dispatch(path, a1, a2, a3) { return 0 }
+@namespace "awk"
+
+@namespace "env"
+function dispatch(path, a1, a2, a3) { return 0 }
+@namespace "awk"

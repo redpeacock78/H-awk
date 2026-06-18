@@ -5,6 +5,7 @@ cd "$(dirname "$0")/../../.."
 PASS=0; FAIL=0
 HAWK=./bin/hawk
 VALID=tests/unit/cli/fixtures/valid.awk
+VALID_SAFE_ENV=tests/unit/cli/fixtures/valid_safe_env.awk
 INVALID=tests/unit/cli/fixtures/invalid.awk
 
 check() {
@@ -43,6 +44,8 @@ check "unknown_subcommand_exits_1" 1  env HAWK_NO_LIBS=1 "$HAWK" unknowncmd "$VA
 
 # check --strict: valid file exits 0
 check "strict_check_valid_exits_0"   0 env HAWK_NO_LIBS=1 "$HAWK" check --strict "$VALID"
+# check --strict: safe/env namespace calls exit 0
+check "strict_check_safe_env_exits_0" 0 env HAWK_NO_LIBS=1 "$HAWK" check --strict "$VALID_SAFE_ENV"
 # check --strict: invalid DSL file exits 1
 check "strict_check_invalid_exits_1" 1 env HAWK_NO_LIBS=1 "$HAWK" check --strict "$INVALID"
 # emit --strict: valid file exits 0 and produces output
