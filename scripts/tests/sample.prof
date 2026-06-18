@@ -1,0 +1,13 @@
+	# gawk profile, created Thu Jun 18 21:00:00 2026
+
+	# BEGIN rules
+
+	BEGIN {
+	     2  	x = 1
+	     2  	print x
+	}
+
+	# END rules
+	END {
+	     1  	print "done"
+	}
