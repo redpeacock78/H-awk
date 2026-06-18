@@ -63,6 +63,7 @@ function _ds_infer_type(expr,    m, _m, arg_type) {
         return ""
     }
     # 変数参照: _DS_VAR_TYPES から型を取得
+    # During Pass 1b, _DS_in_function is 0 so this branch is never taken.
     if (_DS_in_function && (_DS_func_name SUBSEP expr) in _DS_VAR_TYPES)
         return _DS_VAR_TYPES[_DS_func_name, expr]
     return ""

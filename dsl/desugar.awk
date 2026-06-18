@@ -45,9 +45,7 @@ BEGIN {
     # Pass 1b: infer return types for unannotated functions from return statements.
     _pass1_fname = ""
     _pass1_brace_depth = 0
-    _DS_pass1_lineno = 0
     while ((getline _pass1_line < ARGV[1]) > 0) {
-      _DS_pass1_lineno++
       if (_pass1_fname == "") {
         if (_ds_is_func_def(_pass1_line)) {
           _pass1_fname = _ds_extract_func_name(_pass1_line)
@@ -61,8 +59,8 @@ BEGIN {
         continue
       }
 
-      if (match(_pass1_line, /^[[:space:]]*return[[:space:]]+(.+)$/, _pass1_m)) {
-        _pass1_ret = _ds_infer_type_safe(_ds_trim(_pass1_m[1]))
+      if (match(_pass1_line, /^[[:space:]]*(if[[:space:]]*\([^)]*\)[[:space:]]*)?return[[:space:]]+(.+)$/, _pass1_m)) {
+        _pass1_ret = _ds_infer_type_safe(_ds_trim(_pass1_m[2]))
         _pass1_seen_return = 1
         if (_pass1_ret == "") {
           _pass1_conflict = 1
@@ -272,6 +270,8 @@ function _ds_is_func_def(line) {
 
 function _ds_net_braces(line,    n, i, c) {
   n = 0
+  # NOTE: brace count does not mask string literals; unbalanced { or } inside
+  # strings would throw off depth — same limitation as the main pass brace tracker.
   for (i = 1; i <= length(line); i++) {
     c = substr(line, i, 1)
     if      (c == "{") n++
