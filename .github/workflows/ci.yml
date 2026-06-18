@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: MIT
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [master]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck gawk
+      - name: ShellCheck
+        run: |
+          # ponytail: --severity=error only; existing SC2155/SC2064 warnings in libexec are pre-existing, not blocking
+          find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 shellcheck --severity=error
+          for f in bin/hawk libexec/hawk libexec/hawk-check libexec/hawk-emit \
+                   libexec/hawk-help libexec/hawk-libs libexec/hawk-serve; do
+            [ -f "$f" ] && shellcheck --severity=error "$f"
+          done
+      - name: gawk lint
+        run: make lint
+
+  test:
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gawk (ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y gawk curl
+      - name: Install gawk (macos)
+        if: matrix.os == 'macos-latest'
+        run: brew install gawk
+      - name: Run tests
+        run: make test
+      - name: Upload e2e server log
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-server-log-${{ matrix.os }}
+          path: tests/e2e/server.log
+
+  coverage:
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y gawk kcov
+      - name: AWK coverage
+        run: |
+          mkdir -p coverage/awk
+          make test-unit GAWK_OPTS="--profile=coverage/awk/awk.prof"
+          scripts/awk-profile-to-lcov.sh coverage/awk/awk.prof > coverage/awk/awk.info
+      - name: Shell coverage
+        run: |
+          mkdir -p coverage/shell
+          kcov --include-path=bin,libexec,scripts coverage/shell make test
+          # Verify kcov produced output for the expected scripts
+          ls coverage/shell/
+          test -d coverage/shell/hawk || (echo "kcov: no hawk coverage output" && exit 1)
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        if: |
+          env.CODECOV_TOKEN != '' &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        with:
+          token: ${{ env.CODECOV_TOKEN }}
+          files: coverage/awk/awk.info
+          directory: coverage/shell
