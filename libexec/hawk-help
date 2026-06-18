@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+cat <<'EOF'
+Usage: hawk [serve] [--workers N] [--debug] <app.awk>
+       hawk emit    [--strict]             <app.awk>
+       hawk check   [--strict]             <app.awk>
+       hawk help
+
+Subcommands:
+  serve   Start HTTP server (default when no subcommand given)
+  emit    Print desugared AWK to stdout and exit
+  check   Check AWK syntax and exit without starting server
+  help    Show this help message
+
+Options (serve):
+  --workers N, -w N   Number of worker processes (default: 4)
+  --debug             Enable debug logging
+
+Options (emit / check):
+  --strict            Strict syntax check via gawk --sandbox
+EOF

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -e
+
+HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
+HAWK_LIBEXEC="${HAWK_LIBEXEC:-$(cd "$(dirname "$0")" && pwd)}"
+LIBS="${HAWK_LIBEXEC}/hawk-libs"
+
+STRICT=0
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --strict) STRICT=1; shift ;;
+    *)        args+=("$1"); shift ;;
+  esac
+done
+
+APP="${args[0]:-app.awk}"
+if [[ ! -f "$APP" ]]; then
+  echo "[hawk] app file not found: $APP" >&2
+  exit 1
+fi
+
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . ./.env
+  set +a
+fi
+
+APP_AWK="$("$LIBS" desugar "$APP")"
+trap "rm -f '$APP_AWK'" EXIT
+
+if [[ "$STRICT" -eq 1 ]]; then
+  if ! gawk --sandbox -f "${HAWK_LIB}/dsl/strict_stubs.awk" -f "$APP_AWK" < /dev/null >/dev/null 2>&1; then
+    echo "[hawk] --strict: gawk syntax error in desugared output" >&2
+    exit 1
+  fi
+fi
+
+cat "$APP_AWK"

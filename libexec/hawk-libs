@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -e
+
+HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
+subcmd="${1:-}"
+shift
+
+case "$subcmd" in
+  plugins)
+    result=""
+    for d in plugins/*/; do
+      [[ -d "$d" ]] || continue
+      [[ -f "${d}.disabled" ]] && continue
+      name=$(basename "$d")
+      manifest="${d}manifest.awk"
+      impl="${d}${name}.awk"
+      [[ -f "$manifest" ]] && result="$result -f $manifest"
+      [[ -f "$impl" ]]     && result="$result -f $impl"
+    done
+    printf '%s\n' "$result"
+    ;;
+  libs)
+    libs_args=""
+    libs_vars=""
+    has_net=0
+    case "$(uname -s)" in
+      Darwin) so_ext=dylib ;;
+      *)      so_ext=so ;;
+    esac
+    if [[ -z "$HAWK_NO_LIBS" ]]; then
+      for d in libs/*/; do
+        [[ -d "$d" ]] || continue
+        name=$(basename "$d")
+        [[ "$name" = "_common" ]] && continue
+        so="${d}zig-out/lib/libhawk_${name}.${so_ext}"
+        if [[ -f "$so" ]]; then
+          libs_args="$libs_args -l $so"
+          libs_vars="$libs_vars -v HAWK_LIBS_${name}=1"
+          [[ "$name" = "net" ]] && has_net=1
+        else
+          if [[ -f "${d}build.zig" ]]; then
+            echo "[WARN] libs/${name} 未ビルド ($so 不在)。機能 fallback 動作" >&2
+          fi
+        fi
+      done
+    fi
+    printf 'LIBS_ARGS=%s\n' "$(printf '%q' "$libs_args")"
+    printf 'LIBS_VARS=%s\n' "$(printf '%q' "$libs_vars")"
+    printf 'HAS_NET=%d\n' "$has_net"
+    ;;
+  desugar)
+    src="${1:-}"
+    if [[ ! -f "$src" ]]; then
+      echo "[hawk-libs] desugar: file not found: $src" >&2
+      exit 1
+    fi
+    tmp=$(mktemp /tmp/hawk.XXXXXX)
+    if ! gawk -f "${HAWK_LIB}/dsl/desugar.awk" "$src" > "$tmp" || [[ ! -s "$tmp" ]]; then
+      echo "[hawk-libs] desugar failed: $src" >&2
+      rm -f "$tmp"
+      exit 1
+    fi
+    echo "$tmp"
+    ;;
+  *)
+    echo "[hawk-libs] unknown subcommand: $subcmd" >&2
+    exit 1
+    ;;
+esac

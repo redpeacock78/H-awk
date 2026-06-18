@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+
+if [[ "${BASH_VERSINFO[0]}" -lt 4 || ( "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -lt 3 ) ]]; then
+  echo "[hawk] bash 4.3+ required (got ${BASH_VERSION})" >&2
+  exit 1
+fi
+
+set -e
+
+HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
+HAWK_LIBEXEC="${HAWK_LIBEXEC:-$(cd "$(dirname "$0")" && pwd)}"
+LIBS="${HAWK_LIBEXEC}/hawk-libs"
+
+WORKERS="${HAWK_WORKERS:-4}"
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --workers|-w)
+      WORKERS="$2"; shift 2 ;;
+    --workers=*)
+      WORKERS="${1#*=}"; shift ;;
+    --debug)
+      HAWK_DEBUG=1; shift ;;
+    *)
+      args+=("$1"); shift ;;
+  esac
+done
+
+APP="${args[0]:-app.awk}"
+if [[ ! -f "$APP" ]]; then
+  echo "[hawk] app file not found: $APP" >&2
+  exit 1
+fi
+
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . ./.env
+  set +a
+fi
+
+PLUGIN_FILES="$("$LIBS" plugins)"
+eval "$("$LIBS" libs)"
+
+if [[ "$HAS_NET" -eq 1 ]]; then
+  EFFECTIVE_WORKERS="$WORKERS"
+else
+  if [[ "$WORKERS" -gt 1 ]]; then
+    echo "[hawk] [WARN] libs/net not available, multi-worker disabled (falling back to 1 worker)" >&2
+  fi
+  EFFECTIVE_WORKERS=1
+fi
+
+HAWK_PIDFILE="${TMPDIR:-/tmp}/hawk-$(pwd | tr '/' '_').pid"
+if [[ -f "$HAWK_PIDFILE" ]]; then
+  old_pid=$(cat "$HAWK_PIDFILE" 2>/dev/null)
+  if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
+    kill -TERM "$old_pid" 2>/dev/null || true
+    sleep 0.3
+  fi
+  rm -f "$HAWK_PIDFILE"
+fi
+
+WORKER_PIDS=()
+
+shutdown() {
+  for pid in "${WORKER_PIDS[@]}"; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  for pid in "${WORKER_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  rm -f "$APP_AWK"
+  rm -f "$HAWK_PIDFILE"
+  exit 0
+}
+trap shutdown INT TERM
+
+APP_AWK="$("$LIBS" desugar "$APP")"
+# shellcheck disable=SC2064
+[[ -z "${HAWK_DEBUG}" ]] && trap "rm -f '$APP_AWK'" EXIT
+
+for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do
+  # shellcheck disable=SC2086
+  gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP_AWK" &
+  WORKER_PIDS+=($!)
+done
+
+echo "$$" > "$HAWK_PIDFILE"
+
+while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
+  wait -n 2>/dev/null || true
+
+  new_pids=()
+  for pid in "${WORKER_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      new_pids+=("$pid")
+    else
+      wait "$pid" 2>/dev/null
+      status=$?
+      if [[ "$status" -eq 0 ]]; then
+        :
+      else
+        echo "[hawk] worker $pid exited $status, restart in 1s" >&2
+        sleep 1
+        # shellcheck disable=SC2086
+        gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP_AWK" &
+        new_pids+=($!)
+      fi
+    fi
+  done
+  WORKER_PIDS=("${new_pids[@]}")
+done
+
+rm -f "$HAWK_PIDFILE"

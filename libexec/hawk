@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+export HAWK_LIB="$(cd "$(dirname "$0")/.." && pwd)"
+export HAWK_LIBEXEC="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HAWK_LIBEXEC:$PATH"
+
+CMD="${1:-}"
+case "$CMD" in
+  serve|emit|check|help)
+    shift
+    exec "hawk-$CMD" "$@"
+    ;;
+  *.awk|-*|"")
+    exec hawk-serve "$@"
+    ;;
+  *)
+    echo "[hawk] unknown command '$CMD'" >&2
+    hawk-help >&2
+    exit 1
+    ;;
+esac
