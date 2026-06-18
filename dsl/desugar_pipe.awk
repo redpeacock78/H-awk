@@ -17,17 +17,31 @@ function _ds_pipe_find_close(s, open_pos,    i, c, depth) {
     return i - 1
 }
 
-# Find where the left operand token starts (scan left from pipe_pos-1).
-# NOTE: only handles simple identifier LHS (variable names, temp vars like _ds_p_1).
-# Complex expressions (function calls, array subscripts, parenthesized exprs)
-# on the LHS of |> are not supported — use a let binding first:
-#   let tmp = foo(x)
-#   let result = tmp |> trim()
-function _ds_pipe_left_start(masked, pipe_pos,    i) {
+# Find where the left operand starts, preserving balanced calls/subscripts.
+function _ds_pipe_left_start_balanced(masked, pipe_pos,    i, c, depth) {
     i = pipe_pos - 1
     while (i >= 1 && substr(masked, i, 1) == " ") i--
-    while (i > 1 && substr(masked, i - 1, 1) ~ /[a-zA-Z0-9_]/) i--
-    return i
+    depth = 0
+    while (i >= 1) {
+        c = substr(masked, i, 1)
+        if (c == ")" || c == "]") {
+            depth++; i--
+        } else if ((c == "(" || c == "[") && depth > 0) {
+            depth--; i--
+            if (depth == 0) {
+                while (i >= 1 && substr(masked, i, 1) ~ /[a-zA-Z0-9_.]/) i--
+                i++; break
+            }
+        } else if (depth == 0 && c ~ /[a-zA-Z0-9_.]/) {
+            while (i > 1 && substr(masked, i-1, 1) ~ /[a-zA-Z0-9_.]/) i--
+            break
+        } else if (depth > 0) {
+            i--
+        } else {
+            i++; break
+        }
+    }
+    return (i < 1) ? 1 : i
 }
 
 function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
@@ -45,8 +59,19 @@ function _ds_pipe_transform(line, pre_buf,    segs, n, masked, pipe_pos, m,
     while (match(masked, /\|>/)) {
         pipe_pos = RSTART
 
-        left_start = _ds_pipe_left_start(masked, pipe_pos)
+        left_start = _ds_pipe_left_start_balanced(masked, pipe_pos)
         left_op    = _ds_trim(substr(line, left_start, pipe_pos - left_start))
+        if (left_op !~ /^[a-zA-Z_][a-zA-Z0-9_]*$/) {
+            left_type = _ds_infer_type(left_op)
+            _DS_pipe_tmp_cnt++
+            tmpvar = "__pipe_tmp_" _DS_pipe_tmp_cnt
+            pre_buf[++pb] = indent tmpvar " = " left_op
+            if (_DS_in_function) {
+                _DS_let_locals[++_DS_let_count] = tmpvar
+                _DS_VAR_TYPES[_DS_func_name, tmpvar] = left_type
+            }
+            left_op = tmpvar
+        }
 
         # Sealed-pipe check: Result/Option cannot be piped directly
         left_type = _ds_infer_type(left_op)

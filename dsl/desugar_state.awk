@@ -14,6 +14,7 @@ function _ds_init() {
   _DS_src_file    = ""
   _DS_current_lineno = 0
   _DS_pipe_count  = 0
+  _DS_pipe_tmp_cnt = 0
   _DS_mc_count       = 0
   _DS_in_match       = 0
   _DS_match_expr     = ""
