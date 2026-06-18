@@ -55,8 +55,7 @@ case "$subcmd" in
       exit 1
     fi
     tmp=$(mktemp /tmp/hawk.XXXXXX)
-    gawk -f "${HAWK_LIB}/dsl/desugar.awk" "$src" > "$tmp"
-    if [[ $? -ne 0 || ! -s "$tmp" ]]; then
+    if ! gawk -f "${HAWK_LIB}/dsl/desugar.awk" "$src" > "$tmp" || [[ ! -s "$tmp" ]]; then
       echo "[hawk-libs] desugar failed: $src" >&2
       rm -f "$tmp"
       exit 1

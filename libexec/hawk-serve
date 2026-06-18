@@ -112,3 +112,5 @@ while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
   done
   WORKER_PIDS=("${new_pids[@]}")
 done
+
+rm -f "$HAWK_PIDFILE"
