@@ -23,13 +23,13 @@ check() {
   fi
 }
 
-# --no-emit: valid file exits 0
-check "no_emit_valid_exits_0"   0  env HAWK_NO_LIBS=1 "$HAWK" --no-emit "$VALID"
-# --no-emit: invalid file exits 1
-check "no_emit_invalid_exits_1" 1  env HAWK_NO_LIBS=1 "$HAWK" --no-emit "$INVALID"
-# --emit: valid file exits 0, produces output
+# check: valid file exits 0
+check "check_valid_exits_0"   0  env HAWK_NO_LIBS=1 "$HAWK" check "$VALID"
+# check: invalid file exits 1
+check "check_invalid_exits_1" 1  env HAWK_NO_LIBS=1 "$HAWK" check "$INVALID"
+# emit: valid file exits 0, produces output
 set +e
-emit_out=$(HAWK_NO_LIBS=1 "$HAWK" --emit "$VALID" 2>/dev/null)
+emit_out=$(HAWK_NO_LIBS=1 "$HAWK" emit "$VALID" 2>/dev/null)
 emit_exit=$?
 set -e
 if [[ "$emit_exit" -eq 0 && -n "$emit_out" ]]; then
@@ -38,25 +38,16 @@ else
   printf "  FAIL: emit_produces_output (exit=%d, output=%s)\n" "$emit_exit" "$emit_out"
   FAIL=$((FAIL+1))
 fi
-# --no-emit and --emit together: exits 1 with error message
-set +e
-combo_out=$(HAWK_NO_LIBS=1 "$HAWK" --no-emit --emit "$VALID" 2>&1)
-combo_exit=$?
-set -e
-if [[ "$combo_exit" -ne 0 ]] && printf '%s' "$combo_out" | grep -q "mutually exclusive"; then
-  printf "  PASS: no_emit_and_emit_error\n"; PASS=$((PASS+1))
-else
-  printf "  FAIL: no_emit_and_emit_error (exit=%d)\n" "$combo_exit"
-  FAIL=$((FAIL+1))
-fi
+# unknown subcommand: exits 1
+check "unknown_subcommand_exits_1" 1  env HAWK_NO_LIBS=1 "$HAWK" unknowncmd "$VALID"
 
-# --strict with valid file exits 0
-check "strict_no_emit_valid_exits_0" 0 env HAWK_NO_LIBS=1 "$HAWK" --no-emit --strict "$VALID"
-# --strict with invalid DSL file exits 1 (desugar catches it before gawk check)
-check "strict_no_emit_invalid_exits_1" 1 env HAWK_NO_LIBS=1 "$HAWK" --no-emit --strict "$INVALID"
-# --emit --strict with valid file exits 0 and produces output
+# check --strict: valid file exits 0
+check "strict_check_valid_exits_0"   0 env HAWK_NO_LIBS=1 "$HAWK" check --strict "$VALID"
+# check --strict: invalid DSL file exits 1
+check "strict_check_invalid_exits_1" 1 env HAWK_NO_LIBS=1 "$HAWK" check --strict "$INVALID"
+# emit --strict: valid file exits 0 and produces output
 set +e
-strict_emit_out=$(HAWK_NO_LIBS=1 "$HAWK" --emit --strict "$VALID" 2>/dev/null)
+strict_emit_out=$(HAWK_NO_LIBS=1 "$HAWK" emit --strict "$VALID" 2>/dev/null)
 strict_emit_exit=$?
 set -e
 if [[ "$strict_emit_exit" -eq 0 && -n "$strict_emit_out" ]]; then
