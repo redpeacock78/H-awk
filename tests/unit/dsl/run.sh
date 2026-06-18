@@ -11,12 +11,14 @@ for dir in tests/unit/dsl/*/; do
   # エラー fixture: expected_stderr が存在する場合
   if [[ -f "${dir}expected_stderr" ]]; then
     [[ -f "${dir}input.awk" ]] || continue
+    strict_args=()
+    [[ -f "${dir}strict" ]] && strict_args=(-v _DS_strict=1)
     expected_exit=1
     [[ -f "${dir}expected_exit" ]] && expected_exit=$(tr -d '[:space:]' < "${dir}expected_exit")
     expected_msg=$(cat "${dir}expected_stderr")
 
     set +e
-    actual_stderr=$(gawk -f dsl/desugar.awk "${dir}input.awk" 2>&1 1>/dev/null)
+    actual_stderr=$(gawk "${strict_args[@]}" -f dsl/desugar.awk "${dir}input.awk" 2>&1 1>/dev/null)
     actual_exit=$?
     set -e
 

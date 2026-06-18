@@ -175,6 +175,9 @@ function _ds_infer_type_with_orig(transformed_expr, orig_expr,    m, ltype, rtyp
 }
 
 function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_call) {
+  if (_DS_strict && _DS_block_depth > 0 && line ~ /^[[:space:]]*let[[:space:]]+/)
+    print "let inside control-flow block" > "/dev/stderr"
+
   # ?= unwrap: let name ?= expr  (requires Option or Result return type)
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
     rhs = _ds_trim(arr[3])
