@@ -131,6 +131,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
       _DS_func_ret_type = _ds_extract_return_type(line)
       _DS_func_sig     = _ds_strip_func_annotations(line)
       _DS_brace_depth  = _ds_net_braces(line)
+      _DS_block_depth  = 0
       _DS_let_count    = 0
       _DS_body_count   = 0
       delete _DS_let_locals
@@ -200,6 +201,8 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
     return
   }
 
+  _ds_block_depth_close(line)
+
   # Same-line adjacent string literal folding
   line = _ds_fold_adjacent_strings_inline(line)
   # Fragment interpolation: expand #{...} inside safe.html.fragment("...") arg
@@ -225,6 +228,7 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
   _ds_check_return(dot_transformed, lineno)
   transformed = _ds_let_transform(nc_result, lineno, line)
   if (transformed != "") _DS_body_buf[++_DS_body_count] = transformed
+  _ds_block_depth_open(line)
 }
 
 # Flush accumulated multi-line string fold as a single synthetic let line.
@@ -278,6 +282,19 @@ function _ds_net_braces(line,    n, i, c) {
     else if (c == "}") n--
   }
   return n
+}
+
+function _ds_block_depth_close(line,    rest) {
+  rest = line
+  while (rest ~ /^[[:space:]]*}/) {
+    if (_DS_block_depth > 0) _DS_block_depth--
+    sub(/^[[:space:]]*}/, "", rest)
+  }
+}
+
+function _ds_block_depth_open(line) {
+  if (line ~ /^[[:space:]]*(}[[:space:]]*)?(else([[:space:]]+if[[:space:]]*\([^)]*\))?|if[[:space:]]*\([^)]*\)|for[[:space:]]*\([^)]*\)|while[[:space:]]*\([^)]*\))[[:space:]]*\{/)
+    _DS_block_depth++
 }
 
 function _ds_pass1b_finalize(fname, seen_return, inferred_ret, conflict) {

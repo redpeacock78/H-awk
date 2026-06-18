@@ -10,6 +10,7 @@ function _ds_init() {
   _DS_let_count   = 0
   _DS_body_count  = 0
   _DS_tc_count    = 0
+  _DS_block_depth = 0
   _DS_had_error   = 0
   _DS_src_file    = ""
   _DS_current_lineno = 0

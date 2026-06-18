@@ -145,6 +145,8 @@ function handler(    title, items, tmp) {
 
 `let` declarations are hoisted to the function signature as gawk locals (4-space convention). `let name = []` becomes `delete name`. Bare `let name` is hoisted only (line removed).
 
+`let` is function-scoped, not block-scoped. A `let` inside `if`, `for`, or `while` is still hoisted to the function signature, so the variable remains visible after the block. In strict mode (`_DS_strict=1`), a warning is emitted when `let` appears inside a control-flow block.
+
 **Type annotations on `let`**
 
 ```awk
@@ -338,6 +340,10 @@ when ctx.req.form("title") of
 end
 ```
 
+**Regular expression literals**
+
+Regular expression literals must stay on a single source line. The DSL parser does not support regex literals that span multiple lines.
+
 **`??` null-coalescing operator**
 
 ```awk
@@ -350,6 +356,8 @@ hawk::dispatch("app.listen", (_ds_tc_1 != "" ? _ds_tc_1 : 8080))
 ```
 
 Rule: `expr ?? default` — if `expr` evaluates to empty string, use `default`. Works inside function arguments.
+
+Because AWK represents missing values as empty strings, `??` treats both null-like missing values and the empty string as falsy.
 
 **`|>` pipe operator**
 
