@@ -11,7 +11,7 @@ BEGIN { print "SF:" sf; lf = 0; lh = 0 }
 {
   # NR = profile output line number, not source line number.
   # gawk --profile reformats code; line numbers are approximate.
-  if (match($0, /^[\t ]*([0-9]+)[ ]*\t/, arr)) {
+  if (match($0, /^\t[ ]*([0-9]+)[ ]*\t/, arr)) {
     count = arr[1] + 0
     print "DA:" NR "," count
     lf++
