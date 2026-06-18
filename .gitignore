@@ -1,3 +1,6 @@
+# Coverage (CI-generated)
+coverage/
+
 # H-awk runtime artifacts
 data/*.tsv
 data/*.tmp
