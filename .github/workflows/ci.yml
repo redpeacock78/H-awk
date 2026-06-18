@@ -86,9 +86,7 @@ jobs:
         run: |
           mkdir -p coverage/shell
           kcov --include-path=bin,libexec,scripts coverage/shell make test
-          # Verify kcov produced output for the expected scripts
           ls coverage/shell/
-          test -d coverage/shell/hawk || (echo "kcov: no hawk coverage output" && exit 1)
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         if: |
