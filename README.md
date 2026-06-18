@@ -40,9 +40,27 @@ curl http://localhost:8080/todos.json
 
 `make help` lists all available targets.
 
+## CLI
+
+```sh
+hawk [serve] [--workers N] [--debug] <app.awk>
+hawk emit    [--strict]              <app.awk>
+hawk check   [--strict]             <app.awk>
+hawk help
+```
+
+| Subcommand | Description |
+|---|---|
+| `serve` | Start HTTP server. Default when no subcommand is given — `hawk app.awk` and `hawk serve app.awk` are equivalent. |
+| `emit` | Print the desugared AWK source to stdout and exit. Useful for inspecting what the DSL preprocessor produces. |
+| `check` | Run the DSL preprocessor and exit without starting the server. Exits 0 on success, 1 on error. |
+| `help` | Print usage summary. |
+
+`--strict` runs the desugared output through `gawk --sandbox` for additional syntax validation. Available in `emit` and `check`.
+
 ## Routing
 
-`bin/hawk` desugars your app file at startup — write routes and handlers using dot-notation DSL, and gawk locals using `let`.
+`bin/hawk` is a thin wrapper that dispatches to `libexec/hawk`. Desugaring happens in the subcommand (`serve`/`emit`/`check`) before gawk runs — write routes and handlers using dot-notation DSL, and gawk locals using `let`.
 
 ```awk
 BEGIN {
@@ -727,7 +745,7 @@ User-defined functions with type annotations are checked the same way. Forward r
 Use `--debug` to inspect the generated file:
 
 ```sh
-./bin/hawk --debug app.awk   # prints temp file path to stderr
+./bin/hawk serve --debug app.awk   # prints temp file path to stderr
 ```
 
 ## App API (hawk::)
@@ -923,7 +941,7 @@ When `libs/net` is built, `bin/hawk` spawns N independent gawk workers sharing t
 
 ```sh
 # CLI
-./bin/hawk --workers 8 app.awk
+./bin/hawk serve --workers 8 app.awk
 
 # Make
 make run WORKERS=8
