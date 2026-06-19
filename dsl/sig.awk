@@ -2,8 +2,9 @@
 # dsl/sig.awk -- DSL function signature registry
 #
 # _DS_SIG_RET[path]        : return type string
-# _DS_SIG_ARITY[path]  : argument count (-1 = variadic)
-# _DS_SIG_ARG[path, index] : argument type, 1-indexed
+# _DS_SIG_ARITY[path]     : minimum argument count (-1 = variadic)
+# _DS_SIG_ARITY_MAX[path] : maximum argument count for optional args
+# _DS_SIG_ARG[path, index]: argument type, 1-indexed
 
 BEGIN {
     # Type aliases
@@ -124,11 +125,13 @@ BEGIN {
     _DS_SIG_ARG["ctx.res.header", 1] = "Str"
     _DS_SIG_ARG["ctx.res.header", 2] = "Str"
 
-    _DS_SIG_RET["ctx.res.redirect"]   = "Response"
-    _DS_SIG_ARITY["ctx.res.redirect"] = 1
+    _DS_SIG_RET["ctx.res.redirect"]    = "Response"
+    _DS_SIG_ARITY["ctx.res.redirect"]  = 1
+    _DS_SIG_ARITY_MAX["ctx.res.redirect"] = 2
     _DS_SIG_ARG["ctx.res.redirect", 1] = "Str"
+    _DS_SIG_ARG["ctx.res.redirect", 2] = "Int"
 
-    # hawk.app.*  (route registration: always arity=2, Str path + HandlerName)
+    # hawk.app.*  (route registration)
     _DS_SIG_RET["hawk.app.get"]       = "Void"
     _DS_SIG_ARITY["hawk.app.get"]     = 2
     _DS_SIG_ARG["hawk.app.get", 1]    = "Str"
@@ -160,9 +163,10 @@ BEGIN {
     _DS_SIG_ARG["hawk.app.head", 2]   = "HandlerName"
 
     _DS_SIG_RET["hawk.app.on"]        = "Void"
-    _DS_SIG_ARITY["hawk.app.on"]      = 2
+    _DS_SIG_ARITY["hawk.app.on"]      = 3
     _DS_SIG_ARG["hawk.app.on", 1]     = "Str"
-    _DS_SIG_ARG["hawk.app.on", 2]     = "HandlerName"
+    _DS_SIG_ARG["hawk.app.on", 2]     = "Str"
+    _DS_SIG_ARG["hawk.app.on", 3]     = "HandlerName"
 
     _DS_SIG_RET["hawk.app.all"]       = "Void"
     _DS_SIG_ARITY["hawk.app.all"]     = 2

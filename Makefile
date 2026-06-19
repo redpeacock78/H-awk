@@ -80,6 +80,8 @@ test-libs: ## libs/*/zig build test (Zig 必要)
 	  echo "Testing $$d"; \
 	  (cd "$$d" && zig build test); \
 	done
+	@(cd libs/net && zig build)
+	@bash libs/net/tests/split_recv_test.sh
 
 libs-clean: ## libs ビルド成果削除
 	@for d in libs/*/; do rm -rf "$${d}zig-out" "$${d}zig-cache" "$${d}.zig-cache"; done

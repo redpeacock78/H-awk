@@ -84,13 +84,18 @@ function _ds_split_args(args_str, out,    i, c, depth, in_str, cur, n) {
     return n
 }
 
-function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_args, lineno) {
+function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_args, lineno, max_arity) {
     lineno = _DS_current_lineno
     if (!(path in _DS_SIG_ARITY)) return
 
     n = _ds_count_args(args_str)
-    if (_DS_SIG_ARITY[path] != -1 && n != _DS_SIG_ARITY[path]) {
-        _ds_error(lineno, path " expects " _DS_SIG_ARITY[path] " argument(s), got " n, "")
+    max_arity = ((path in _DS_SIG_ARITY_MAX) ? _DS_SIG_ARITY_MAX[path] : _DS_SIG_ARITY[path])
+    if (_DS_SIG_ARITY[path] != -1 && (n < _DS_SIG_ARITY[path] || n > max_arity)) {
+        if (path in _DS_SIG_ARITY_MAX) {
+            _ds_error(lineno, path " expects " _DS_SIG_ARITY[path] ".." max_arity " argument(s), got " n, "")
+        } else {
+            _ds_error(lineno, path " expects " _DS_SIG_ARITY[path] " argument(s), got " n, "")
+        }
         return
     }
 
