@@ -138,6 +138,16 @@ function _ds_kind_of(t) {
     return "scalar"
 }
 
+function _ds_result_ng_return(varname,    t) {
+    t = "_ds_err_type_" varname
+    return \
+        "    " t " = awk::result_err_type(" varname ")\n" \
+        "    if (" t " == \"ParseError\") return ctx::dispatch(\"res.status\", 400)\n" \
+        "    if (" t " == \"AuthError\") return ctx::dispatch(\"res.status\", 401)\n" \
+        "    if (" t " == \"NotFoundError\") return ctx::dispatch(\"res.status\", 404)\n" \
+        "    return ctx::dispatch(\"res.status\", 500)"
+}
+
 # _ds_extract_let_parts: parse "  let name: TYPE = RHS"
 # Returns 1 on success, 0 on failure
 # Fills: out_indent, out_varname, out_type, out_rhs
@@ -199,8 +209,9 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
       _DS_body_buf[++_DS_body_count] = arr[1] "}"
       _DS_body_buf[++_DS_body_count] = arr[1] arr[2] " = option_val(_ds_tc_" _DS_tc_count ")"
     } else {
+      _DS_let_locals[++_DS_let_count] = "_ds_err_type__ds_tc_" _DS_tc_count
       _DS_body_buf[++_DS_body_count] = arr[1] "if (!result_ok(_ds_tc_" _DS_tc_count ")) {"
-      _DS_body_buf[++_DS_body_count] = arr[1] "  return ctx::dispatch(\"res.status\", 500)"
+      _DS_body_buf[++_DS_body_count] = _ds_result_ng_return("_ds_tc_" _DS_tc_count)
       _DS_body_buf[++_DS_body_count] = arr[1] "}"
       _DS_body_buf[++_DS_body_count] = arr[1] arr[2] " = result_val(_ds_tc_" _DS_tc_count ")"
     }
