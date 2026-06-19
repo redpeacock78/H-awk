@@ -55,8 +55,8 @@ POST / PUT リクエストではリクエストボディが後続の TCP パケ�
 
 #### 要求仕様
 
-`http_parser.zig` に `parseFrameResult` 構造体を追加し、フレーミング判定を一箇所に集約する。
-`parseFrameResult` は以下のフィールドを持つ。
+`http_parser.zig` に `ParseFrameResult` 構造体を追加し、フレーミング判定を一箇所に集約する。
+`ParseFrameResult` は以下のフィールドを持つ。
 
 ```zig
 const ParseFrameResult = struct {
@@ -98,7 +98,7 @@ const ParseFrameResult = struct {
 `Content-Length` の値が数値として解析できない場合は `400 Bad Request` を返す（`action: error_response, should_close: true`）。
 `Content-Length` が負の値または `+` や空白プレフィックスを含む場合も `400 Bad Request` を返す（`action: error_response, should_close: true`）。
 同一リクエストに `Content-Length` が複数存在する場合、または値が相互に矛盾する場合も `400 Bad Request` を返す（`action: error_response, should_close: true`）。
-`Content-Length` が最大ボディサイズ（デフォルト 1 MiB = 1048576 バイト）を超える場合は `413 Content Too Large` を返す（`action: error_response, should_close: true`）。
+`Content-Length` が最大ボディサイズ（デフォルト 1 MiB = 1048576 バイト）を超える場合は `413 Payload Too Large` を返す（`action: error_response, should_close: true`）。
 フレーミングエラーはすべて `should_close: true` を設定する。バッファに残留したボディバイトが次のリクエストとして誤解釈されることを防ぐためである。
 
 最大ボディサイズはコンパイル時定数 `MAX_BODY_SIZE` として `http_parser.zig` に定義し、`event_loop.zig` はこれをインポートして使用する。フレーミング判定ロジックを持つパーサーが上限値も所有することで、定数の参照元を一箇所に集約する。
@@ -117,9 +117,25 @@ const ParseFrameResult = struct {
 
 Keep-alive に対応するため、1 バッファに複数の完全なリクエストが含まれる場合は以下の処理とする。
 
-1. `parseFrameResult.consume_len` バイトだけバッファから取り除いてリクエストをエンキューする。
+1. `ParseFrameResult.consume_len` バイトだけバッファから取り除いてリクエストをエンキューする。
 2. 残余バイトを接続の読み取りバッファに保持する。
-3. 次のループ / 読み取りで残余バイトを再度 `parseFrameResult` に通す。
+3. 次のループ / 読み取りで残余バイトを再度 `ParseFrameResult` に通す。
+
+**エラーレスポンスの wire format:**
+
+`action: error_response` の場合、`event_loop.zig` は以下の HTTP レスポンスを送信する関数 `sendSimpleError(conn, status_code, reason, close)` を実装する。
+
+```
+HTTP/1.1 {status_code} {reason}\r\n
+Content-Type: text/plain; charset=utf-8\r\n
+Content-Length: {len}\r\n
+Connection: close\r\n
+\r\n
+{status_code} {reason}\r\n
+```
+
+`should_close = true` の場合、送信後に接続を閉じる。
+バッファクリーンアップは `consume_len` バイト消費 + 接続クローズで行う（残余バイトを保持しない）。
 
 #### 変更対象ファイル
 
@@ -153,7 +169,7 @@ Keep-alive に対応するため、1 バッファに複数の完全なリクエ�
 
 - `hawk.app.on`: ランタイムは 3 引数（method, path, handler）だが、DSL シグネチャは 2 引数
 - `ctx.res.redirect`: ランタイムは 2 引数（url, code）をサポートするが、DSL シグネチャは 1 引数のみ
-- `safe.html.fragment`: README は可変長引数と説明しているが、ランタイムは 3 引数のみ受け付ける
+- `safe.html.fragment`: `dsl/sig.awk:107-110` は既に variadic 宣言済みだが、ランタイムディスパッチは 3 引数固定（`_SAFE_ARITY["html.fragment"] = 3`）のため、4 引数以上を渡すとランタイム/デシュガーが対応していない
 
 #### 要求仕様
 
@@ -189,6 +205,11 @@ ctx.res.redirect(url, code)  # 任意のリダイレクトコード
 - 引数 4 個以上：展開ごとに一意な名前（`_ds_frag_args_N`、N はデシュガー内の単調カウンター）の AWK 配列に引数を格納し、`safe::fragment_v(_ds_frag_args_N, n)` を呼び出す特殊ディスパッチに展開する。配列は使用前にクリア（`delete _ds_frag_args_N`）する。
 
 `safe::fragment_v(arr, n)` は `core/safe.awk` に追加するランタイム関数であり、`arr[1]`〜`arr[n]` を連結して返す。
+
+引数 0〜3 個のケースでは既存の `_SAFE_ARITY["html.fragment"] = 3` による `html_fragment(a, b, c)` 呼び出しをそのまま使う。
+0 引数は `html_fragment("", "", "")` に展開される（未初期化引数は空文字列）。
+1 引数は `html_fragment(arg1, "", "")` に展開される。
+これらは現在の偶発的な動作であるため、明示的に仕様として定義し、テストで固定する。
 
 #### 変更対象ファイル
 
@@ -238,12 +259,12 @@ function tsv_lock(path,    lockdir, pidfile, pid, i) {
     lockdir = path ".lock"
     pidfile = lockdir "/pid"
     for (i = 0; i < 50; i++) {
-        if (system("mkdir " shell_quote(lockdir) " 2>/dev/null") == 0) {
+        if (system("mkdir " _shellquote(lockdir) " 2>/dev/null") == 0) {
             # ロック取得: PID をオーナートークンとして書き込む
             print PROCINFO["pid"] > pidfile
             if (close(pidfile) != 0) {
                 # PID 書き込み失敗: ロックを解放して失敗を返す
-                system("rm -rf " shell_quote(lockdir))
+                system("rm -rf " _shellquote(lockdir))
                 return 0
             }
             return 1
@@ -253,14 +274,24 @@ function tsv_lock(path,    lockdir, pidfile, pid, i) {
             close(pidfile)
             # PID を数字のみに制限してシェルインジェクションを防ぐ
             if (pid !~ /^[0-9]+$/) {
-                system("rm -rf " shell_quote(lockdir))
+                # 不正な PID ファイル: アトミックなリネームで横取りして削除する
+                _tsv_seq++
+                reapdir = lockdir ".reap." PROCINFO["pid"] "." _tsv_seq
+                if (system("mv " _shellquote(lockdir) " " _shellquote(reapdir) " 2>/dev/null") == 0) {
+                    system("rm -rf " _shellquote(reapdir))
+                }
                 continue
             }
             if (system("kill -0 " pid " 2>/dev/null") != 0) {
-                # オーナープロセスが死亡 → スタールロックを削除して再試行する
-                # mkdir はアトミックなので rm -rf 後に別プロセスがロックを取得しても安全:
-                # その場合、次の mkdir が失敗し、そのプロセスの live PID を読んで待機する
-                system("rm -rf " shell_quote(lockdir))
+                # オーナープロセスが死亡 → アトミックなリネームで横取りしてから削除する
+                # 2 つのリーパーが同時に kill-0 を通過しても、mv はアトミックなので
+                # 一方だけが成功し、他方は mv 失敗後に continue して再試行する
+                _tsv_seq++
+                reapdir = lockdir ".reap." PROCINFO["pid"] "." _tsv_seq
+                if (system("mv " _shellquote(lockdir) " " _shellquote(reapdir) " 2>/dev/null") == 0) {
+                    system("rm -rf " _shellquote(reapdir))
+                }
+                # mv 失敗は他のリーパーまたはオーナーが処理済み → continue で再試行する
                 continue
             }
         } else {
@@ -279,7 +310,7 @@ function tsv_unlock(path,    lockdir, pidfile, pid) {
     if ((getline pid < pidfile) > 0) {
         close(pidfile)
         if (pid == PROCINFO["pid"]) {
-            system("rm -rf " shell_quote(lockdir))
+            system("rm -rf " _shellquote(lockdir))
         }
     } else {
         close(pidfile)
@@ -287,7 +318,7 @@ function tsv_unlock(path,    lockdir, pidfile, pid) {
 }
 ```
 
-`shell_quote(s)` は AWK 組み込みの文字列クォート関数として実装する。
+`_shellquote(s)` は AWK 組み込みの文字列クォート関数として実装する。
 `gsub(/'/, "'\\''", s)` を使い、結果を `'` で囲む。
 
 **一時ファイルのパス:**
@@ -304,9 +335,9 @@ function tsv_tmppath(path) {
 }
 ```
 
-`mv` は `system("mv " shell_quote(tmppath) " " shell_quote(path))` で実行し、戻り値を確認する。
-失敗した場合は `system("rm -f " shell_quote(tmppath))` でクリーンアップしてエラーを返す。
-すべてのコマンド引数に `shell_quote()` を適用する。
+`mv` は `system("mv " _shellquote(tmppath) " " _shellquote(path))` で実行し、戻り値を確認する。
+失敗した場合は `system("rm -f " _shellquote(tmppath))` でクリーンアップしてエラーを返す。
+すべてのコマンド引数に `_shellquote()` を適用する。
 
 #### 変更対象ファイル
 
@@ -398,9 +429,12 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 ハンドラーが呼び出される時点でリクエストは必ず完全に受信済みである（P0-1 で保証）。
 `Content-Length: 0` の場合、またはボディ区切り後のバイト列が 0 バイトの場合は `ok("")` を返す。
 
-`ctx::req_json` の `ParseError` 条件を `ctx::body` の空 / 欠損とは明確に分離する。
+`ctx::req_json` の仕様を以下のとおり明確にする。
+
+- **戻り値型**: `Result<Str, ParseError>`。`ok` 値は元のリクエストボディ文字列（そのまま保持）。
+- `request.awk` の `_request_parse_json_body` は既に `req["json:" key]` にフラット展開済みであるため、DSL から `ctx.req.json_field("key")` でアクセスできる。`ctx.req.json()` は JSON ボディ全体を raw string として返す（デコード済みマップを返さない）。
 - `ctx::body` は常に `ok(...)` を返す（受信済みが保証されているため）。空ボディは `ok("")` を返す。
-- `ctx::req_json` は JSON パースに失敗した場合のみ `ParseError` を返す。`Content-Type: application/json` + 空ボディは `ctx::req_json` が `ParseError` を返すが、`ctx::body` は `ok("")` を返す。
+- `ctx::req_json` の `ParseError` 条件: ボディが JSON として無効な場合。空ボディ（`Content-Type: application/json` + `Content-Length: 0`）も無効 JSON として `ParseError` を返す。
 - この 2 者の動作は独立しており、`ctx::body` の返値が `ctx::req_json` の動作に影響しない。
 
 #### 変更対象ファイル
@@ -459,6 +493,8 @@ AWK の JSON データモデルを以下のように定義する。
 - オブジェクト内にネストされた配列が正しく変換されること。
 
 事前エンコード済みの JSON 文字列を直接セットするためのヘルパーとして `ctx.res.json_raw(str)` を追加する。
+
+`dsl/sig.awk` における `ctx.res.json` のシグネチャは、引数型を `Any`（AWK 配列・スカラーを問わず受け付けることを示す）に変更する。型チェックレイヤーは `ctx.res.json(v)` の引数 `v` に対して型エラーを出さない（引数型を `Any` として扱う）。`ctx.res.json_raw` は `Str` を引数に取る。
 
 この変更は破壊的変更である。`ctx.res.json` に pre-encoded JSON 文字列を渡している既存コードはすべて二重エンコードになる。
 修正対象のファイルは以下のとおりである（すべて確認・修正すること）。
@@ -578,13 +614,15 @@ Result 式と Option 式が混在する `when...of` はサポート対象外で�
 - Result 式に `none:` が含まれる → エラー
 
 **Option 式の有効なアーム順序:**
-- `ok [bind]:` アームを最初に置く
+- `ok [bind]:` アーム（または `some [bind]:` と記述する場合）を最初に置く（1 つのみ）
 - `none:` は最後の catch-all として 1 つだけ許可
 
 無効なパターン：
 - `none:` の後にアームが続く → エラー
 - Option 式に `ng e<Type>:` が含まれる → エラー
 - `ok` アームが存在しない（`none:` のみ）→ エラー
+
+注: 既存コード（`desugar_match.awk`）は `some:` アームを `ok` の別名として処理する。本フェーズでは `some:` と `ok:` を同等として扱い、どちらの記法も許可する。
 
 catch-all アームの後に型付きアームが続く場合は、以下のエラーメッセージを出力する。
 
@@ -624,29 +662,25 @@ end
 
 #### 要求仕様
 
-テンプレートパスをランタイムで検証し、以下のパスのみを許可する。
+テンプレートパスのAPIを以下のとおり定義する。
 
-- `views/` プレフィックスで始まる相対パス
+**呼び出し側 API**:
+- 呼び出し元は `views/` プレフィックス付きの相対パスを渡す（例: `ctx.res.render("views/index.html")`）。
+- 以下は事前チェックで即時拒否する（`realpath` 実行前）: 絶対パス（`/` 始まり）、`..` を含むパス、空文字列、`views/` プレフィックスなしのパス。
 
-以下のパスは拒否してエラーレスポンス（500）を返す。
+**`HAWK_TEMPLATE_ROOT`**:
+- アプリルートディレクトリの絶対パス（`views/` の親ディレクトリ）を指す。
+- `libexec/hawk-serve` がプロセス起動時に環境変数として設定する。`bin/hawk` は設定しない。
+- 例: アプリが `/app` にある場合、`HAWK_TEMPLATE_ROOT=/app`。
 
-- 絶対パス（`/` で始まるパス）
-- `..` を含むパス
-- 空文字列
+**パス正規化**:
 
-ベースディレクトリは `ENVIRON["PWD"]` ではなく、hawk 起動時に確定する信頼済みの定数 `HAWK_TEMPLATE_ROOT`（`views/` の絶対パス）を使う。
-`HAWK_TEMPLATE_ROOT` は `libexec/hawk-serve`（または serve を担当する libexec コマンド）がプロセス起動時に環境変数として設定し、`core/template.awk` はこれを参照する。
-`bin/hawk` は wrapper であり serve ロジックを持たないため、ここでは設定しない。
-
-パス正規化は以下の手順で行う。
-
-1. `HAWK_TEMPLATE_ROOT` 自体を `realpath` で正規化する（サーブ起動時に 1 回のみ実行し、`_hawk_template_root` 変数にキャッシュする）。
-2. 候補パスを `_hawk_template_root "/" path` として構築する（`path` が `views/` プレフィックスを持つ場合は除去してから結合する）。これにより CWD に依存しない。
-3. 候補パスを `realpath` で正規化する。
+1. `HAWK_TEMPLATE_ROOT` 自体を `realpath` で正規化する（サーブ起動時に 1 回のみ実行し、`_hawk_template_root` 変数にキャッシュする）。また `_hawk_template_views = _hawk_template_root "/views"` もキャッシュする。
+2. 候補パスを `_hawk_template_root "/" path` として構築する。`path = "views/index.html"` なら `candidate = "/app/views/index.html"`。二重 `views/` にはならない（呼び出し元が `views/` プレフィックス付きで渡し、それをそのまま結合するため）。
 
 ```awk
 candidate = _hawk_template_root "/" path
-cmd = "realpath -- " shell_quote(candidate) " 2>/dev/null"
+cmd = "realpath -- " _shellquote(candidate) " 2>/dev/null"
 ret = (cmd | getline normalized)
 close(cmd)
 if (ret != 1) {
@@ -654,19 +688,19 @@ if (ret != 1) {
 }
 ```
 
-4. `normalized` が `_hawk_template_root` と等しいか、または `_hawk_template_root "/"` で始まるかを確認する。
+3. `normalized` が `_hawk_template_views` と等しいか、または `_hawk_template_views "/"` で始まるかを確認する。
 
 ```awk
-if (normalized != _hawk_template_root && index(normalized, _hawk_template_root "/") != 1) {
+if (normalized != _hawk_template_views && index(normalized, _hawk_template_views "/") != 1) {
     return render_error(500, "template path outside root")
 }
 ```
 
-この条件により、`root = "/app/views"` のとき `normalized = "/app/views2/foo"` が誤って許可されない。
-シンボリックリンクは `realpath` が解決済みの実パスに展開するため、`HAWK_TEMPLATE_ROOT` 配下に収まることで保証する。
+シンボリックリンクは `realpath` が解決済みの実パスに展開するため、`HAWK_TEMPLATE_ROOT/views/` 配下に収まることで保証する。
 テンプレートファイルは `normalized` を使って読み込む（元の `path` や `candidate` は使わない）。
 
 `realpath` が利用できない環境（戻り値 `!= 1`）では fail-closed とし、`500 Internal Server Error` を返す。
+`realpath` の利用可否は `hawk serve` 起動時に確認し、利用不可の場合は起動を中止するかログに警告を出力する。
 
 長期的な設計として `TemplatePath` ブランド型の導入を検討するが、本フェーズでは短期的なランタイムチェックのみを実装する。
 
@@ -678,6 +712,8 @@ if (normalized != _hawk_template_root && index(normalized, _hawk_template_root "
 - `dsl/sig.awk`
 - `README.md`
 - `tests/unit/test_template.awk`
+- `tests/e2e/fixtures/app.awk`（既存の `ctx.res.render("tests/e2e/fixtures/views/test.html")` を `ctx.res.render("views/test.html")` に更新し、テスト実行時に `HAWK_TEMPLATE_ROOT=tests/e2e/fixtures` が設定されることを確認する）
+- `libexec/hawk-serve`（`realpath` の利用可否を起動時に確認する処理を追加）
 
 #### 追加するテスト
 
@@ -719,12 +755,18 @@ if (normalized != _hawk_template_root && index(normalized, _hawk_template_root "
 - 未知のエラー型が `?=` で 500 に変換されること。
 - `Option none` が `?=` で 404 に変換されること（従来動作の確認）。
 
+エラー型の文字列マッチングルールは以下のとおりである。
+- `result_err_type(r)` が返す文字列と上記マッピングキーを完全一致で比較する。
+- エイリアス型（`type MyError = ParseError`）は型名として `"MyError"` を使うため、`"ParseError"` とはマッチしない。エイリアスが 400 にマッピングされるべき場合は `type MyError = ParseError` ではなく `result_ng("ParseError", msg)` を使うよう README に記載する。
+- union エラー型（`AuthError|ParseError`）を `result_ng` に渡すケースは AWK の ADT ランタイムでは発生しない（`result_ng` は 1 つのエラー種別文字列をとるため）。
+- 名前空間付きエラー文字列（例: `"Pkg::ParseError"`）はマッピングテーブルに存在しないとみなし `500` を返す。
+
 将来的には `let body ?= ctx.req.json() else 400` のような構文拡張を検討する。
 
 #### 変更対象ファイル
 
 - `dsl/desugar_nullcoalesce.awk`
-- `dsl/adt.awk`（`result_err_type` が存在しない場合のみ追加）
+- `dsl/adt.awk`（`result_err_type` は `dsl/adt.awk:60` に既に実装済みのため変更不要）
 - `README.md`
 
 ---
@@ -813,8 +855,11 @@ DSL の型チェックフェーズがエラーなく通過していれば、型�
 
 #### 要求仕様
 
-`response_wire` を呼び出す前のプリフライト検証として、すべてのヘッダー名を以下の正規表現で検証する。
-プリフライトとして実装するため、いずれかのヘッダーが無効な場合はバイトを一切出力しない。
+ヘッダー名の検証は `header()` / `ctx.res.set_header()` の呼び出し時点で行い、無効な名前を早期に拒否する。
+こうすることで `response_wire` が呼ばれる前に汚染されたヘッダーがレスポンスオブジェクトに格納されることを防ぐ。
+`response_wire` でも二次プリフライト検証を行い、いずれかのヘッダー名が無効な場合はバイトを一切出力しない。
+
+すべてのヘッダー名を以下の正規表現で検証する。
 
 ```
 ^[!#$%&'*+.^_`|~0-9A-Za-z-]+$
@@ -851,16 +896,24 @@ DSL の型チェックフェーズがエラーなく通過していれば、型�
 
 `manifest.awk` を持たないプラグインディレクトリはスキップして警告を出力し、存在しない関数を indirect-call しない。
 `manifest.awk` は存在するが `plugin_<name>_manifest` 関数が定義されていない場合も同様にスキップして警告を出力する。
-プラグインマニフェストのロードはサブプロセス分離を使う。AWK の `@include` はパーサー段階で静的に展開されるため、不正な AWK 構文を含む `manifest.awk` はインタープリター起動前にパース失敗し、同一プロセス内でエラーを回復できない。
+現在の `hawk-libs plugins` はプラグインディレクトリを走査し、`manifest.awk` と実装ファイルのパスを `-f flag` として出力する。
+この仕組みを維持したまま、無効なマニフェストを事前にフィルタリングする方式に変更する。
 
-ロード方式は以下のとおりとする。
+**検証方式（プリフライトサブプロセス）:**
 
-1. `hawk-libs` が各プラグインディレクトリを走査し、`manifest.awk` の存在を確認する。
-2. `manifest.awk` が存在するプラグインに対し、`gawk -f manifest.awk` をサブプロセスとして実行して標準出力にマニフェスト情報を出力させる。
-3. サブプロセスの終了コードが非ゼロの場合、またはマニフェスト関数が定義されていない場合（関数名の規約が守られていない場合を含む）はスキップして警告をエラー出力に書く。
-4. サブプロセスが正常終了した場合のみ、その出力を本体の発見結果に統合する。
+`hawk-libs plugins` が各プラグインの `-f manifest.awk` を出力する前に、以下のコマンドをサブプロセスで実行して事前検証する。
 
-この方式により、不正な構文・未定義関数・クラッシュするプラグインが本体 AWK プロセスを停止させない。
+```bash
+name="<plugin-name>"
+funcname="plugin_${name}_manifest"
+gawk -f "${manifest}" -e "BEGIN { if (!(\"${funcname}\" in FUNCTAB)) exit 1 }" 2>/dev/null
+```
+
+- 終了コード 0: `manifest.awk` の構文が正常かつ `plugin_<name>_manifest` 関数が定義済み → `-f manifest.awk -f impl.awk` を出力する。
+- 終了コード 非ゼロ（構文エラーまたは関数未定義）: スキップして警告を stderr に出力する。`-f manifest.awk` を出力しない。
+
+これにより、不正な構文や未定義関数を持つマニフェストが本体 gawk プロセスに `-f` で読み込まれることを防ぐ。
+本体プロセスでのランタイム FUNCTAB チェックは行わない（既に安全なプラグインのみが読み込まれているため）。
 
 #### 変更対象ファイル
 
