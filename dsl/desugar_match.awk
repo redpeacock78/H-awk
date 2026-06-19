@@ -20,7 +20,11 @@
 
 # Returns 1 if the line starts a when block; captures indent in m[1], expr in m[2]
 function _ds_match_starts(line, m) {
-  return match(line, /^([[:space:]]*)when[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)
+  if (match(line, /^([[:space:]]*)when[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)) {
+    _ds_saw_catchall = 0
+    return 1
+  }
+  return 0
 }
 
 # Collect a line while inside a when block. Returns "" always.
@@ -44,44 +48,56 @@ function _ds_match_collect(line, lineno,    m, i) {
   }
   # none:  (none, no bind — treated as default arm for option)
   if (line ~ /^[[:space:]]*none:[[:space:]]*$/) {
+    if (_ds_saw_catchall) _ds_match_catchall_order_error()
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = ""
+    _ds_saw_catchall = 1
     _DS_match_ng_is_default[i] = 1; _DS_match_branch = "ng"; return ""
   }
   # ng VAR<TypeName>:  (typed ng, bind — check BEFORE plain "ng name:")
   if (match(line, /^[[:space:]]*ng[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
+    if (_ds_saw_catchall) _ds_match_catchall_order_error()
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = m[2]; _DS_match_ng_var_name[i] = m[1]
     _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
   }
   # ng <TypeName>:  (typed ng, no bind)
   if (match(line, /^[[:space:]]*ng[[:space:]]*<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
+    if (_ds_saw_catchall) _ds_match_catchall_order_error()
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = m[1]; _DS_match_ng_var_name[i] = ""
     _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
   }
   # ng name:  (untyped ng, bind)
   if (match(line, /^[[:space:]]*ng[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+    if (_ds_saw_catchall) _ds_match_catchall_order_error()
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = m[1]
+    _ds_saw_catchall = 1
     _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
   }
   # ng:  (untyped ng, no bind)
   if (line ~ /^[[:space:]]*ng:[[:space:]]*$/) {
+    if (_ds_saw_catchall) _ds_match_catchall_order_error()
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = ""
+    _ds_saw_catchall = 1
     _DS_match_ng_is_default[i] = 0; _DS_match_branch = "ng"; return ""
   }
   # default name:  (catch-all, bind)
   if (match(line, /^[[:space:]]*default[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+    if (_ds_saw_catchall) _ds_match_catchall_order_error()
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = m[1]
+    _ds_saw_catchall = 1
     _DS_match_ng_is_default[i] = 1; _DS_match_branch = "ng"; return ""
   }
   # default:  (catch-all, no bind)
   if (line ~ /^[[:space:]]*default:[[:space:]]*$/) {
+    if (_ds_saw_catchall) _ds_match_catchall_order_error()
     i = ++_DS_match_ng_arms; _DS_match_cur_ng_arm = i
     _DS_match_ng_type[i] = ""; _DS_match_ng_var_name[i] = ""
+    _ds_saw_catchall = 1
     _DS_match_ng_is_default[i] = 1; _DS_match_branch = "ng"; return ""
   }
   # end
@@ -107,6 +123,12 @@ function _ds_match_collect(line, lineno,    m, i) {
   return ""
 }
 
+function _ds_match_catchall_order_error() {
+  print "desugar: error: catch-all arm must be last" > "/dev/stderr"
+  _DS_had_error = 1
+  exit 1
+}
+
 # Reset all match state variables and arrays
 function _ds_match_reset() {
   _DS_match_ok_count   = 0
@@ -117,6 +139,7 @@ function _ds_match_reset() {
   _DS_match_ng_arms    = 0
   _DS_match_cur_ng_arm = 0
   _DS_match_is_option  = 0
+  _ds_saw_catchall     = 0
   delete _DS_match_ok_body
   delete _DS_match_ok_lineno
   delete _DS_match_ng_body
