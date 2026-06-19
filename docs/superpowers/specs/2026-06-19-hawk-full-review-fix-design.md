@@ -188,6 +188,8 @@ Connection: close\r\n
 
 テストはネットワーク層の分割送信を再現するため、`curl` ではなく raw ソケットで実装する。
 `Content-Length` 不正値（負数、非数値、1 MiB 超）に対して正しいステータスを返すことも検証する。
+`MAX_HEADER_SIZE`（8193 バイト以上）のヘッダーに対して `431` を返すことも検証する。
+不完全なボディ（`Content-Length: 100` と宣言して 50 バイトのみ送信後に接続を閉じる）に対して、リクエストがエンキューされないことを検証する。keep-alive idle sweep が不完全ボディ待ち接続をカバーするかどうかを実装時に確認し、カバーしない場合は読み取りタイムアウトフラグを追加してこのケースのテストを追加する。
 
 ---
 
@@ -290,16 +292,26 @@ TSV ヘルパー関数は複数ワーカーによる同時書き込みに対し�
 **ロック取得・解放の対象操作:**
 `append_tsv`、`update_tsv`、`delete_tsv` の 3 関数がロックを使用する。各関数は `tsv_lock` 呼び出し後、処理完了（成功・失敗を問わず）の後に `tsv_unlock` を呼び出す。すべての early return パスで `tsv_unlock` が呼ばれることを保証するため、各関数の AWK コードは以下のパターンに従う。
 
+AWK に例外機構がないため、`tsv_lock` 成功後のすべての分岐で `tsv_unlock` を呼び出すことを保証するため、`ok` 変数を使った single-exit パターンを採用する。
+
 ```awk
-function append_tsv(path, record,    ok) {
+function append_tsv(path, record,    tmppath, ok) {
     if (!tsv_lock(path)) return 0
-    # ... 本体処理 ...
-    tsv_unlock(path)
-    return 1
+    ok = 0
+    tmppath = tsv_tmppath(path)
+    # ... 本体処理（成功時 ok = 1、失敗時 ok = 0 のまま） ...
+    # 例: ファイルコピー処理
+    # while ((getline line < path) > 0) print line > tmppath
+    # print record > tmppath
+    # close(path); close(tmppath)
+    # if (system("mv " _shellquote(tmppath) " " _shellquote(path)) == 0) ok = 1
+    # else system("rm -f " _shellquote(tmppath))
+    tsv_unlock(path)   # 常に到達する単一 unlock ポイント
+    return ok
 }
 ```
 
-`tsv_lock` が失敗した場合（タイムアウト）は `tsv_unlock` を呼ばない（ロックを取得していないため）。`tsv_lock` が成功した後は、AWK に例外機構がないためすべての分岐で `tsv_unlock` を明示的に呼び出すこと。
+`update_tsv` と `delete_tsv` も同様のパターンを使う。`tsv_lock` が失敗した場合（タイムアウト）は `tsv_unlock` を呼ばない（ロックを取得していないため、先頭の `if (!tsv_lock(path)) return 0` がガードとなる）。
 
 **ロック取得:**
 
@@ -499,12 +511,14 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 - `request.awk` の `_request_parse_json_body` は既に `req["json:" key]` にフラット展開済みであるため、DSL から `ctx.req.json_field("key")` でアクセスできる。`ctx.req.json()` は JSON ボディ全体を raw string として返す（デコード済みマップを返さない）。
 - **`dsl/sig.awk` 変更**: `ctx.req.json` のシグネチャを現在の `Result<Untrusted<Map>, ParseError>` から `Result<Str, ParseError>` に変更する。`dsl/sig.awk` を変更対象ファイルに追加する。
 - **`ctx.req.json_field` のシグネチャ**: `(Str) -> Result<Str, ParseError>` として `dsl/sig.awk` に登録する。このヘルパーは `req["json:" key]` へのアクセスをラップし、キー存在チェックを行う（`ctx.req.json()` が `ok` を返した後に使用する）。
+- **`core/request.awk` 変更**: `_request_parse_json_body` が `Content-Type: application/json` の存在チェックと JSON 構文解析の結果をフラグ（`req["json:__ok"] = 1` または `req["json:__error"] = "..."` など）として `req` 配列に格納するよう修正する。`ctx::req_json` はこのフラグを参照して `ParseError` を返す。
 - `ctx::req_json` の `ParseError` 条件: ボディが JSON として無効な場合。具体的には: (a) ボディが空（`Content-Length: 0` または `Content-Type: application/json` 付きのゼロバイトボディ）、(b) ボディが JSON 構文として解析不能、(c) `Content-Type: application/json` が付いていない場合（`Content-Type` なしは `ParseError`）。
 - `ctx::body` と `ctx::req_json` の動作は独立している。`ctx::body` が `ok("")` を返す（空ボディ）ケースでも、`ctx::req_json` は `ParseError` を返す。この 2 者の動作は矛盾しない: 空ボディは「ボディとしては存在するが JSON ではない」という扱いである。
 
 #### 変更対象ファイル
 
 - `core/ctx.awk`
+- `core/request.awk`（JSON パース状態フラグの格納処理を追加）
 - `dsl/sig.awk`（`ctx.req.json` のシグネチャ変更 + `ctx.req.json_field` 追加）
 - `tests/unit/test_ctx.awk`
 - `tests/unit/test_request.awk`
@@ -559,6 +573,7 @@ AWK の JSON データモデルを以下のように定義する。
 - エスケープが必要な文字列（ダブルクォート、バックスラッシュ、改行）が正しく変換されること。
 - 空配列（要素なし、`__json_type = "array"` のみ）が `[]` に変換されること。
 - オブジェクト内にネストされた配列が正しく変換されること。
+- スパース配列（`arr[1]="a"; arr[3]="c"`、`arr[2]` 欠落）が `["a",null,"c"]` に変換されること。
 
 事前エンコード済みの JSON 文字列を直接セットするためのヘルパーとして `ctx.res.json_raw(str)` を追加する。
 
@@ -904,7 +919,10 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 複合型への再代入の生成規則は以下のとおりである。
 
 - プリミティブ型（`Int`, `Float`, `Str`, `Bool`）：従来どおり `type::coerce(rhs, "Type")` を生成する
-- union 型、alias 型、ブランド型、`Option<T>`、`Result<T,E>`、`Effect<T>`：`var = rhs` のみを生成する（`type::coerce` を生成しない）
+- プリミティブ型の alias（例: `type UserId = Str`）：alias 展開後のベース型がプリミティブであれば `type::coerce(rhs, "Str")` を生成する（alias 名ではなくベース型名を使用）
+- union 型、ブランド型、`Option<T>`、`Result<T,E>`、`Effect<T>`、非プリミティブ alias：`var = rhs` のみを生成する（`type::coerce` を生成しない）
+
+alias のベース型解決はデシュガー時の型テーブルを参照する。alias チェーン（`type A = B`、`type B = Str`）の場合は最終的なプリミティブ型まで展開する。循環 alias はデシュガー時のエラーとする。
 
 DSL の型チェックフェーズがエラーなく通過していれば、型の整合性は静的に保証されている。
 ブランド型への強制変換はデシュガー層でも行わない。
@@ -932,9 +950,9 @@ DSL の型チェックフェーズがエラーなく通過していれば、型�
 
 #### 要求仕様
 
-ヘッダー名の検証は `header()` / `ctx.res.set_header()` の呼び出し時点で行う。
+ヘッダー名の検証は `header()` / `header_append()` / `ctx.res.set_header()` の呼び出し時点で行う。
 
-**`header()` / `ctx.res.set_header()` での動作（早期拒否）:**
+**`header()` / `header_append()` / `ctx.res.set_header()` での動作（早期拒否）:**
 
 無効なヘッダー名が渡された場合、そのヘッダーを `res[]` 配列に格納せず、stderr に警告を出力する。レスポンスの処理は続行する（当該ヘッダーが欠落した状態で継続）。これにより汚染されたヘッダーが `res[]` に入ることを防ぐ。
 
@@ -1005,6 +1023,7 @@ gawk -f "${manifest}" -e "BEGIN { if (!(\"${funcname}\" in FUNCTAB)) exit 1 }" 2
 
 - `core/plugin.awk`
 - `libexec/hawk-libs`
+- `libexec/hawk-serve`（`PLUGIN_FILES="$("$LIBS" plugins)"` の展開方法を安全にする。`hawk-libs plugins` の出力は `printf '%q'` でクォート済みのパスを含むため、呼び出し元では `eval` は使わず、`set --` または配列に直接格納する方式に変更する）
 
 #### 追加するテスト
 
@@ -1064,12 +1083,12 @@ make ci-full
 - `hawk.app.on` の arity がランタイムと DSL チェッカーで一致していること。
 - `ctx.res.redirect` の動作がランタイムと DSL チェッカーで一致していること。
 - `safe.html.fragment` の動作がランタイム、DSL チェッカー、README で一致していること。
-- `libs/net` が不完全な POST ボディをエンキューしないこと。
-- `libs/net` がヘッダーサイズ超過（`MAX_HEADER_SIZE` = 8 KiB 超）で `431` を返すこと。
-- `libs/net` が `Transfer-Encoding: chunked` に対して `501` を返し接続を閉じること。
-- `libs/net` が任意の `Transfer-Encoding` 値（複数値・カンマ区切りを含む）に対して `501` を返し接続を閉じること。
-- `libs/net` が無効・重複・負数の `Content-Length` に対して `400` を返すこと。
-- `libs/net` が `MAX_BODY_SIZE` 超の `Content-Length` に対して `413` を返すこと。
+- **（Zig 0.16.0 利用可能な場合のみ）** `libs/net` が不完全な POST ボディをエンキューしないこと。
+- **（Zig 0.16.0 利用可能な場合のみ）** `libs/net` がヘッダーサイズ超過（`MAX_HEADER_SIZE` = 8 KiB 超）で `431` を返すこと。
+- **（Zig 0.16.0 利用可能な場合のみ）** `libs/net` が `Transfer-Encoding: chunked` に対して `501` を返し接続を閉じること。
+- **（Zig 0.16.0 利用可能な場合のみ）** `libs/net` が任意の `Transfer-Encoding` 値（複数値・カンマ区切りを含む）に対して `501` を返し接続を閉じること。
+- **（Zig 0.16.0 利用可能な場合のみ）** `libs/net` が無効・重複・負数の `Content-Length` に対して `400` を返すこと。
+- **（Zig 0.16.0 利用可能な場合のみ）** `libs/net` が `MAX_BODY_SIZE` 超の `Content-Length` に対して `413` を返すこと。
 - `ctx.req.form("x")` が `x=` に対して `ok("")` を返すこと。
 - `ctx.res.json(data)` が AWK 配列を JSON エンコードすること。
 - `when` アーム内のパイプ右辺の dot 記法が正しくデシュガーされること。
@@ -1111,13 +1130,12 @@ fix(ctx): encode data in ctx.res.json, add json_raw helper
 fix(dsl): transform pipe preludes inside when arms
 fix(dsl): reject catch-all when arms before typed arms
 fix(template): restrict render path to hawk_template_root
-fix(response): reject invalid header names
+fix(response): reject invalid header names at header() and header_append() time
 
 # Phase 3: P2 Design Cleanup
 fix(dsl): improve ?= error type mapping with type-based defaults
 fix(dsl): fix validator classify to unwrap Untrusted
-fix(dsl): avoid type::coerce for complex type reassignment
-fix(response): add preflight header name validation
+fix(dsl): avoid type::coerce for complex type reassignment (keep for primitive aliases)
 fix(plugin): tolerate missing or malformed manifest in plugin discovery
 
 # Phase 4
