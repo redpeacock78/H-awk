@@ -35,7 +35,7 @@ make ci
 zig version || true
 ```
 
-Zig 0.13 以上が利用可能な場合は、追加で以下を実行する。
+Zig 0.16.0 が利用可能な場合は、追加で以下を実行する。
 
 ```sh
 make test-libs
@@ -55,24 +55,33 @@ POST / PUT リクエストではリクエストボディが後続の TCP パケ�
 
 #### 要求仕様
 
+`http_parser.zig` に `parseFrameResult` 構造体を追加し、フレーミング判定を一箇所に集約する。
+`parseFrameResult` は以下のフィールドを持つ。
+
+- `complete_len: usize` — 現在のバッファで消費するバイト数（完全なリクエスト 1 件分）
+- `action: enum { enqueue, wait, error_response, close }`
+
+`event_loop.zig` は `complete_len` バイトだけバッファから取り除き、残余バイトはそのまま保持する。
+
 リクエストが完了したとみなす条件は以下の 3 つをすべて満たすこととする。
 
 1. ヘッダー終端子 `\r\n\r\n` がバッファに存在する。
 2. `Content-Length` の有無を確定済みである（存在すること、または存在しないことが確認されていること）。
 3. バッファが `header_end + 4 + content_length` バイト以上のデータを保持している。
 
-`Content-Length` が存在しないリクエストは、ボディ長を 0 として扱う。
-これは GET / DELETE / HEAD など本来ボディを持たないメソッドに対する安全なデフォルトである。
-POST / PUT に `Content-Length` が存在しない場合も 0 として扱い、ボディは受け取らない（クライアントが `Content-Length` を省略した場合は不正なリクエストとみなす）。
+`Content-Length` が存在しないリクエストは、ボディ長を 0 として扱う（action: enqueue）。
+`Content-Length` の値が数値として解析できない場合は `400 Bad Request` を返す（action: error_response）。
+`Content-Length` が負の値の場合も `400 Bad Request` を返す（action: error_response）。
+`Content-Length` が最大ボディサイズ（デフォルト 1 MiB = 1048576 バイト）を超える場合は `413 Content Too Large` を返す（action: error_response）。
+最大ボディサイズはコンパイル時定数 `MAX_BODY_SIZE` として `event_loop.zig` に定義する。
 
-`Transfer-Encoding: chunked` はサポート対象外とし、`501 Not Implemented` を返してから接続を閉じる。
-残余バイトを接続バッファに保持したまま次のリクエストを試みてはならない。
+`Transfer-Encoding: chunked` はサポート対象外とし、`501 Not Implemented` を返してから接続を閉じる（action: close）。
 
 Keep-alive に対応するため、1 バッファに複数の完全なリクエストが含まれる場合は以下の処理とする。
 
-1. 完全なリクエストを 1 件だけ解析してエンキューする。
+1. `parseFrameResult.complete_len` バイトだけバッファから取り除いてリクエストをエンキューする。
 2. 残余バイトを接続の読み取りバッファに保持する。
-3. 次のループ / 読み取りで残余バイトを処理する。
+3. 次のループ / 読み取りで残余バイトを再度 `parseFrameResult` に通す。
 
 #### 変更対象ファイル
 
@@ -90,6 +99,7 @@ Keep-alive に対応するため、1 バッファに複数の完全なリクエ�
 - `Transfer-Encoding: chunked` リクエストに対して `501` を返し、接続を閉じること。
 
 テストはネットワーク層の分割送信を再現するため、`curl` ではなく raw ソケットで実装する。
+`Content-Length` 不正値（負数、非数値、1 MiB 超）に対して正しいステータスを返すことも検証する。
 
 ---
 
@@ -127,6 +137,11 @@ ctx.res.redirect(url, code)  # 任意のリダイレクトコード
 実装方法は `safe.html.fragment` 専用のスペシャルケースとし、汎用的な `hawk_dispatch::callv` は導入しない。
 `hawk_dispatch::callv` の導入は `core/dispatch.awk`、DSL シグネチャ、ランタイム API に対して広範な変更を要するため、本フェーズのスコープ外とする。
 
+**オプション引数・可変長引数の既存ディスパッチャーとの整合:**
+既存のディスパッチャーは arity 0〜3 の固定テーブルで動作する。
+`ctx.res.redirect` のオプション arity は、DSL デシュガー時に 1 引数呼び出しを `ctx.res.redirect(url, 302)` の 2 引数呼び出しに正規化することで対応する。
+`safe.html.fragment` の可変長引数は、呼び出し側で引数を配列にまとめて渡すスペシャルケースとして `core/dispatch.awk` に実装する。
+
 #### 変更対象ファイル
 
 - `dsl/sig.awk`
@@ -159,30 +174,35 @@ TSV ヘルパー関数は複数ワーカーによる同時書き込みに対し�
 
 #### 要求仕様
 
-AWK から `flock(1)` を呼び出すためのシェルラッパー関数 `tsv_lock(path)` および `tsv_unlock(path)` を実装する。
-具体的には gawk の `system()` または `|&` プロセス置換を使って以下のロック操作を行う。
+AWK の読み取り-修正-書き込み全体をクリティカルセクションとして保護するため、シェルサブプロセスにロックを委譲する方式を採用する。
 
-```
-# ロック取得（最大 5 秒リトライ）
-flock -w 5 "$lockfile" true
+**`flock` が利用可能な場合:**
 
-# ロックファイルパス
-path ".lock"
-```
+書き込み操作をシェルスクリプトとしてテンポラリファイルに書き出し、`flock -w 5 "$lockfile" sh "$tmpscript"` で実行する。
+これによりロックはシェルプロセスの生存期間中保持され、書き込み完了後に自動解放される。
+ロックファイルパスは `path ".lock"` とする。
 
-`flock` が存在しない環境では、`mkdir "$path.lock"` を使ったアトミックなロックディレクトリ方式にフォールバックする。
+**`flock` が利用できない場合（フォールバック）:**
+
+`mkdir "$path.lock"` の成否でロックを取得する（アトミック操作）。
 リトライ間隔は 0.1 秒、最大リトライ回数は 50 回（合計 5 秒）とする。
-ロック取得に失敗した場合は書き込みを中断してエラーを返す。
+ロック取得後の書き込み完了時に `rmdir "$path.lock"` でロックを解放する。
 
-ロックファイルは書き込み完了後に必ず解放する。
-gawk の `ENDFILE` ルールではなく、各関数の終端で明示的に解放処理を呼ぶ。
+**スタールロックの検出:**
+ロックディレクトリの `mtime` が 30 秒以上前の場合はスタールロックとみなし、削除して再取得を試みる。
 
-一時ファイルのパスは以下の形式とし、競合を回避する。
-`srand(PROCINFO["pid"] + systime())` を初回呼び出し時に必ず実行してから `rand()` を使う。
+**ロック取得失敗時の動作:**
+タイムアウトした場合は書き込みを中断し、呼び出し元に `-1` を返す。
+
+**一時ファイルのパス:**
+`srand(PROCINFO["pid"] + systime())` を `BEGIN` ルールで必ず実行する。
+テンポラリファイルのパスは以下の形式とする。
 
 ```
 path ".tmp." PROCINFO["pid"] "." systime() "." int(rand() * 1000000)
 ```
+
+`mv` の成否を確認し（`system()` の戻り値チェック）、失敗した場合はテンポラリファイルを削除してエラーを返す。
 
 #### 変更対象ファイル
 
@@ -193,6 +213,8 @@ path ".tmp." PROCINFO["pid"] "." systime() "." int(rand() * 1000000)
 
 - `delete_tsv` と `update_tsv` が固定の共有 tmp パスを使用していないこと。
 - ロック実装後、繰り返し書き込みを行うスモークテストが通ること。
+- `mv` 失敗時にテンポラリファイルが残留しないこと。
+- フォールバック方式でスタールロック（30 秒超）が自動解除されること。
 
 ---
 
@@ -268,8 +290,9 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 - `ctx::req_json`
 
 `ctx::body` については以下のセマンティクスを明示する。
-リクエストに `Content-Length: 0` が存在する場合、またはボディ区切り後に読み取れるバイト列が 0 バイトの場合は `ok("")` を返す。
-ヘッダーが完全に受信されておらずボディの有無が未確定の場合のみ欠損として扱い、`ParseError` を返す。
+ハンドラーが呼び出される時点でリクエストは必ず完全に受信済みである（P0-1 で保証）。
+`Content-Length: 0` の場合、またはボディ区切り後のバイト列が 0 バイトの場合は `ok("")` を返す。
+ハンドラーが呼び出された後に「ヘッダーが未受信」になることはないため、`ctx::body` が `ParseError` を返すのはヘッダーに `Content-Type: application/json` が存在するにも関わらずボディが空の場合のみとし、その条件をドキュメントに明記する。
 
 #### 変更対象ファイル
 
@@ -297,11 +320,13 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 #### 要求仕様
 
 `ctx.res.json(data)` は AWK 配列または値を `json_encode` でエンコードしてからレスポンスボディにセットする。
-エンコード規則は以下のとおりである。
+エンコードは新たに実装する `json_encode_any(val)` 関数を使う。
+既存の `json_encode` は `for (key in data)` による配列専用であり、スカラーを渡すと不定動作になる。
+`json_encode_any` のエンコード規則は以下のとおりである。
 
-- AWK 配列：`json_encode` が処理するオブジェクト / 配列形式に変換する
-- 文字列スカラー：JSON 文字列（`"..."` 形式）に変換する
-- 数値スカラー：JSON 数値（クォートなし）に変換する
+- `isarray(val)` が真：既存の `json_encode(val)` に委譲する
+- `typeof(val) == "number"`：JSON 数値（クォートなし）に変換する
+- それ以外（文字列・数値文字列）：JSON 文字列（`"..."` 形式、適切にエスケープ）に変換する
 
 事前エンコード済みの JSON 文字列を直接セットするためのヘルパーとして `ctx.res.json_raw(str)` を追加する。
 
@@ -325,7 +350,8 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 #### 追加するテスト
 
 - `ctx.res.json(data)` が AWK 配列を JSON オブジェクトにエンコードして返すこと。
-- `ctx.res.json("hello")` が `"hello"` という JSON 文字列を返すこと（二重エンコードではないこと）。
+- `ctx.res.json("hello")` が JSON 文字列 `"hello"`（ダブルクォートを含む）を返すこと（二重エンコードでないこと）。
+- `ctx.res.json(42)` が JSON 数値 `42` を返すこと。
 - `ctx.res.json_raw(str)` が文字列をそのままボディにセットすること。
 - e2e の `/echo` エンドポイントが引き続き有効な JSON を返すこと。
 
@@ -406,6 +432,9 @@ catch-all アームは `when...of` 式の最後のエラーアームとしての
 `none:` は Option 式の最終アームとして許可する。
 Result 式と Option 式が混在する `when...of` はサポート対象外であり、混在が検出された場合は別途エラーを出力する。
 
+バリデーションは `_DS_match_ng_is_default` フラグを利用せず、アームの型付き / 非型付きを直接判定する方式で実装する。
+具体的には、catch-all アーム（型注釈のない `ng:` / `default:` / `none:`）を検出した後に型注釈付きのアームが続く場合にエラーを出力する。
+
 catch-all アームの後に型付きアームが続く場合は、以下のエラーメッセージを出力する。
 
 ```
@@ -454,7 +483,16 @@ end
 - `..` を含むパス
 - 空文字列
 
-さらに、`realpath` コマンドが利用可能な場合は `system("realpath ...")` でパスを正規化し、解決後のパスが作業ディレクトリ配下の `views/` に収まることを確認する。
+さらに、`realpath` コマンドが利用可能な場合は以下の方法でパスを正規化する。
+`system()` は戻り値のみを返し正規化後のパスを返さないため、代わりに getline パイプを使う。
+
+```awk
+cmd = "realpath -- " shell_quote(path) " 2>/dev/null"
+cmd | getline normalized
+close(cmd)
+```
+
+解決後のパスが `ENVIRON["PWD"] "/views/"` プレフィックスで始まらない場合は拒否する。
 `realpath` が利用できない場合は文字列ベースのチェックのみとし、README にシンボリックリンクによる制限回避の可能性を注記する。
 
 長期的な設計として `TemplatePath` ブランド型の導入を検討するが、本フェーズでは短期的なランタイムチェックのみを実装する。
@@ -496,8 +534,15 @@ end
 - 未知のエラー → 500
 - `Option none` → 404（従来どおり）
 
-型判定は `result_ng` の第 1 引数（エラー種別文字列）に対する文字列一致で実装する。
-`Option none` は引き続き 404 にマッピングし、上記テーブルには含めない。
+`Result ng` の型判定は `result_ng` の第 1 引数（エラー種別文字列）を取得するアクセサー `result_err_type(r)` で実装する。
+この関数が存在しない場合は `core/adt.awk` に追加する。
+デシュガーが生成するコードは `result_err_type` を呼び出してマッピングテーブルを参照するパターンを使う。
+
+追加するテストは以下のとおりである。
+- `ParseError` を含む `Result ng` が `?=` で 400 に変換されること。
+- `AuthError` を含む `Result ng` が `?=` で 401 に変換されること。
+- 未知のエラー型が `?=` で 500 に変換されること。
+- `Option none` が `?=` で 404 に変換されること（従来動作の確認）。
 
 将来的には `let body ?= ctx.req.json() else 400` のような構文拡張を検討する。
 
@@ -531,7 +576,12 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 
 - `dsl/type_dataflow.awk`
 - `README.md`
-- 関連テスト
+- `tests/unit/dsl/untrusted_validator_propagates/`（既存 fixture の期待値修正）
+
+#### 追加するテスト
+
+- `classify: validator` 関数に `Untrusted<Str>` を渡した場合、戻り値の型が `Str`（`Untrusted` なし）として扱われること。
+- `classify: transform` 関数に `Untrusted<Str>` を渡した場合、戻り値の型が `Untrusted<Str>` のままであること。
 
 ---
 
@@ -552,23 +602,32 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 #### 要求仕様
 
 複合型への再代入では `type::coerce` を使用しない。
-代わりに `type::accepts(val, "TypeName")` を呼び出すランタイムアサーションヘルパーを生成する。
+代わりに新規追加する `type::assert_accepts(val, "TypeName")` を呼び出すランタイムアサーションヘルパーを生成する。
+既存の `type::accepts(val, typename)` は boolean を返す互換チェック関数であり、上書きしない。
 
-`type::accepts` の契約は以下のとおりである。
+`type::assert_accepts` の契約は以下のとおりである。
 
 - 引数：値と型名文字列
 - 戻り値：型が一致する場合は `val` をそのまま返す
-- 型不一致の場合：gawk の `_hawk_fatal` でランタイムエラーを出力して終了する
+- 型不一致の場合：`_hawk_fatal` でランタイムエラーを出力して終了する
 - サポートする型名：`type.awk` に登録されているすべての型（プリミティブ・union・alias・ブランド・`Option<T>`・`Result<T,E>`・`Effect<T>`）
-- ブランド型への強制変換は `type::accepts` でも行わない
+- ブランド型への強制変換は `type::assert_accepts` でも行わない
+- 内部で `type::accepts(val, typename)` を呼び出して判定する
 
-静的型チェックで代入の型整合性が確定している場合は `type::accepts` の呼び出し自体を省略する。
+静的型チェックで代入の型整合性が確定している場合は `type::assert_accepts` の呼び出し自体を省略する。
 
 #### 変更対象ファイル
 
 - `dsl/desugar_let.awk`
-- `dsl/type.awk`
-- 関連テスト
+- `dsl/type.awk`（`type::assert_accepts` 追加）
+- `core/adt.awk` は変更なし（型ランタイムの変更は最小限にとどめる）
+
+#### 追加するテスト
+
+- union 型への再代入が `type::coerce` を生成しないこと（デシュガー出力の確認）。
+- `Option<Str>` への再代入が `type::coerce` を生成しないこと。
+- ブランド型への再代入が `type::coerce` を生成しないこと。
+- プリミティブ型（`Int`, `Str`）への再代入は従来どおり `type::coerce` を使うこと（回帰テスト）。
 
 ---
 
@@ -581,14 +640,18 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 
 #### 要求仕様
 
-以下の正規表現に一致しないヘッダー名は出力を拒否し、警告ログを出力する。
-ヘッダーを無視して処理を継続するのではなく、そのヘッダーを含むレスポンス出力全体を中断してエラーレスポンスに切り替える。
+`response_wire` を呼び出す前のプリフライト検証として、すべてのヘッダー名を以下の正規表現で検証する。
+プリフライトとして実装するため、いずれかのヘッダーが無効な場合はバイトを一切出力しない。
 
 ```
 ^[!#$%&'*+.^_`|~0-9A-Za-z-]+$
 ```
 
-「無視」ではなく「拒否」とする理由は、無効なヘッダー名がサイレントに欠落すると API の呼び出し元がデバッグできないためである。
+無効なヘッダー名が検出された場合は、元の `res` 配列とは独立したフレッシュなオブジェクトから `500 Internal Server Error` レスポンスを構築して出力する。
+これにより、汚染された `res` 配列の内容が部分的に出力されることを防ぐ。
+警告ログをエラー出力（stderr）に出力する。
+
+「無視」ではなく「拒否（500 返却）」とする理由は、無効なヘッダー名がサイレントに欠落すると API の呼び出し元がデバッグできないためである。
 
 #### 変更対象ファイル
 
@@ -621,7 +684,12 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 
 - `core/plugin.awk`
 - `libexec/hawk-libs`
-- 関連テスト
+
+#### 追加するテスト
+
+- `manifest.awk` が存在しないプラグインディレクトリがスキップされ、警告が出力されること。
+- `manifest.awk` は存在するが `plugin_<name>_manifest` 関数が未定義のプラグインがスキップされ、警告が出力されること。
+- 有効な `manifest.awk` を持つプラグインが正常にロードされること（回帰テスト）。
 
 ---
 
@@ -656,7 +724,7 @@ make test-e2e
 make ci
 ```
 
-Zig 0.13 以上が利用可能な場合は追加で以下を実行する。
+Zig 0.16.0 が利用可能な場合は追加で以下を実行する。
 
 ```sh
 make test-libs
