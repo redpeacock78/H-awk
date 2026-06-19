@@ -242,7 +242,7 @@ function _ds_match_process_body(line, lineno,    pipe_pre, nc_pre, p, pipe_r, do
     line = _ds_expand_interp(line, lineno)
   }
   pipe_r = _ds_pipe_transform(line, pipe_pre)
-  for (p = 1; p in pipe_pre; p++) _DS_body_buf[++_DS_body_count] = pipe_pre[p]
+  for (p = 1; p in pipe_pre; p++) _DS_body_buf[++_DS_body_count] = _ds_dot_transform(pipe_pre[p])
   dot_r = _ds_dot_transform(pipe_r)
   nc_r  = _ds_nc_transform(dot_r, nc_pre)
   for (p = 1; p in nc_pre; p++) _DS_body_buf[++_DS_body_count] = nc_pre[p]
