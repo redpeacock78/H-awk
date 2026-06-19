@@ -68,6 +68,20 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    const test_server_mod = b.createModule(.{
+        .root_source_file = b.path("tests/test_server_main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    test_server_mod.addImport("event_loop", loop_mod);
+
+    const test_server = b.addExecutable(.{
+        .name = "hawk-net-test-server",
+        .root_module = test_server_mod,
+    });
+    b.installArtifact(test_server);
 }
 
 fn findGawkInclude(_: *std.Build) ?[]const u8 {

@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: MIT
 const std = @import("std");
 
+pub const MAX_HEADER_SIZE: usize = 8192;
+pub const MAX_BODY_SIZE: usize = 1048576;
+pub const BODY_READ_TIMEOUT_MS: i64 = 30000;
+
+pub const ParseFrameResult = struct {
+    pub const Action = enum { enqueue, wait_header, wait_body, error_response };
+    action: Action,
+    consume_len: usize,
+    status_code: u16,
+    reason: []const u8,
+    should_close: bool,
+};
+
 pub const Request = struct {
     conn_id: u64,
     method: []const u8,
@@ -17,6 +30,99 @@ pub const Request = struct {
         alloc.free(self.body);
     }
 };
+
+pub fn parseFrame(buf: []const u8) ParseFrameResult {
+    const sep_pos = std.mem.indexOf(u8, buf, "\r\n\r\n");
+    if (sep_pos == null) {
+        if (buf.len > MAX_HEADER_SIZE) {
+            return .{
+                .action = .error_response,
+                .consume_len = buf.len,
+                .status_code = 431,
+                .reason = "Request Header Fields Too Large",
+                .should_close = true,
+            };
+        }
+        return .{
+            .action = .wait_header,
+            .consume_len = 0,
+            .status_code = 0,
+            .reason = "",
+            .should_close = false,
+        };
+    }
+    const header_end = sep_pos.?;
+    const headers_section = buf[0..header_end];
+    var hdr_it = std.mem.splitSequence(u8, headers_section, "\r\n");
+    _ = hdr_it.next();
+    var has_te = false;
+    var content_length: ?usize = null;
+    var cl_count: usize = 0;
+    while (hdr_it.next()) |hline| {
+        if (hline.len == 0) continue;
+        const colon = std.mem.indexOf(u8, hline, ":") orelse continue;
+        const name = std.mem.trim(u8, hline[0..colon], " ");
+        const val = std.mem.trim(u8, hline[colon + 1 ..], " ");
+        if (std.ascii.eqlIgnoreCase(name, "transfer-encoding")) has_te = true;
+        if (std.ascii.eqlIgnoreCase(name, "content-length")) {
+            cl_count += 1;
+            if (cl_count > 1 or val.len == 0 or val[0] == '+' or val[0] == ' ') {
+                return .{
+                    .action = .error_response,
+                    .consume_len = header_end + 4,
+                    .status_code = 400,
+                    .reason = "Bad Request",
+                    .should_close = true,
+                };
+            }
+            const cl = std.fmt.parseInt(usize, val, 10) catch {
+                return .{
+                    .action = .error_response,
+                    .consume_len = header_end + 4,
+                    .status_code = 400,
+                    .reason = "Bad Request",
+                    .should_close = true,
+                };
+            };
+            if (cl > MAX_BODY_SIZE) {
+                return .{
+                    .action = .error_response,
+                    .consume_len = header_end + 4,
+                    .status_code = 413,
+                    .reason = "Payload Too Large",
+                    .should_close = true,
+                };
+            }
+            content_length = cl;
+        }
+    }
+    if (has_te) {
+        return .{
+            .action = .error_response,
+            .consume_len = header_end + 4,
+            .status_code = 501,
+            .reason = "Not Implemented",
+            .should_close = true,
+        };
+    }
+    const cl = content_length orelse 0;
+    if (buf.len < header_end + 4 + cl) {
+        return .{
+            .action = .wait_body,
+            .consume_len = 0,
+            .status_code = 0,
+            .reason = "",
+            .should_close = false,
+        };
+    }
+    return .{
+        .action = .enqueue,
+        .consume_len = header_end + 4 + cl,
+        .status_code = 0,
+        .reason = "",
+        .should_close = false,
+    };
+}
 
 /// Parse raw HTTP/1.1 request bytes. Returns owned Request; caller calls deinit.
 pub fn parse(buf: []const u8, conn_id: u64, alloc: std.mem.Allocator) !Request {

@@ -3,6 +3,56 @@ const std = @import("std");
 const http_parser = @import("http_parser");
 const conn_pool = @import("conn_pool");
 
+test "parseFrame waits for full body" {
+    const header_only = "POST /echo HTTP/1.1\r\nContent-Length: 7\r\n\r\n";
+    const r1 = http_parser.parseFrame(header_only);
+    try std.testing.expectEqual(http_parser.ParseFrameResult.Action.wait_body, r1.action);
+
+    const full = header_only ++ "msg=hey";
+    const r2 = http_parser.parseFrame(full);
+    try std.testing.expectEqual(http_parser.ParseFrameResult.Action.enqueue, r2.action);
+    try std.testing.expectEqual(full.len, r2.consume_len);
+}
+
+test "parseFrame rejects Transfer-Encoding" {
+    const r = "GET / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+    const result = http_parser.parseFrame(r);
+    try std.testing.expectEqual(http_parser.ParseFrameResult.Action.error_response, result.action);
+    try std.testing.expectEqual(@as(u16, 501), result.status_code);
+    try std.testing.expect(result.should_close);
+}
+
+test "parseFrame rejects oversized header" {
+    var buf: [8193]u8 = [_]u8{'A'} ** 8193;
+    const result = http_parser.parseFrame(&buf);
+    try std.testing.expectEqual(http_parser.ParseFrameResult.Action.error_response, result.action);
+    try std.testing.expectEqual(@as(u16, 431), result.status_code);
+}
+
+test "parseFrame rejects negative Content-Length string" {
+    const r = "POST / HTTP/1.1\r\nContent-Length: -1\r\n\r\n";
+    const result = http_parser.parseFrame(r);
+    try std.testing.expectEqual(http_parser.ParseFrameResult.Action.error_response, result.action);
+    try std.testing.expectEqual(@as(u16, 400), result.status_code);
+}
+
+test "parseFrame keep-alive: second request stays in buffer" {
+    const req1 = "GET /a HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+    const req2 = "GET /b HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+    var buf: [512]u8 = undefined;
+    const combined = try std.fmt.bufPrint(&buf, "{s}{s}", .{ req1, req2 });
+    const r = http_parser.parseFrame(combined);
+    try std.testing.expectEqual(http_parser.ParseFrameResult.Action.enqueue, r.action);
+    try std.testing.expectEqual(req1.len, r.consume_len);
+}
+
+test "parseFrame duplicate Content-Length rejected" {
+    const r = "POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello";
+    const result = http_parser.parseFrame(r);
+    try std.testing.expectEqual(http_parser.ParseFrameResult.Action.error_response, result.action);
+    try std.testing.expectEqual(@as(u16, 400), result.status_code);
+}
+
 test "parse simple GET" {
     const alloc = std.testing.allocator;
     const raw = "GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n";
@@ -17,7 +67,7 @@ test "parse simple GET" {
 
 test "parse POST with body" {
     const alloc = std.testing.allocator;
-    const raw = "POST /data HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello";
+    const raw = "POST /data HTTP/1.1\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello";
     const req = try http_parser.parse(raw, 2, alloc);
     defer req.deinit(alloc);
     try std.testing.expectEqualStrings("POST", req.method);
@@ -45,10 +95,9 @@ test "formatPollResult" {
     defer req.deinit(alloc);
     const poll = try http_parser.formatPollResult(req, alloc);
     defer alloc.free(poll);
-    // Format: conn_id RS method RS path RS headers RS body_len RS body
     const RS = "\x1e";
     try std.testing.expectEqualStrings(
-        "42" ++ RS ++ "GET" ++ RS ++ "/foo" ++ RS ++ "Host: example.com\r\n" ++ RS ++ "0" ++ RS,
+        "42" ++ RS ++ "GET" ++ RS ++ "/foo" ++ RS ++ "Host: example.com\r\n" ++ RS ++ "0" ++ RS ++ "1" ++ RS,
         poll,
     );
 }
