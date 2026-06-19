@@ -39,6 +39,14 @@ function test_response_json(   data, body) {
   assert_eq(res["body"], "{\"foo\":\"bar\"}", "res: json body")
 }
 
+function test_response_json_raw() {
+  delete res
+  json_raw(res, "{\"ok\":true}")
+  assert_eq(res["status"], 200, "res: json_raw default 200")
+  assert_eq(res["header:content-type"], "application/json; charset=utf-8", "res: json_raw content-type")
+  assert_eq(res["body"], "{\"ok\":true}", "res: json_raw body")
+}
+
 function test_response_text() {
   delete res
   text(res, "hello")

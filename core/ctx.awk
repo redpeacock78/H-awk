@@ -19,12 +19,12 @@ function body(            v) { v = ctx::req["body"];                          re
 
 # --- Response helpers ---
 
-# json(data): set body to a pre-encoded JSON string and set content-type.
-# For array-based encoding, callers should use awk::json_encode() directly.
 function json(data) {
-  if (!("status" in ctx::res)) ctx::res["status"] = 200
-  ctx::res["header:content-type"] = "application/json; charset=utf-8"
-  ctx::res["body"] = data
+  awk::json(ctx::res, data)
+  return 1
+}
+function json_raw(data) {
+  awk::json_raw(ctx::res, data)
   return 1
 }
 function text(data)          { awk::text(ctx::res, data);        return 1 }
@@ -47,6 +47,7 @@ BEGIN {
     _CTX_ROUTES["res.html"]     = "ctx::html";       _CTX_ARITY["res.html"]     = 1
     _CTX_ROUTES["res.text"]     = "ctx::text";       _CTX_ARITY["res.text"]     = 1
     _CTX_ROUTES["res.json"]     = "ctx::json";       _CTX_ARITY["res.json"]     = 1
+    _CTX_ROUTES["res.json_raw"] = "ctx::json_raw";   _CTX_ARITY["res.json_raw"] = 1
     _CTX_ROUTES["res.render"]   = "ctx::render";     _CTX_ARITY["res.render"]   = 1
     _CTX_ROUTES["res.status"]   = "ctx::status";     _CTX_ARITY["res.status"]   = 1
     _CTX_ROUTES["res.header"]   = "ctx::set_header"; _CTX_ARITY["res.header"]   = 2
