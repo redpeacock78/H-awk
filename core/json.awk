@@ -51,6 +51,40 @@ function _json_escape(s,    out) {
   return out
 }
 
+function _json_escape_str(s) {
+  return _json_escape(s)
+}
+
+function _json_encode_array(arr,    i, n, out, sep) {
+  n = 0; for (i in arr) { if (i+0 > n && i == i+0) n = i+0 }
+  out = "["; sep = ""
+  for (i = 1; i <= n; i++) {
+    out = out sep json_encode_any(arr[i])
+    sep = ","
+  }
+  return out "]"
+}
+
+function _json_encode_object(obj,    k, out, sep) {
+  out = "{"; sep = ""
+  for (k in obj) {
+    if (k == "__json_type") continue
+    out = out sep "\"" _json_escape_str(k) "\":" json_encode_any(obj[k])
+    sep = ","
+  }
+  return out "}"
+}
+
+function json_encode_any(val,    t) {
+  t = typeof(val)
+  if (t == "array") {
+    if (val["__json_type"] == "array") return _json_encode_array(val)
+    return _json_encode_object(val)
+  }
+  if (t == "number") return val + 0
+  return "\"" _json_escape_str(val) "\""
+}
+
 # 簡易 JSON decoder: トップレベル object のみ。値は string / number / true / false / null
 # にフラットに対応する。ネスト object / array は MVP では未サポート。
 function json_decode(s, out,    i, n, c, key, val, buf) {

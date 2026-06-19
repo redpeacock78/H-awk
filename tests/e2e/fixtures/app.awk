@@ -19,7 +19,7 @@ function e_echo(    data) {
   delete data
   data["got"] = ctx::req["form:msg"]
   ctx::status(201)
-  return ctx::json(json_encode(data))
+  return ctx::json_raw(json_encode(data))
 }
 
 function e_render() {

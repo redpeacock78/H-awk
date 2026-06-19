@@ -79,7 +79,7 @@ function todo_list_json() -> Response {
     let sep: Str = (i > 1 ? "," : "")
     items_json = "#{items_json}#{sep}#{json_encode(item)}"
   }
-  return ctx.res.json("{\"count\":#{n},\"items\":[#{items_json}]}")
+  return ctx.res.json_raw("{\"count\":#{n},\"items\":[#{items_json}]}")
 }
 
 function _todo_tr(id: Str, title: Str) -> HtmlFragment {

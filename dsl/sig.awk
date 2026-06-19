@@ -67,7 +67,11 @@ BEGIN {
     # ctx.res.*
     _DS_SIG_RET["ctx.res.json"]      = "Response"
     _DS_SIG_ARITY["ctx.res.json"]    = 1
-    _DS_SIG_ARG["ctx.res.json", 1]   = "Str"
+    _DS_SIG_ARG["ctx.res.json", 1]   = "Any"
+
+    _DS_SIG_RET["ctx.res.json_raw"]      = "Response"
+    _DS_SIG_ARITY["ctx.res.json_raw"]    = 1
+    _DS_SIG_ARG["ctx.res.json_raw", 1]   = "Str"
 
     _DS_SIG_RET["ctx.res.text"]      = "Response"
     _DS_SIG_ARITY["ctx.res.text"]    = 1

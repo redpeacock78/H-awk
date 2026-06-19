@@ -37,3 +37,25 @@ function test_json_decode_flat(   out) {
   assert_eq(out["ok"],  "true", "json decode: bool")
   assert_eq(out["v"],   "null", "json decode: null literal")
 }
+
+function test_json_encode_any_scalar() {
+  assert_eq(json_encode_any("hello"), "\"hello\"", "json any: string scalar")
+  assert_eq(json_encode_any(42), "42", "json any: number scalar")
+}
+
+function test_json_encode_any_array(   arr) {
+  delete arr
+  arr["__json_type"] = "array"
+  arr[1] = "a"
+  arr[2] = "b"
+  assert_eq(json_encode_any(arr), "[\"a\",\"b\"]", "json any: array")
+}
+
+function test_json_encode_any_object(   obj, out) {
+  delete obj
+  obj["x"] = 1
+  obj["y"] = "hello"
+  out = json_encode_any(obj)
+  assert_true(index(out, "\"x\":1") > 0, "json any: object number field")
+  assert_true(index(out, "\"y\":\"hello\"") > 0, "json any: object string field")
+}

@@ -125,10 +125,21 @@ function test_ctx_json_helper(    req, res) {
   delete res
   res["status"] = 200
   _ctx_load(req, res)
-  ctx::json("{\"ok\":true}")
+  ctx::json("hello")
   _ctx_save(res)
-  assert_eq(res["body"],                     "{\"ok\":true}",                  "ctx::json sets body")
+  assert_eq(res["body"],                     "\"hello\"",                  "ctx::json encodes body")
   assert_eq(res["header:content-type"], "application/json; charset=utf-8", "ctx::json sets content-type")
+}
+
+function test_ctx_json_raw_helper(    req, res) {
+  delete req
+  delete res
+  res["status"] = 200
+  _ctx_load(req, res)
+  ctx::json_raw("{\"ok\":true}")
+  _ctx_save(res)
+  assert_eq(res["body"],                     "{\"ok\":true}",                  "ctx::json_raw sets body")
+  assert_eq(res["header:content-type"], "application/json; charset=utf-8", "ctx::json_raw sets content-type")
 }
 
 function test_ctx_text_helper(    req, res) {

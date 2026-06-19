@@ -7,6 +7,7 @@
 #   header_append(res, name, value)      -- 既存に追加 (LF区切り内部表現)
 #   redirect(res, location [, code])
 #   json(res, data [, code])
+#   json_raw(res, str [, code])
 #   text(res, body [, code])
 #   html(res, body [, code])
 #   render(res, path [, code])           -- views/ から HTML をそのまま読込
@@ -39,11 +40,18 @@ function redirect(res, location, code) {
 }
 
 function json(res, data, code,    body) {
-  body = json_encode(data)
+  body = json_encode_any(data)
   if (code != "" && code != 0) res["status"] = code
   else if (!("status" in res)) res["status"] = 200
   res["header:content-type"] = "application/json; charset=utf-8"
   res["body"] = body
+}
+
+function json_raw(res, str, code) {
+  if (code != "" && code != 0) res["status"] = code
+  else if (!("status" in res)) res["status"] = 200
+  res["header:content-type"] = "application/json; charset=utf-8"
+  res["body"] = str
 }
 
 function text(res, body, code) {
