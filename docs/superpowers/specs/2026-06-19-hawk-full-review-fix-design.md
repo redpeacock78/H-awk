@@ -90,13 +90,11 @@ const ParseFrameResult = struct {
 `action == error_response` かつ `should_close == true` の場合はレスポンス送信後に接続を閉じる。
 
 **タイムアウトと DoS 防御:**
-不完全なボディを待機する接続に対するアプリケーションレベルの read timeout は本フェーズの実装スコープ外とする。ただし、以下の制限がスロー送信による DoS を部分的に緩和する。
+以下の制限がスロー送信による DoS を緩和する。
 
 - `MAX_HEADER_SIZE`（8 KiB）を超えるヘッダー送信は `431` で即時切断する。
 - `MAX_BODY_SIZE`（1 MiB）を超える `Content-Length` は `413` で即時切断する。
-- アクティブな読み取りを行わないアイドル接続は `event_loop.zig` の既存 keep-alive idle sweep で処理される（この sweep が不完全ボディ待ち接続をカバーすることを実装時に確認する。カバーしない場合は別途 read timeout フラグを実装する）。
-
-将来的には `event_loop.zig` に設定可能な per-connection read timeout を追加することで根本的に対応する（本仕様には含まない）。
+- **ボディ待機 timeout（P0-1 スコープ内）**: 既存の `sweepIdleConns()` は `conn.keep_alive` フラグが真の接続のみを対象とするため、不完全ボディを待つ接続（keep_alive が設定される前の状態）はカバーされない。このため、P0-1 の一部として `Conn` 構造体に `body_deadline: i64` フィールドを追加する。`ParseFrameResult.action == .wait`（ヘッダーは受信済みだがボディが不足）の時点で `body_deadline = now + BODY_READ_TIMEOUT_MS`（デフォルト 30000 ms）を設定する。`sweepIdleConns()` はこの deadline も確認し、超過した接続を `408 Request Timeout` で切断・閉じる。`BODY_READ_TIMEOUT_MS` はコンパイル時定数として `http_parser.zig` に定義する。
 
 リクエストが完了したとみなす条件は以下の 3 つをすべて満たすこととする。
 
@@ -189,7 +187,7 @@ Connection: close\r\n
 テストはネットワーク層の分割送信を再現するため、`curl` ではなく raw ソケットで実装する。
 `Content-Length` 不正値（負数、非数値、1 MiB 超）に対して正しいステータスを返すことも検証する。
 `MAX_HEADER_SIZE`（8193 バイト以上）のヘッダーに対して `431` を返すことも検証する。
-不完全なボディ（`Content-Length: 100` と宣言して 50 バイトのみ送信後に接続を閉じる）に対して、リクエストがエンキューされないことを検証する。keep-alive idle sweep が不完全ボディ待ち接続をカバーするかどうかを実装時に確認し、カバーしない場合は読み取りタイムアウトフラグを追加してこのケースのテストを追加する。
+不完全なボディ（`Content-Length: 100` と宣言して 50 バイトのみ送信してタイムアウトを待つ）に対して、`BODY_READ_TIMEOUT_MS` 経過後に `408 Request Timeout` を返し接続を閉じることを検証する（タイムアウト値は小さくしてテストを実行可能にする）。
 
 ---
 
@@ -234,7 +232,7 @@ ctx.res.redirect(url, code)  # 任意のリダイレクトコード
 
 デシュガーの生成規則は以下のとおりである。
 
-- 引数 0〜3 個：既存の `_SAFE_ARITY["html.fragment"] = 3` による固定 3 引数ディスパッチをそのまま使う（`hawk_dispatch::call3` を使用）。不足した引数は空文字列で埋める: 0 引数 → `html_fragment("", "", "")`、1 引数 → `html_fragment(arg1, "", "")`、2 引数 → `html_fragment(arg1, arg2, "")` に展開される。`call0`〜`call2` は **使わない**。
+- 引数 0〜3 個：既存の `_SAFE_ARITY["html.fragment"] = 3` による固定 3 引数ディスパッチをそのまま使う。`core/dispatch.awk` の `call()` 関数は arity 0〜3 のケースを持つ単一関数であるため、`hawk_dispatch::call3` という専用関数は存在しない。デシュガーは `safe::dispatch("html.fragment", a, b, c)` の 3 引数形式を直接生成する（`a`、`b`、`c` は空文字列パディング済み）。
 - 引数 4 個以上：展開ごとに一意な名前（`_ds_frag_args_N`、N はデシュガー内の単調カウンター）の AWK 配列に引数を格納し、`safe::fragment_v(_ds_frag_args_N, n)` を呼び出す特殊ディスパッチに展開する。配列は使用前にクリア（`delete _ds_frag_args_N`）する。
 
 `safe::fragment_v(arr, n)` は `core/safe.awk` に追加するランタイム関数であり、`arr[1]`〜`arr[n]` を連結して返す。
@@ -362,6 +360,10 @@ function tsv_lock(path,    lockdir, pidfile, pid, i, reapdir, no_pid_count) {
             # 対策: _tsv_no_pid_count で連続した読み取り失敗を追跡し、
             #       閾値（5 回）を超えたらアトミック mv でリープを試みる
             no_pid_count++
+            # 注: グレース期間（5 回 × sleep 0.1s = ~0.5s）内にオーナーが pid を
+            # 書き込めなかった場合に mv を試みる。正常なオーナーが stall している
+            # 場合に誤リープする可能性（既知の制限）があるが、5 回のグレースは
+            # 通常の pid 書き込み遅延（数 ms）に対して十分な余裕を持つ。
             if (no_pid_count >= 5) {
                 no_pid_count = 0
                 _tsv_seq++
@@ -507,10 +509,10 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 
 **`ctx::req_json` の仕様**:
 
-- **戻り値型**: `Result<Str, ParseError>`。`ok` 値は元のリクエストボディ文字列（そのまま保持）。`ParseError` 値はエラー理由文字列。
-- `request.awk` の `_request_parse_json_body` は既に `req["json:" key]` にフラット展開済みであるため、DSL から `ctx.req.json_field("key")` でアクセスできる。`ctx.req.json()` は JSON ボディ全体を raw string として返す（デコード済みマップを返さない）。
-- **`dsl/sig.awk` 変更**: `ctx.req.json` のシグネチャを現在の `Result<Untrusted<Map>, ParseError>` から `Result<Str, ParseError>` に変更する。`dsl/sig.awk` を変更対象ファイルに追加する。
-- **`ctx.req.json_field` のシグネチャ**: `(Str) -> Result<Str, ParseError>` として `dsl/sig.awk` に登録する。このヘルパーは `req["json:" key]` へのアクセスをラップし、キー存在チェックを行う（`ctx.req.json()` が `ok` を返した後に使用する）。
+- **戻り値型**: `Result<Untrusted<Str>, ParseError>`。`ok` 値はユーザー入力由来の JSON ボディ文字列であり、`Untrusted` タントを維持する（safe HTML/dataflow モデルの一貫性を保つため）。呼び出し元は `ctx.req.json()` の結果を `Untrusted<Str>` として扱い、信頼境界を明示的に通過させる必要がある。`ParseError` 値はエラー理由文字列。
+- `request.awk` の `_request_parse_json_body` は既に `req["json:" key]` にフラット展開済みであるため、DSL から `ctx.req.json_field("key")` でアクセスできる。`ctx.req.json()` は JSON ボディ全体を raw `Untrusted<Str>` として返す（デコード済みマップを返さない）。
+- **`dsl/sig.awk` 変更**: `ctx.req.json` のシグネチャを現在の `Result<Untrusted<Map>, ParseError>` から `Result<Untrusted<Str>, ParseError>` に変更する。`dsl/sig.awk` を変更対象ファイルに追加する。
+- **`ctx.req.json_field` のシグネチャ**: `(Str) -> Result<Untrusted<Str>, ParseError>` として `dsl/sig.awk` に登録する。このヘルパーは `req["json:" key]` へのアクセスをラップし、キー存在チェックを行う（`ctx.req.json()` が `ok` を返した後に使用する）。返値も `Untrusted` タント付きで返す。
 - **`core/request.awk` 変更**: `_request_parse_json_body` が `Content-Type: application/json` の存在チェックと JSON 構文解析の結果をフラグ（`req["json:__ok"] = 1` または `req["json:__error"] = "..."` など）として `req` 配列に格納するよう修正する。`ctx::req_json` はこのフラグを参照して `ParseError` を返す。
 - `ctx::req_json` の `ParseError` 条件: ボディが JSON として無効な場合。具体的には: (a) ボディが空（`Content-Length: 0` または `Content-Type: application/json` 付きのゼロバイトボディ）、(b) ボディが JSON 構文として解析不能、(c) `Content-Type: application/json` が付いていない場合（`Content-Type` なしは `ParseError`）。
 - `ctx::body` と `ctx::req_json` の動作は独立している。`ctx::body` が `ok("")` を返す（空ボディ）ケースでも、`ctx::req_json` は `ParseError` を返す。この 2 者の動作は矛盾しない: 空ボディは「ボディとしては存在するが JSON ではない」という扱いである。
@@ -557,7 +559,7 @@ AWK の JSON データモデルを以下のように定義する。
 エンコード規則は以下のとおりである。
 
 - `isarray(val)` が真かつ `val["__json_type"] == "array"`：JSON 配列として `[val[1], val[2], ..., val[n]]` を生成する。各要素は `json_encode_any` を再帰的に呼び出してエンコードする。
-- `isarray(val)` が真かつ `val["__json_type"] != "array"`：JSON オブジェクトとして生成する。`__json_type` キーおよびキー `"n"` を除いた各キーと値を `json_encode_any` で再帰的にエンコードする（`"n"` は JSON 配列の長さメタキーとして予約されており、オブジェクト出力からも除外する）。既存の `json_encode` はスカラー値を扱えないため、`json_encode_any` 自身で再帰処理を実装する。AWK の配列イテレーション順は未定義のため、テストでは厳密な文字列比較ではなく、期待するキーと値のペアがすべて含まれることを検証する（JSON パーサーで parse して比較するか、`sort` 済み出力で比較する）。注: `"n"` キーの予約によって純粋な JSON オブジェクトに `"n"` を格納できなくなる。これは既知のトレードオフであり、本 ADT の配列表現の制約として README に記載する。
+- `isarray(val)` が真かつ `val["__json_type"] != "array"`：JSON オブジェクトとして生成する。`__json_type` キーおよびキー `"n"` を除いた各キーと値を `json_encode_any` で再帰的にエンコードする（`"n"` は JSON 配列の長さメタキーとして予約されており、オブジェクト出力からも除外する）。既存の `json_encode` はスカラー値を扱えないため、`json_encode_any` 自身で再帰処理を実装する。AWK の配列イテレーション順は未定義のため、テストでは以下の方法で検証する。(a) `core/json.awk` の既存デコーダーは top-level オブジェクトのみ対応でネスト非対応であるため、ネストなしの単純オブジェクトのテストは既存デコーダーで検証可能。(b) ネストありや配列のテストは、エンコード結果を `gawk` + `jq` または `python3 -c 'import json, sys; json.load(sys.stdin)'` で valid JSON として解析できることを確認し、個々のキー・値を grep または jq で抽出して比較する。注: `"n"` キーの予約によって純粋な JSON オブジェクトに `"n"` を格納できなくなる。これは既知のトレードオフであり、本 ADT の配列表現の制約として README に記載する。
 - `typeof(val) == "number"`：JSON 数値（クォートなし）に変換する。
 - `typeof(val) == "strnum"`（数値として解釈可能な文字列、例: `"42"`, `"001"`, `"1e2"`）：JSON 文字列として扱う（クォートあり）。AWK の `strnum` は文字列として渡されたものであり、呼び出し元が数値として意図した場合は `typeof` で区別できないためである。注: 式の評価（連結、算術演算、配列格納）によって値の型カテゴリが変化するため、`json_encode_any` に渡す前に `typeof` で安定した出力を得るには、呼び出し元が数値リテラル（`+0` 算術変換など）または文字列リテラルとして明示的に構築する必要がある。この不安定性は AWK の型システムの制約であり、仕様の範囲内として受け入れる。
 - それ以外（通常の文字列）：JSON 文字列（`"..."` 形式、`\"`・`\\`・`\n`・`\r`・`\t`・制御文字をエスケープ）に変換する。
@@ -681,7 +683,19 @@ catch-all アームは `when...of` 式の最後のエラーアームとしての
 
 `none:` は Option 式の最終アームとして許可する。
 Result 式と Option 式が混在する `when...of` はサポート対象外であり、混在が検出された場合は別途エラーを出力する。
-アーム種別（Result か Option か）の判定は以下のヒューリスティックで行う: アームに `none:` が含まれれば Option、`ok` or `some` のみがあり `ng` がなければ Option、`ng` アームが 1 つでもあれば Result として扱う。デシュガーフェーズではスクルーティニーの型情報は利用できないため、アーム名のパターンで判定する。両種のアームが混在する場合は「混在 Result/Option arms」エラーを出力する。
+アーム種別（Result か Option か）の判定は以下のルールで行う。デシュガーフェーズではスクルーティニーの型情報は利用できないため、アーム名のパターンで判定する。
+
+**Result 式と判定する条件（いずれか 1 つ以上を満たす場合）:**
+- `ng e<Type>:` 型付きエラーアームが存在する
+- `ng:` または `ng err:` アームが存在する
+- `default:` または `default err:` アームが存在する（`default:` は Result の catch-all として扱う）
+
+**Option 式と判定する条件:**
+- `none:` アームが存在する
+- `some [bind]:` アームが存在する
+- `ok [bind]:` のみで `ng` 系・`default:` 系がない
+
+`default:` は Result の catch-all である。`none:` または `some:` と `default:` が混在する場合は「混在 Result/Option arms」エラーを出力する。両種のアームが混在する場合も同様にエラーを出力する。
 
 バリデーションは `_DS_match_ng_is_default` フラグを利用せず、アームの型付き / 非型付きを直接判定する方式で実装する。
 
@@ -755,8 +769,8 @@ end
 
 **`HAWK_TEMPLATE_ROOT`**:
 - アプリルートディレクトリの絶対パス（`views/` の親ディレクトリ）を指す。
-- `libexec/hawk-serve` がプロセス起動時に環境変数として設定する。`bin/hawk` は設定しない。
-- 例: アプリが `/app` にある場合、`HAWK_TEMPLATE_ROOT=/app`。
+- `libexec/hawk-serve` がプロセス起動時に `export HAWK_TEMPLATE_ROOT="$(realpath "$(dirname "$APP")")"` の形式で設定・エクスポートする（`export` が必須。シェル変数のままでは gawk 子プロセスに渡らない）。`bin/hawk` は設定しない。
+- 例: アプリが `/app/app.awk` の場合、`HAWK_TEMPLATE_ROOT=/app` に設定する。
 - **HAWK_TEMPLATE_ROOT が未設定の場合**: `render()` は即座に `500 Internal Server Error` を返す（fail-closed）。これにより、直接 `gawk` 呼び出しやユニットテストなど `hawk-serve` を経由しない実行パスで `render()` が意図せず成功することを防ぐ。ユニットテストで `render()` の成功パスをテストする場合は、テスト側で `HAWK_TEMPLATE_ROOT` を設定する（`tests/e2e/fixtures/app.awk` のテストでは `HAWK_TEMPLATE_ROOT=tests/e2e/fixtures` を設定する）。
 
 **パス正規化**:
@@ -925,6 +939,11 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 alias のベース型解決はデシュガー時の型テーブルを参照する。alias チェーン（`type A = B`、`type B = Str`）の場合は最終的なプリミティブ型まで展開する。循環 alias はデシュガー時のエラーとする。
 
 DSL の型チェックフェーズがエラーなく通過していれば、型の整合性は静的に保証されている。
+ただし、`_ds_check_type()` が推論不能（`inferred == ""`）を返す場合は型整合性を保証できない。この場合は以下の規則を適用する。
+
+- プリミティブ型またはプリミティブ alias への代入で RHS 型が未推論: 従来どおり `type::coerce` を生成する（runtime coercion による型保証を維持）。
+- 複合型（union、brand、`Option<T>`、`Result<T,E>`、`Effect<T>`、非プリミティブ alias）への代入で RHS 型が未推論: コンパイル時エラーを出力する（`unknown RHS type for complex typed reassignment`）。`type::coerce` を省略できない根拠がないためである。エスケープハッチとして `@unchecked` アノテーション（本フェーズでは実装しない）を将来的に検討する。
+
 ブランド型への強制変換はデシュガー層でも行わない。
 
 #### 変更対象ファイル
@@ -1016,7 +1035,19 @@ gawk -f "${manifest}" -e "BEGIN { if (!(\"${funcname}\" in FUNCTAB)) exit 1 }" 2
 - 終了コード 非ゼロ（構文エラーまたは関数未定義）: スキップして警告を stderr に出力する。`-f manifest.awk` を出力しない。
 
 これにより、不正な構文や未定義関数を持つマニフェストが本体 gawk プロセスに `-f` で読み込まれることを防ぐ。
-本体プロセスでのランタイム FUNCTAB チェックは行わない（既に安全なプラグインのみが読み込まれているため）。
+
+**`core/plugin.awk` のランタイム FUNCTAB チェック（防衛的追加）:**
+`core/plugin.awk` の `plugin_discover()` は現在、プラグインディレクトリを直接スキャンして `@funcname(meta)` を無条件に呼び出す。プリフライトとは独立したパスであるため、`hawk-libs plugins` のフィルタリングだけでは `plugin_discover()` 経由のクラッシュを防げない。
+`plugin_discover()` で各マニフェスト呼び出しの前に `funcname in FUNCTAB` チェックを追加し、未定義関数への indirect-call を防ぐ。
+
+```awk
+if (!(funcname in FUNCTAB)) {
+    print "[WARN] plugin " name ": function " funcname " not found, skipping" > "/dev/stderr"
+    continue
+}
+@funcname(meta)
+```
+
 注: プリフライト実行と本体プロセス起動の間にマニフェストが書き換えられる TOCTOU は残存する。本フェーズの目的はクラッシュ防止であり、完全なファイル整合性保証は対象外とする。
 
 #### 変更対象ファイル
