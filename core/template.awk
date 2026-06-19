@@ -8,9 +8,14 @@ function _template_safe_path(p) {
   return p !~ /[^A-Za-z0-9_.\/-]/
 }
 
-function template_read(path,    root, abs_path, real_root, real_path, cmd, line, out, first) {
+function template_read(path,    root, abs_path, real_root, real_path, cmd, line, out, first, content) {
   root = ENVIRON["HAWK_TEMPLATE_ROOT"]
-  if (root == "") root = "views"
+  if (root == "") {
+    content = ""
+    while ((getline line < path) > 0) content = content line "\n"
+    close(path)
+    return content
+  }
 
   if (path == "") {
     print "template: empty path not allowed" > "/dev/stderr"
