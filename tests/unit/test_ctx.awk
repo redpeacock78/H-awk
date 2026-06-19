@@ -39,37 +39,85 @@ function test_ctx_save_copies_res_back(    req, res) {
   assert_eq(res["header:content-type"], "application/json", "ctx_save: header written back")
 }
 
-function test_ctx_query_helper(    req, res) {
+function test_ctx_query_helper(    req, res, r) {
   delete req
   delete res
   req["query:page"] = "3"
   _ctx_load(req, res)
   assert_eq(result_val(ctx::query("page")), "3", "ctx::query reads query param")
+
+  delete req
+  delete res
+  req["query:q"] = ""
+  _ctx_load(req, res)
+  r = ctx::query("q")
+  assert_true(result_ok(r), "ctx::query treats empty existing query as ok")
+  assert_eq(result_val(r), "", "ctx::query returns empty query value")
 }
 
-function test_ctx_param_helper(    req, res) {
+function test_ctx_param_helper(    req, res, r) {
   delete req
   delete res
   req["params:id"] = "99"
   _ctx_load(req, res)
   assert_eq(result_val(ctx::param("id")), "99", "ctx::param reads path param")
+
+  delete req
+  delete res
+  req["params:id"] = ""
+  _ctx_load(req, res)
+  r = ctx::param("id")
+  assert_true(result_ok(r), "ctx::param treats empty existing param as ok")
+  assert_eq(result_val(r), "", "ctx::param returns empty param value")
 }
 
-function test_ctx_get_header_helper(    req, res) {
+function test_ctx_get_header_helper(    req, res, r) {
   delete req
   delete res
   req["header:accept"] = "text/html"
   _ctx_load(req, res)
   assert_eq(result_val(ctx::get_header("Accept")), "text/html", "ctx::get_header normalizes to lowercase")
   assert_eq(result_val(ctx::get_header("accept")), "text/html", "ctx::get_header lowercase input works")
+
+  delete req
+  delete res
+  req["header:x-empty"] = ""
+  _ctx_load(req, res)
+  r = ctx::get_header("X-Empty")
+  assert_true(result_ok(r), "ctx::get_header treats empty existing header as ok")
+  assert_eq(result_val(r), "", "ctx::get_header returns empty header value")
 }
 
-function test_ctx_body_helper(    req, res) {
+function test_ctx_body_helper(    req, res, r) {
   delete req
   delete res
   req["body"] = "raw body content"
   _ctx_load(req, res)
   assert_eq(result_val(ctx::body()), "raw body content", "ctx::body returns raw body")
+
+  delete req
+  delete res
+  req["body"] = ""
+  _ctx_load(req, res)
+  r = ctx::body()
+  assert_true(result_ok(r), "ctx::body treats empty existing body as ok")
+  assert_eq(result_val(r), "", "ctx::body returns empty body")
+
+  delete req
+  delete res
+  req["form:title"] = ""
+  _ctx_load(req, res)
+  r = ctx::req_form("title")
+  assert_true(result_ok(r), "ctx::req_form treats empty existing form value as ok")
+  assert_eq(result_val(r), "", "ctx::req_form returns empty form value")
+
+  delete req
+  delete res
+  req["body"] = ""
+  _ctx_load(req, res)
+  r = ctx::req_json()
+  assert_true(result_ok(r), "ctx::req_json treats empty existing body as ok")
+  assert_eq(result_val(r), "", "ctx::req_json returns empty body")
 }
 
 function test_ctx_json_helper(    req, res) {
