@@ -68,3 +68,33 @@ function test_tsv_delete_update(   row, out, n, tmpfile) {
 
   system("rm -f " tmpfile)
 }
+
+BEGIN {
+    srand()
+    tpath = "/tmp/test_tsv_unique_" int(rand() * 1000000) ".tsv"
+
+    print "1\talice\t100" > tpath
+    print "2\tbob\t200" >> tpath
+    close(tpath)
+    delete_tsv(tpath, 1, "1")
+    n = 0
+    while ((getline < tpath) > 0) n++
+    close(tpath)
+    if (n != 1) { print "FAIL: delete_tsv unique tmp" > "/dev/stderr"; exit 1 }
+    print "PASS: delete_tsv unique tmp"
+
+    print "1\talice\t100" > tpath
+    print "2\tbob\t200" >> tpath
+    close(tpath)
+    update_tsv(tpath, 1, "2", 3, "999")
+    ok = 0
+    while ((getline line < tpath) > 0) {
+        split(line, f, "\t")
+        if (f[1]=="2" && f[3]=="999") ok=1
+    }
+    close(tpath)
+    if (!ok) { print "FAIL: update_tsv unique tmp" > "/dev/stderr"; exit 1 }
+    print "PASS: update_tsv unique tmp"
+
+    system("rm -f " tpath)
+}
