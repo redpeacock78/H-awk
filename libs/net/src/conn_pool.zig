@@ -28,6 +28,7 @@ pub const Conn = struct {
     read_buf: std.ArrayList(u8),
     keep_alive: bool,
     last_used: i64,
+    body_deadline: i64,
 };
 
 pub const ConnPool = struct {
@@ -66,6 +67,7 @@ pub const ConnPool = struct {
             .read_buf = try std.ArrayList(u8).initCapacity(self.alloc, 0),
             .keep_alive = false,
             .last_used = monoNanos(),
+            .body_deadline = 0,
         });
         self.next_id += 1;
         return id;

@@ -198,11 +198,11 @@ pub const EventLoop = struct {
         return false;
     }
 
-    // Close connections idle longer than keepalive_timeout_ns.
     fn sweepIdleConns(self: *EventLoop) void {
-        const now = monoNanos();
+        const now_ms = @divTrunc(monoNanos(), 1_000_000);
         var ids: [256]u64 = undefined;
         var fds: [256]std.posix.socket_t = undefined;
+        var send408: [256]bool = undefined;
         var count: usize = 0;
 
         self.pool.mu.lock();
@@ -210,23 +210,47 @@ pub const EventLoop = struct {
         while (it.next()) |entry| {
             if (count >= ids.len) break;
             const conn = entry.value_ptr;
-            if (conn.keep_alive and now - conn.last_used > self.keepalive_timeout_ns) {
+            const idle = conn.keep_alive and (monoNanos() - conn.last_used > self.keepalive_timeout_ns);
+            const body_late = conn.body_deadline != 0 and now_ms > conn.body_deadline;
+            if (idle or body_late) {
                 ids[count] = entry.key_ptr.*;
                 fds[count] = conn.fd;
+                send408[count] = body_late;
                 count += 1;
             }
         }
-        for (ids[0..count], fds[0..count]) |id, _| {
+        var removed_count: usize = 0;
+        var bufs_to_deinit: [256]std.ArrayList(u8) = undefined;
+        var close_fds: [256]std.posix.socket_t = undefined;
+        var close_408: [256]bool = undefined;
+        for (ids[0..count], 0..) |id, i| {
             if (self.pool.conns.fetchRemove(id)) |kv| {
-                var c = kv.value;
-                c.read_buf.deinit(self.alloc);
+                bufs_to_deinit[removed_count] = kv.value.read_buf;
+                close_fds[removed_count] = fds[i];
+                close_408[removed_count] = send408[i];
+                removed_count += 1;
             }
         }
         self.pool.mu.unlock();
 
-        for (fds[0..count]) |fd| {
+        for (bufs_to_deinit[0..removed_count]) |*buf| buf.deinit(self.alloc);
+
+        for (close_fds[0..removed_count], close_408[0..removed_count]) |fd, do408| {
+            if (do408) sendSimpleError(fd, 408, "Request Timeout");
             _ = std.posix.system.close(fd);
         }
+    }
+
+    fn sendSimpleError(fd: std.posix.socket_t, status_code: u16, reason: []const u8) void {
+        var body_buf: [64]u8 = undefined;
+        const body = std.fmt.bufPrint(&body_buf, "{d} {s}", .{ status_code, reason }) catch return;
+        var hdr_buf: [512]u8 = undefined;
+        const msg = std.fmt.bufPrint(
+            &hdr_buf,
+            "HTTP/1.1 {d} {s}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ status_code, reason, body.len, body },
+        ) catch return;
+        _ = std.posix.system.write(fd, msg.ptr, msg.len);
     }
 
     // ---- kqueue implementation (macOS) ----
@@ -384,9 +408,8 @@ pub const EventLoop = struct {
 
         const n: usize = @intCast(r);
 
-        // Append to connection read buffer
         self.pool.mu.lock();
-        const conn_ptr = self.pool.conns.getPtr(conn_id);
+        var conn_ptr = self.pool.conns.getPtr(conn_id);
         if (conn_ptr == null) {
             self.pool.mu.unlock();
             return;
@@ -395,33 +418,80 @@ pub const EventLoop = struct {
             self.pool.mu.unlock();
             return;
         };
-        const raw_data = conn_ptr.?.read_buf.items;
-        // Check if we have a complete HTTP request
-        const complete = std.mem.indexOf(u8, raw_data, "\r\n\r\n") != null;
-        var owned_buf: ?[]u8 = null;
-        if (complete) {
-            owned_buf = self.alloc.dupe(u8, raw_data) catch null;
-            conn_ptr.?.read_buf.clearRetainingCapacity();
+
+        drain: while (true) {
+            const frame = http_parser.parseFrame(conn_ptr.?.read_buf.items);
+            switch (frame.action) {
+                .enqueue => {
+                    const slice = conn_ptr.?.read_buf.items[0..frame.consume_len];
+                    const owned = self.alloc.dupe(u8, slice) catch break :drain;
+                    defer self.alloc.free(owned);
+                    const rest = conn_ptr.?.read_buf.items[frame.consume_len..];
+                    const rest_copy = self.alloc.dupe(u8, rest) catch break :drain;
+                    defer self.alloc.free(rest_copy);
+                    conn_ptr.?.read_buf.clearRetainingCapacity();
+                    conn_ptr.?.read_buf.appendSlice(self.alloc, rest_copy) catch {};
+                    conn_ptr.?.body_deadline = 0;
+                    self.pool.mu.unlock();
+                    const req = http_parser.parse(owned, conn_id, self.alloc) catch {
+                        self.pool.mu.lock();
+                        conn_ptr = self.pool.conns.getPtr(conn_id);
+                        if (conn_ptr == null) {
+                            self.pool.mu.unlock();
+                            return;
+                        }
+                        break :drain;
+                    };
+                    defer req.deinit(self.alloc);
+                    const poll_str = http_parser.formatPollResult(req, self.alloc) catch {
+                        self.pool.mu.lock();
+                        conn_ptr = self.pool.conns.getPtr(conn_id);
+                        if (conn_ptr == null) {
+                            self.pool.mu.unlock();
+                            return;
+                        }
+                        break :drain;
+                    };
+                    self.req_mu.lock();
+                    self.req_queue.append(self.alloc, poll_str) catch {
+                        self.req_mu.unlock();
+                        self.alloc.free(poll_str);
+                        self.pool.mu.lock();
+                        conn_ptr = self.pool.conns.getPtr(conn_id);
+                        if (conn_ptr == null) {
+                            self.pool.mu.unlock();
+                            return;
+                        }
+                        break :drain;
+                    };
+                    self.req_mu.unlock();
+                    self.pool.mu.lock();
+                    conn_ptr = self.pool.conns.getPtr(conn_id);
+                    if (conn_ptr == null) {
+                        self.pool.mu.unlock();
+                        return;
+                    }
+                    if (conn_ptr.?.read_buf.items.len == 0) break :drain;
+                },
+                .wait_header => break :drain,
+                .wait_body => {
+                    conn_ptr.?.body_deadline = @divTrunc(monoNanos(), 1_000_000) + http_parser.BODY_READ_TIMEOUT_MS;
+                    break :drain;
+                },
+                .error_response => {
+                    const close_fd = conn_ptr.?.fd;
+                    if (self.pool.conns.fetchRemove(conn_id)) |kv| {
+                        var conn = kv.value;
+                        conn.read_buf.deinit(self.alloc);
+                    }
+                    self.pool.mu.unlock();
+                    sendSimpleError(close_fd, frame.status_code, frame.reason);
+                    _ = std.posix.system.close(close_fd);
+                    return;
+                },
+            }
         }
         self.pool.mu.unlock();
-
-        if (owned_buf) |raw| {
-            defer self.alloc.free(raw);
-            // Parse the request
-            const req = http_parser.parse(raw, conn_id, self.alloc) catch return;
-            defer req.deinit(self.alloc);
-
-            const poll_str = http_parser.formatPollResult(req, self.alloc) catch return;
-
-            // Enqueue poll string
-            self.req_mu.lock();
-            self.req_queue.append(self.alloc, poll_str) catch {
-                self.req_mu.unlock();
-                self.alloc.free(poll_str);
-                return;
-            };
-            self.req_mu.unlock();
-        }
     }
 
     fn drainResponses(self: *EventLoop) void {
