@@ -60,9 +60,9 @@ POST / PUT リクエストではリクエストボディが後続の TCP パケ�
 
 ```zig
 const ParseFrameResult = struct {
-    action: enum { enqueue, wait, error_response },
+    action: enum { enqueue, wait_header, wait_body, error_response },
     // action == enqueue のとき: バッファから取り除くバイト数（ヘッダー + ボディ）
-    // action == wait のとき: 0（バッファを変更しない）
+    // action == wait_header / wait_body のとき: 0（バッファを変更しない）
     // action == error_response のとき: バッファから取り除くバイト数
     consume_len: usize,
     // action == error_response のときのみ有効
@@ -75,11 +75,12 @@ const ParseFrameResult = struct {
 
 `action` の種別と `consume_len`・`should_close` の関係は以下のとおりである。
 
-| action | consume_len | should_close |
-|---|---|---|
-| `enqueue` | ヘッダー + ボディのバイト数 | `false` |
-| `wait` | `0`（バッファ変更なし） | `false` |
-| `error_response` | ヘッダーのバイト数（バッファに残ったボディバイトが次リクエストとして誤解釈されることを防ぐため、`should_close` は常に `true`） | 常に `true` |
+| action | consume_len | should_close | 意味 |
+|---|---|---|---|
+| `enqueue` | ヘッダー + ボディのバイト数 | `false` | リクエスト完全受信。キューに追加してバッファから取り除く |
+| `wait_header` | `0`（バッファ変更なし） | `false` | ヘッダー未完全（`\r\n\r\n` 未着）。`body_deadline` を設定しない |
+| `wait_body` | `0`（バッファ変更なし） | `false` | ヘッダー受信済み、ボディ不足。この時点で `body_deadline` を設定する |
+| `error_response` | ヘッダーのバイト数（バッファに残ったボディバイトが次リクエストとして誤解釈されることを防ぐため、`should_close` は常に `true`） | 常に `true` | エラー応答後に接続を閉じる |
 
 `action == close` は廃止し、代わりに `action: error_response, should_close: true` を使う。
 `action == error_response` を使う場合は `should_close` を常に `true` に設定する。`should_close = false` の `error_response` は存在しない。
@@ -94,7 +95,20 @@ const ParseFrameResult = struct {
 
 - `MAX_HEADER_SIZE`（8 KiB）を超えるヘッダー送信は `431` で即時切断する。
 - `MAX_BODY_SIZE`（1 MiB）を超える `Content-Length` は `413` で即時切断する。
-- **ボディ待機 timeout（P0-1 スコープ内）**: 既存の `sweepIdleConns()` は `conn.keep_alive` フラグが真の接続のみを対象とするため、不完全ボディを待つ接続（keep_alive が設定される前の状態）はカバーされない。このため、P0-1 の一部として `Conn` 構造体に `body_deadline: i64` フィールドを追加する。`ParseFrameResult.action == .wait`（ヘッダーは受信済みだがボディが不足）の時点で `body_deadline = now + BODY_READ_TIMEOUT_MS`（デフォルト 30000 ms）を設定する。`sweepIdleConns()` はこの deadline も確認し、超過した接続を `408 Request Timeout` で切断・閉じる。`BODY_READ_TIMEOUT_MS` はコンパイル時定数として `http_parser.zig` に定義する。
+- **ボディ待機 timeout（P0-1 スコープ内）**: 既存の `sweepIdleConns()` は `conn.keep_alive` フラグが真の接続のみを対象とするため、不完全ボディを待つ接続（keep_alive が設定される前の状態）はカバーされない。このため、P0-1 の一部として `Conn` 構造体に `body_deadline: i64` フィールドを追加する。
+
+  `body_deadline` の設定タイミングは `ParseFrameResult.action` によって決まる。
+  - `.wait_header` の場合: `body_deadline` を設定しない（ヘッダーすら未受信のため）。
+  - `.wait_body` の場合（ヘッダー受信済み・ボディ不足）: `body_deadline = now() + BODY_READ_TIMEOUT_MS`（デフォルト 30000 ms）を設定する。
+  - `.enqueue` の場合: `body_deadline` をリセット（`0` に戻す）する。
+  - 接続クローズ時: `body_deadline` をリセットする（keep-alive の次リクエストに残留させない）。
+
+  `sweepIdleConns()` はこの `body_deadline` も確認し、期限超過した接続を `408 Request Timeout` で切断する。安全な送信経路:
+  1. `sweepIdleConns()` は期限超過の接続を active pool から先に取り除く（以後の read/write イベントと競合しない状態にする）。
+  2. 共通関数 `sendSimpleError(conn, 408, "Request Timeout")` を呼ぶ（パーサーエラー経路と同じ実装）。
+  3. `sendSimpleError` は `conn.stream.write()` でブロッキング書き込みを試みる。成功・失敗にかかわらず接続を閉じる（408 は best-effort であり、相手が受け取れなくても接続は解放する）。
+
+  `BODY_READ_TIMEOUT_MS` はコンパイル時定数として `http_parser.zig` に定義する。
 
 リクエストが完了したとみなす条件は以下の 3 つをすべて満たすこととする。
 
@@ -137,7 +151,10 @@ loop {
         buf.consume(result.consume_len)
         // バッファにデータが残っていれば continue でループを継続する
         if buf.len == 0 { break }
-    } else if result.action == .wait {
+    } else if result.action == .wait_header || result.action == .wait_body {
+        if result.action == .wait_body {
+            conn.body_deadline = now() + BODY_READ_TIMEOUT_MS
+        }
         break  // 完全なリクエストがないため次の read まで待機する
     } else {  // error_response
         sendSimpleError(result.status_code, result.reason)
@@ -275,8 +292,7 @@ TSV ヘルパー関数は複数ワーカーによる同時書き込みに対し�
 
 #### 要求仕様
 
-ロック機構は `mkdir` を使ったアトミックなロックディレクトリ方式で AWK 内に直接実装する。
-シェルスクリプトへの委譲は行わない（AWK と外部プロセス間でロックのライフタイムを共有できないため）。
+ロック機構は `mkdir` を使ったアトミックなロックディレクトリ方式で AWK コードとして実装する。ロックのライフサイクル（取得・検証・解放）を AWK プロセス内で完結させる設計であり、ロックを保持したまま別のシェルプロセスに処理を委ねる構造は避ける。ただし、ロック操作の実体（`mkdir`・`mv`・`rm`・`kill`・`sleep`）は AWK の `system()` 呼び出しを経由した外部コマンドである。利用環境でこれらのコマンドが存在することを前提とする。`sleep 0.1` は GNU/Linux 専用のため `system("sleep 0.1 2>/dev/null || sleep 1")` で POSIX フォールバックを確保する。
 
 **オーナートークン:**
 
@@ -288,7 +304,11 @@ TSV ヘルパー関数は複数ワーカーによる同時書き込みに対し�
 オーナープロセスが死亡後に別のプロセスが同じ PID を再利用した場合、`kill -0` チェックが生存中と誤判定してスタールロックを検出できない。これは POSIX PID 再利用の根本的な制限であり、本フェーズでは許容する。将来的にはロック取得時刻（`systime()`）をトークンに含め、取得から一定時間経過後は強制リープを行うことで改善できる（本仕様には含まない）。
 
 **ロック取得・解放の対象操作:**
-`append_tsv`、`update_tsv`、`delete_tsv` の 3 関数がロックを使用する。各関数は `tsv_lock` 呼び出し後、処理完了（成功・失敗を問わず）の後に `tsv_unlock` を呼び出す。すべての early return パスで `tsv_unlock` が呼ばれることを保証するため、各関数の AWK コードは以下のパターンに従う。
+**書き込みロックのスコープ:** `append_tsv`、`update_tsv`、`delete_tsv` の 3 関数がロックを使用する。各関数は `tsv_lock` 呼び出し後、
+
+**読み取り操作のロックスコープ:** `read_tsv` と `find_tsv` はロックを使用しない。書き込みは tmpfile + atomic mv を採用しているため、読み取り側が観測できるのはコミット済みの完全なファイルか、コミット前の旧ファイルのどちらかであり、バイトレベルの破損は起きない。ただし、書き込みと同時期の読み取りでは古い状態を返す可能性がある（結果整合性）。行単位の強い読み取り整合性が必要なアプリケーションには外部ストレージを推奨する（README に記載する）。
+
+`append_tsv`、`update_tsv`、`delete_tsv` のロック詳細:処理完了（成功・失敗を問わず）の後に `tsv_unlock` を呼び出す。すべての early return パスで `tsv_unlock` が呼ばれることを保証するため、各関数の AWK コードは以下のパターンに従う。
 
 AWK に例外機構がないため、`tsv_lock` 成功後のすべての分岐で `tsv_unlock` を呼び出すことを保証するため、`ok` 変数を使った single-exit パターンを採用する。
 
@@ -512,7 +532,7 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 - **戻り値型**: `Result<Untrusted<Str>, ParseError>`。`ok` 値はユーザー入力由来の JSON ボディ文字列であり、`Untrusted` タントを維持する（safe HTML/dataflow モデルの一貫性を保つため）。呼び出し元は `ctx.req.json()` の結果を `Untrusted<Str>` として扱い、信頼境界を明示的に通過させる必要がある。`ParseError` 値はエラー理由文字列。
 - `request.awk` の `_request_parse_json_body` は既に `req["json:" key]` にフラット展開済みであるため、DSL から `ctx.req.json_field("key")` でアクセスできる。`ctx.req.json()` は JSON ボディ全体を raw `Untrusted<Str>` として返す（デコード済みマップを返さない）。
 - **`dsl/sig.awk` 変更**: `ctx.req.json` のシグネチャを現在の `Result<Untrusted<Map>, ParseError>` から `Result<Untrusted<Str>, ParseError>` に変更する。`dsl/sig.awk` を変更対象ファイルに追加する。
-- **`ctx.req.json_field` のシグネチャ**: `(Str) -> Result<Untrusted<Str>, ParseError>` として `dsl/sig.awk` に登録する。このヘルパーは `req["json:" key]` へのアクセスをラップし、キー存在チェックを行う（`ctx.req.json()` が `ok` を返した後に使用する）。返値も `Untrusted` タント付きで返す。
+- **`ctx.req.json_field` のシグネチャ**: `(Str) -> Result<Untrusted<Str>, ParseError>` として `dsl/sig.awk` に登録する。このヘルパーは自身で `req["json:__ok"] == 1` チェックを行い、未成功（`ctx.req.json()` が呼ばれていない、またはパース失敗）の場合は即 `ParseError` を返す。チェック通過後に `req["json:" key]` へのキー存在チェックを行う。返値も `Untrusted` タント付きで返す。`ctx.req.json()` の呼び出しなしで `json_field` を直接呼んでも安全に失敗する。
 - **`core/request.awk` 変更**: `_request_parse_json_body` が `Content-Type: application/json` の存在チェックと JSON 構文解析の結果をフラグ（`req["json:__ok"] = 1` または `req["json:__error"] = "..."` など）として `req` 配列に格納するよう修正する。`ctx::req_json` はこのフラグを参照して `ParseError` を返す。
 - `ctx::req_json` の `ParseError` 条件: ボディが JSON として無効な場合。具体的には: (a) ボディが空（`Content-Length: 0` または `Content-Type: application/json` 付きのゼロバイトボディ）、(b) ボディが JSON 構文として解析不能、(c) `Content-Type: application/json` が付いていない場合（`Content-Type` なしは `ParseError`）。
 - `ctx::body` と `ctx::req_json` の動作は独立している。`ctx::body` が `ok("")` を返す（空ボディ）ケースでも、`ctx::req_json` は `ParseError` を返す。この 2 者の動作は矛盾しない: 空ボディは「ボディとしては存在するが JSON ではない」という扱いである。
@@ -559,7 +579,7 @@ AWK の JSON データモデルを以下のように定義する。
 エンコード規則は以下のとおりである。
 
 - `isarray(val)` が真かつ `val["__json_type"] == "array"`：JSON 配列として `[val[1], val[2], ..., val[n]]` を生成する。各要素は `json_encode_any` を再帰的に呼び出してエンコードする。
-- `isarray(val)` が真かつ `val["__json_type"] != "array"`：JSON オブジェクトとして生成する。`__json_type` キーおよびキー `"n"` を除いた各キーと値を `json_encode_any` で再帰的にエンコードする（`"n"` は JSON 配列の長さメタキーとして予約されており、オブジェクト出力からも除外する）。既存の `json_encode` はスカラー値を扱えないため、`json_encode_any` 自身で再帰処理を実装する。AWK の配列イテレーション順は未定義のため、テストでは以下の方法で検証する。(a) `core/json.awk` の既存デコーダーは top-level オブジェクトのみ対応でネスト非対応であるため、ネストなしの単純オブジェクトのテストは既存デコーダーで検証可能。(b) ネストありや配列のテストは、エンコード結果を `gawk` + `jq` または `python3 -c 'import json, sys; json.load(sys.stdin)'` で valid JSON として解析できることを確認し、個々のキー・値を grep または jq で抽出して比較する。注: `"n"` キーの予約によって純粋な JSON オブジェクトに `"n"` を格納できなくなる。これは既知のトレードオフであり、本 ADT の配列表現の制約として README に記載する。
+- `isarray(val)` が真かつ `val["__json_type"] != "array"`：JSON オブジェクトとして生成する。`__json_type` キーを除いたすべてのキーと値を `json_encode_any` で再帰的にエンコードする（`"n"` はオブジェクトに対して特別扱いしない。ユーザーが `data["n"] = "value"` とした場合は通常のキーとして出力する）。既存の `json_encode` はスカラー値を扱えないため、`json_encode_any` 自身で再帰処理を実装する。AWK の配列イテレーション順は未定義のため、テストでは以下の方法で検証する。(a) `core/json.awk` の既存デコーダーは top-level オブジェクトのみ対応でネスト非対応であるため、ネストなしの単純オブジェクトのテストは既存デコーダーで検証可能。(b) ネストありや配列のテストは、エンコード結果を `gawk` + `jq` または `python3 -c 'import json, sys; json.load(sys.stdin)'` で valid JSON として解析できることを確認し、個々のキー・値を grep または jq で抽出して比較する。注: `"n"` キーは配列コンテキスト（`__json_type == "array"`）のみで特別な意味を持つ（要素数メタキー）。オブジェクトでは通常キーとして出力するため、アプリケーションは `"n"` キーを自由に使用できる。
 - `typeof(val) == "number"`：JSON 数値（クォートなし）に変換する。
 - `typeof(val) == "strnum"`（数値として解釈可能な文字列、例: `"42"`, `"001"`, `"1e2"`）：JSON 文字列として扱う（クォートあり）。AWK の `strnum` は文字列として渡されたものであり、呼び出し元が数値として意図した場合は `typeof` で区別できないためである。注: 式の評価（連結、算術演算、配列格納）によって値の型カテゴリが変化するため、`json_encode_any` に渡す前に `typeof` で安定した出力を得るには、呼び出し元が数値リテラル（`+0` 算術変換など）または文字列リテラルとして明示的に構築する必要がある。この不安定性は AWK の型システムの制約であり、仕様の範囲内として受け入れる。
 - それ以外（通常の文字列）：JSON 文字列（`"..."` 形式、`\"`・`\\`・`\n`・`\r`・`\t`・制御文字をエスケープ）に変換する。
@@ -936,7 +956,11 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 - プリミティブ型の alias（例: `type UserId = Str`）：alias 展開後のベース型がプリミティブであれば `type::coerce(rhs, "Str")` を生成する（alias 名ではなくベース型名を使用）
 - union 型、ブランド型、`Option<T>`、`Result<T,E>`、`Effect<T>`、非プリミティブ alias：`var = rhs` のみを生成する（`type::coerce` を生成しない）
 
-alias のベース型解決はデシュガー時の型テーブルを参照する。alias チェーン（`type A = B`、`type B = Str`）の場合は最終的なプリミティブ型まで展開する。循環 alias はデシュガー時のエラーとする。
+alias のベース型解決はデシュガー時の型テーブルを参照する。alias チェーン（`type A = B`、`type B = Str`）の場合は最終的なプリミティブ型まで展開する。循環 alias はデシュガー時のエラーとする。**型テーブル（alias 定義の格納場所）は複数のパス・ファイルが参照する共有データである。実装前に以下を確認すること:**
+
+1. alias テーブルの正規格納場所（`dsl/desugar.awk` の `_DS_types` か `dsl/type_dataflow.awk` の内部テーブルか）を特定する。
+2. そのテーブルを参照しているすべてのファイル（型推論、型チェック、coerce 生成）を洗い出し、alias チェーン展開ロジックを一箇所に集約する。
+3. alias 展開は型チェック経路（`dsl/type_dataflow.awk`）と coerce 生成経路（`dsl/desugar_let.awk`）の両方で一貫して動作する必要がある。
 
 DSL の型チェックフェーズがエラーなく通過していれば、型の整合性は静的に保証されている。
 ただし、`_ds_check_type()` が推論不能（`inferred == ""`）を返す場合は型整合性を保証できない。この場合は以下の規則を適用する。
@@ -948,7 +972,9 @@ DSL の型チェックフェーズがエラーなく通過していれば、型�
 
 #### 変更対象ファイル
 
-- `dsl/desugar_let.awk`
+- `dsl/desugar_let.awk`（coerce 生成経路での alias 展開）
+- `dsl/type_dataflow.awk`（型推論・型チェック経路での alias 展開。alias テーブルの正規格納場所の可能性あり）
+- alias テーブルを参照している他の DSL ファイル（実装前に `grep -r '_DS_types\|alias_table\|type_alias' dsl/` で洗い出すこと）
 - `core/adt.awk` は変更なし（型ランタイムの変更は最小限にとどめる）
 
 #### 追加するテスト
@@ -1031,7 +1057,7 @@ funcname="plugin_${name}_manifest"
 gawk -f "${manifest}" -e "BEGIN { if (!(\"${funcname}\" in FUNCTAB)) exit 1 }" 2>/dev/null
 ```
 
-- 終了コード 0: `manifest.awk` の構文が正常かつ `plugin_<name>_manifest` 関数が定義済み → `-f "${manifest}" -f "${impl}"` を出力する。`${manifest}` と `${impl}` は `printf '%s'` でクォートする（パス中のスペースや特殊文字に対応するため）。呼び出し元が `eval` または `$()` でフラグを展開する場合は、この出力をシングルクォートで適切にエスケープすること（`printf '%q'` を使用する）。
+- 終了コード 0: `manifest.awk` の構文が正常かつ `plugin_<name>_manifest` 関数が定義済み → 1 行 1 パスの形式で `-f ${manifest}` および `-f ${impl}` を改行区切りで出力する（`printf '%q'` は使わない。`%q` 出力を eval なしで配列に渡すと再エスケープが起きて破損する）。
 - 終了コード 非ゼロ（構文エラーまたは関数未定義）: スキップして警告を stderr に出力する。`-f manifest.awk` を出力しない。
 
 これにより、不正な構文や未定義関数を持つマニフェストが本体 gawk プロセスに `-f` で読み込まれることを防ぐ。
@@ -1054,7 +1080,7 @@ if (!(funcname in FUNCTAB)) {
 
 - `core/plugin.awk`
 - `libexec/hawk-libs`
-- `libexec/hawk-serve`（`PLUGIN_FILES="$("$LIBS" plugins)"` の展開方法を安全にする。`hawk-libs plugins` の出力は `printf '%q'` でクォート済みのパスを含むため、呼び出し元では `eval` は使わず、`set --` または配列に直接格納する方式に変更する）
+- `libexec/hawk-serve`（`PLUGIN_FILES="$("$LIBS" plugins)"` の展開方法を安全にする。`hawk-libs plugins` の出力は 1 行 1 パスの改行区切り形式に変更するため、呼び出し元では `mapfile -t plugin_args < <("$LIBS" plugins)` で配列に読み込み、`"${plugin_args[@]}"` で展開する。`eval` は使わない）
 
 #### 追加するテスト
 
