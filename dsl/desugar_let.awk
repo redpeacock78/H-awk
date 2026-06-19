@@ -138,6 +138,10 @@ function _ds_kind_of(t) {
     return "scalar"
 }
 
+function _ds_is_primitive_type(t) {
+    return (t == "Int" || t == "Float" || t == "Str" || t == "Bool")
+}
+
 function _ds_result_ng_return(varname,    t) {
     t = "_ds_err_type_" varname
     return \
@@ -248,7 +252,9 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
     # Type statically known and accepted: no coerce needed
     if (inferred != "" && type::accepts(declared, inferred))
       return indent varname " = " rhs
-    return indent varname " = type::coerce(" rhs ", \"" declared "\")"
+    if (_ds_is_primitive_type(declared))
+      return indent varname " = type::coerce(" rhs ", \"" declared "\")"
+    return indent varname " = " rhs
   }
   # Bare typed declaration: let name: Type  (初期値なし, supports Union types)
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*(.+)$/, arr)) {
@@ -291,7 +297,9 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
       rhs      = _ds_trim(arr[3])
       declared = _DS_let_type_map[arr[2]]
       _ds_check_type(declared, _ds_infer_type(rhs), lineno)
-      return arr[1] arr[2] " = type::coerce(" rhs ", \"" declared "\")"
+      if (_ds_is_primitive_type(declared))
+        return arr[1] arr[2] " = type::coerce(" rhs ", \"" declared "\")"
+      return arr[1] arr[2] " = " rhs
     }
   }
   # Array element assignment: arr["key"] = expr → track inferred type for later lookup
