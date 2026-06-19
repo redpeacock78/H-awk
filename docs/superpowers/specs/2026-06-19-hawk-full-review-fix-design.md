@@ -89,8 +89,14 @@ const ParseFrameResult = struct {
 `event_loop.zig` は `consume_len` バイトだけバッファから取り除き、残余バイトはそのまま保持する（`should_close = true` の場合を除く）。
 `action == error_response` かつ `should_close == true` の場合はレスポンス送信後に接続を閉じる。
 
-**タイムアウト:**
-不完全なボディを待機する接続のタイムアウトは本フェーズの実装スコープ外とする。OS の TCP タイムアウトまたは `event_loop.zig` の既存コネクション管理に委ねる。将来的には `event_loop.zig` に設定可能な read timeout を追加することで対応する（本仕様には含まない）。
+**タイムアウトと DoS 防御:**
+不完全なボディを待機する接続に対するアプリケーションレベルの read timeout は本フェーズの実装スコープ外とする。ただし、以下の制限がスロー送信による DoS を部分的に緩和する。
+
+- `MAX_HEADER_SIZE`（8 KiB）を超えるヘッダー送信は `431` で即時切断する。
+- `MAX_BODY_SIZE`（1 MiB）を超える `Content-Length` は `413` で即時切断する。
+- アクティブな読み取りを行わないアイドル接続は `event_loop.zig` の既存 keep-alive idle sweep で処理される（この sweep が不完全ボディ待ち接続をカバーすることを実装時に確認する。カバーしない場合は別途 read timeout フラグを実装する）。
+
+将来的には `event_loop.zig` に設定可能な per-connection read timeout を追加することで根本的に対応する（本仕様には含まない）。
 
 リクエストが完了したとみなす条件は以下の 3 つをすべて満たすこととする。
 
@@ -105,10 +111,13 @@ const ParseFrameResult = struct {
 `Content-Length` が最大ボディサイズ（デフォルト 1 MiB = 1048576 バイト）を超える場合は `413 Payload Too Large` を返す（`action: error_response, should_close: true`）。
 フレーミングエラーはすべて `should_close: true` を設定する。バッファに残留したボディバイトが次のリクエストとして誤解釈されることを防ぐためである。
 
-最大ボディサイズはコンパイル時定数 `MAX_BODY_SIZE` として `http_parser.zig` に定義し、`event_loop.zig` はこれをインポートして使用する。フレーミング判定ロジックを持つパーサーが上限値も所有することで、定数の参照元を一箇所に集約する。
+最大ボディサイズはコンパイル時定数 `MAX_BODY_SIZE` として `http_parser.zig` に定義し、`event_loop.zig` はこれをインポートして使用する。フレーミング判定ロジックを持つパーサーが上限値も所有することで、Zig ネイティブランタイム内での参照元を一箇所に集約する。
 
 `\r\n\r\n` が到達する前にバッファが `MAX_HEADER_SIZE`（デフォルト 8 KiB = 8192 バイト）を超えた場合は `431 Request Header Fields Too Large` を返す（`action: error_response, should_close: true`）。
 `MAX_HEADER_SIZE` も `http_parser.zig` に定義する。
+
+**AWK フォールバックランタイムとの関係:**
+`core/http.awk` は既に `HAWK_MAX_HEADER_SIZE` と `HAWK_MAX_BODY_SIZE` 環境変数でこれらの上限を設定している。Zig ネイティブランタイムと AWK フォールバックランタイムはそれぞれ独立した実装であり、ポリシーソースも別である（Zig はコンパイル時定数、AWK は実行時環境変数）。この 2 者は並行して存在し、互いに干渉しない。デフォルト値（8 KiB ヘッダー、1 MiB ボディ）は両ランタイムで一致させること。
 
 ヘッダー名の比較はすべて case-insensitive（`content-length`, `Content-Length`, `CONTENT-LENGTH` を同一視）で行う。
 ヘッダー値の前後の OWS（optional whitespace）は RFC 7230 に従いトリムする。
@@ -120,10 +129,27 @@ const ParseFrameResult = struct {
 `Transfer-Encoding` と `Content-Length` が同時に存在する場合、RFC 7230 §3.3.3 に従い `Content-Length` を無視して `Transfer-Encoding` を優先し、上記の規則を適用する。
 
 Keep-alive に対応するため、1 バッファに複数の完全なリクエストが含まれる場合は以下の処理とする。
+`event_loop.zig` はソケット read ごとにバッファを使い果たすまで、内部ドレインループを実行する。
 
-1. `ParseFrameResult.consume_len` バイトだけバッファから取り除いてリクエストをエンキューする。
-2. 残余バイトを接続の読み取りバッファに保持する。
-3. 次のループ / 読み取りで残余バイトを再度 `ParseFrameResult` に通す。
+```
+loop {
+    result = parseFrame(buf)
+    if result.action == .enqueue {
+        enqueue(request)
+        buf.consume(result.consume_len)
+        // バッファにデータが残っていれば continue でループを継続する
+        if buf.len == 0 { break }
+    } else if result.action == .wait {
+        break  // 完全なリクエストがないため次の read まで待機する
+    } else {  // error_response
+        sendSimpleError(result.status_code, result.reason)
+        connection.close()
+        break
+    }
+}
+```
+
+次の read イベントを待たずに、バッファ内の完全なフレームをすべて処理することで、バッファ済みリクエストが孤立する問題を防ぐ。
 
 **エラーレスポンスの wire format:**
 
@@ -229,6 +255,10 @@ ctx.res.redirect(url, code)  # 任意のリダイレクトコード
 - `ctx.res.redirect("/x")` の DSL チェックが通ること。
 - `ctx.res.redirect("/x", 303)` の DSL チェックが通ること。
 - `safe.html.fragment` に 4 引数以上を渡した場合のランタイムテスト。
+- `safe.html.fragment` に 0 引数を渡すと `""` を返すこと（パディング動作の固定）。
+- `safe.html.fragment` に 1 引数を渡すと `arg1` を返すこと。
+- `safe.html.fragment` に 2 引数を渡すと `arg1 .. arg2` を返すこと。
+- `safe.html.fragment` に 3 引数を渡すと `arg1 .. arg2 .. arg3` を返すこと。
 
 ---
 
@@ -253,6 +283,23 @@ TSV ヘルパー関数は複数ワーカーによる同時書き込みに対し�
 ロックディレクトリ取得後、取得したプロセスの PID をオーナートークンとしてロックディレクトリ内の `pid` ファイルに書き込む。
 `tsv_unlock` はこのトークンを検証し、自プロセスが所有するロックのみを削除する。
 これにより、タイムアウト後に別プロセスが取得したロックを誤って削除する競合状態を防ぐ。
+
+**PID 再利用リスク（既知の制限）:**
+オーナープロセスが死亡後に別のプロセスが同じ PID を再利用した場合、`kill -0` チェックが生存中と誤判定してスタールロックを検出できない。これは POSIX PID 再利用の根本的な制限であり、本フェーズでは許容する。将来的にはロック取得時刻（`systime()`）をトークンに含め、取得から一定時間経過後は強制リープを行うことで改善できる（本仕様には含まない）。
+
+**ロック取得・解放の対象操作:**
+`append_tsv`、`update_tsv`、`delete_tsv` の 3 関数がロックを使用する。各関数は `tsv_lock` 呼び出し後、処理完了（成功・失敗を問わず）の後に `tsv_unlock` を呼び出す。すべての early return パスで `tsv_unlock` が呼ばれることを保証するため、各関数の AWK コードは以下のパターンに従う。
+
+```awk
+function append_tsv(path, record,    ok) {
+    if (!tsv_lock(path)) return 0
+    # ... 本体処理 ...
+    tsv_unlock(path)
+    return 1
+}
+```
+
+`tsv_lock` が失敗した場合（タイムアウト）は `tsv_unlock` を呼ばない（ロックを取得していないため）。`tsv_lock` が成功した後は、AWK に例外機構がないためすべての分岐で `tsv_unlock` を明示的に呼び出すこと。
 
 **ロック取得:**
 
@@ -450,12 +497,15 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 
 - **戻り値型**: `Result<Str, ParseError>`。`ok` 値は元のリクエストボディ文字列（そのまま保持）。`ParseError` 値はエラー理由文字列。
 - `request.awk` の `_request_parse_json_body` は既に `req["json:" key]` にフラット展開済みであるため、DSL から `ctx.req.json_field("key")` でアクセスできる。`ctx.req.json()` は JSON ボディ全体を raw string として返す（デコード済みマップを返さない）。
+- **`dsl/sig.awk` 変更**: `ctx.req.json` のシグネチャを現在の `Result<Untrusted<Map>, ParseError>` から `Result<Str, ParseError>` に変更する。`dsl/sig.awk` を変更対象ファイルに追加する。
+- **`ctx.req.json_field` のシグネチャ**: `(Str) -> Result<Str, ParseError>` として `dsl/sig.awk` に登録する。このヘルパーは `req["json:" key]` へのアクセスをラップし、キー存在チェックを行う（`ctx.req.json()` が `ok` を返した後に使用する）。
 - `ctx::req_json` の `ParseError` 条件: ボディが JSON として無効な場合。具体的には: (a) ボディが空（`Content-Length: 0` または `Content-Type: application/json` 付きのゼロバイトボディ）、(b) ボディが JSON 構文として解析不能、(c) `Content-Type: application/json` が付いていない場合（`Content-Type` なしは `ParseError`）。
 - `ctx::body` と `ctx::req_json` の動作は独立している。`ctx::body` が `ok("")` を返す（空ボディ）ケースでも、`ctx::req_json` は `ParseError` を返す。この 2 者の動作は矛盾しない: 空ボディは「ボディとしては存在するが JSON ではない」という扱いである。
 
 #### 変更対象ファイル
 
 - `core/ctx.awk`
+- `dsl/sig.awk`（`ctx.req.json` のシグネチャ変更 + `ctx.req.json_field` 追加）
 - `tests/unit/test_ctx.awk`
 - `tests/unit/test_request.awk`
 
@@ -465,6 +515,8 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 - 空値を持つフォームフィールドが `ok("")` を返すこと（`key=` の形式）。
 - 欠損キーが `ParseError` を返すこと。
 - 空ボディ（`Content-Length: 0`）が `ok("")` を返すこと。
+- `ctx.req.json_field("key")` が JSON ボディから指定キーの値を返すこと。
+- `ctx.req.json_field("missing")` が `ParseError` を返すこと。
 
 ---
 
@@ -521,6 +573,7 @@ AWK の JSON データモデルを以下のように定義する。
 
 #### 変更対象ファイル
 
+- `core/json.awk`（`json_encode_any` をここに追加する。`json_encode` と同じファイルに置くことで JSON エンコードポリシーを一箇所に集約する）
 - `core/response.awk`
 - `core/ctx.awk`
 - `dsl/sig.awk`
@@ -689,6 +742,7 @@ end
 - アプリルートディレクトリの絶対パス（`views/` の親ディレクトリ）を指す。
 - `libexec/hawk-serve` がプロセス起動時に環境変数として設定する。`bin/hawk` は設定しない。
 - 例: アプリが `/app` にある場合、`HAWK_TEMPLATE_ROOT=/app`。
+- **HAWK_TEMPLATE_ROOT が未設定の場合**: `render()` は即座に `500 Internal Server Error` を返す（fail-closed）。これにより、直接 `gawk` 呼び出しやユニットテストなど `hawk-serve` を経由しない実行パスで `render()` が意図せず成功することを防ぐ。ユニットテストで `render()` の成功パスをテストする場合は、テスト側で `HAWK_TEMPLATE_ROOT` を設定する（`tests/e2e/fixtures/app.awk` のテストでは `HAWK_TEMPLATE_ROOT=tests/e2e/fixtures` を設定する）。
 
 **パス正規化**:
 
@@ -809,6 +863,9 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 `classify: validator` は純粋な静的な信頼境界アノテーションである。「この関数はデータが有効であることを確認してから返す」という意図を型システムに伝えるものであり、ランタイムの成功/失敗とは独立している。
 `Untrusted<T>` を `validator` 関数に渡した場合、戻り値の型は `T`（`Untrusted` なし）として扱われる。これは「この関数を通過したデータは検証済みである」という静的な信頼付与である。
 ランタイムでバリデーションが失敗しうる（例: 長さチェック、形式チェック）場合は `Result<T, E>` を返す通常の関数として実装する。`classify: validator` は「成功すれば信頼済み」という前提を静的に注入するためのものであり、失敗パスを扱わない。
+
+**セキュリティ上の注意点（既知のガードレール不足）:**
+`classify: validator` は関数名や実装内容に関わらず信頼付与を行うため、実際に検証を行わない関数に付与すると未検証データが `Untrusted` なしで伝播する。これは意図的な設計（プログラマーの宣言的責任）であるが、誤用リスクがある。本フェーズでは型チェッカーによる自動検証（本文中に検証ロジックがあるかチェックするなど）は行わない。README に「`classify: validator` を付与できるのは、実際に入力を検証してから返す関数に限る」と明記し、コードレビューで確認することとする。
 
 #### 変更対象ファイル
 
@@ -937,7 +994,7 @@ funcname="plugin_${name}_manifest"
 gawk -f "${manifest}" -e "BEGIN { if (!(\"${funcname}\" in FUNCTAB)) exit 1 }" 2>/dev/null
 ```
 
-- 終了コード 0: `manifest.awk` の構文が正常かつ `plugin_<name>_manifest` 関数が定義済み → `-f manifest.awk -f impl.awk` を出力する。
+- 終了コード 0: `manifest.awk` の構文が正常かつ `plugin_<name>_manifest` 関数が定義済み → `-f "${manifest}" -f "${impl}"` を出力する。`${manifest}` と `${impl}` は `printf '%s'` でクォートする（パス中のスペースや特殊文字に対応するため）。呼び出し元が `eval` または `$()` でフラグを展開する場合は、この出力をシングルクォートで適切にエスケープすること（`printf '%q'` を使用する）。
 - 終了コード 非ゼロ（構文エラーまたは関数未定義）: スキップして警告を stderr に出力する。`-f manifest.awk` を出力しない。
 
 これにより、不正な構文や未定義関数を持つマニフェストが本体 gawk プロセスに `-f` で読み込まれることを防ぐ。
