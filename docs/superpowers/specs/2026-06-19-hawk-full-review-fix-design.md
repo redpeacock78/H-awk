@@ -60,21 +60,32 @@ POST / PUT リクエストではリクエストボディが後続の TCP パケ�
 
 ```zig
 const ParseFrameResult = struct {
-    action: enum { enqueue, wait, error_response, close },
+    action: enum { enqueue, wait, error_response },
     // action == enqueue のとき: バッファから取り除くバイト数（ヘッダー + ボディ）
     // action == wait のとき: 0（バッファを変更しない）
-    // action == error_response / close のとき: ヘッダー全体のバイト数（不正なリクエストを消費する）
+    // action == error_response のとき: バッファから取り除くバイト数
     consume_len: usize,
     // action == error_response のときのみ有効
     status_code: u16,  // 400, 413, 501 など
     reason: []const u8,
-    // error_response の後に接続を閉じるか
+    // true のときはレスポンス送信後に接続を閉じる
     should_close: bool,
 };
 ```
 
-`event_loop.zig` は `consume_len` バイトだけバッファから取り除き、残余バイトはそのまま保持する。
-`action == close` の場合は `consume_len` バイト消費後に接続を閉じる。
+`action` の種別と `consume_len`・`should_close` の関係は以下のとおりである。
+
+| action | consume_len | should_close |
+|---|---|---|
+| `enqueue` | ヘッダー + ボディのバイト数 | `false` |
+| `wait` | `0`（バッファ変更なし） | `false` |
+| `error_response` | ヘッダーのバイト数（バッファに残ったボディバイトを次リクエストとして誤解釈しないよう `should_close = true` を推奨） | フレーミングエラーの場合は `true`、それ以外は任意 |
+
+`action == close` は廃止し、代わりに `action: error_response, should_close: true` を使う。
+フレーミングエラー（`Content-Length` 不正、`Transfer-Encoding` 非対応）は必ず `should_close: true` を設定してレスポンス送信後に接続を閉じる。
+これにより、バッファに残留したボディバイトが次のリクエストとして誤解釈されることを防ぐ。
+
+`event_loop.zig` は `consume_len` バイトだけバッファから取り除き、残余バイトはそのまま保持する（`should_close = true` の場合を除く）。
 `action == error_response` かつ `should_close == true` の場合はレスポンス送信後に接続を閉じる。
 
 リクエストが完了したとみなす条件は以下の 3 つをすべて満たすこととする。
@@ -83,21 +94,24 @@ const ParseFrameResult = struct {
 2. `Content-Length` の有無を確定済みである（存在すること、または存在しないことが確認されていること）。
 3. バッファが `header_end + 4 + content_length` バイト以上のデータを保持している。
 
-`Content-Length` が存在しないリクエストは、ボディ長を 0 として扱う（action: enqueue）。
-`Content-Length` の値が数値として解析できない場合は `400 Bad Request` を返す（action: error_response）。
-`Content-Length` が負の値または `+` や空白プレフィックスを含む場合も `400 Bad Request` を返す（action: error_response）。
-同一リクエストに `Content-Length` が複数存在する場合、または値が相互に矛盾する場合も `400 Bad Request` を返す（action: error_response）。
-`Content-Length` が最大ボディサイズ（デフォルト 1 MiB = 1048576 バイト）を超える場合は `413 Content Too Large` を返す（action: error_response）。
+`Content-Length` が存在しないリクエストは、ボディ長を 0 として扱う（`action: enqueue`）。
+`Content-Length` の値が数値として解析できない場合は `400 Bad Request` を返す（`action: error_response, should_close: true`）。
+`Content-Length` が負の値または `+` や空白プレフィックスを含む場合も `400 Bad Request` を返す（`action: error_response, should_close: true`）。
+同一リクエストに `Content-Length` が複数存在する場合、または値が相互に矛盾する場合も `400 Bad Request` を返す（`action: error_response, should_close: true`）。
+`Content-Length` が最大ボディサイズ（デフォルト 1 MiB = 1048576 バイト）を超える場合は `413 Content Too Large` を返す（`action: error_response, should_close: true`）。
+フレーミングエラーはすべて `should_close: true` を設定する。バッファに残留したボディバイトが次のリクエストとして誤解釈されることを防ぐためである。
+
 最大ボディサイズはコンパイル時定数 `MAX_BODY_SIZE` として `http_parser.zig` に定義し、`event_loop.zig` はこれをインポートして使用する。フレーミング判定ロジックを持つパーサーが上限値も所有することで、定数の参照元を一箇所に集約する。
+
+`\r\n\r\n` が到達する前にバッファが `MAX_HEADER_SIZE`（デフォルト 8 KiB = 8192 バイト）を超えた場合は `431 Request Header Fields Too Large` を返す（`action: error_response, should_close: true`）。
+`MAX_HEADER_SIZE` も `http_parser.zig` に定義する。
 
 ヘッダー名の比較はすべて case-insensitive（`content-length`, `Content-Length`, `CONTENT-LENGTH` を同一視）で行う。
 ヘッダー値の前後の OWS（optional whitespace）は RFC 7230 に従いトリムする。
 
 `Transfer-Encoding` ヘッダーが存在する場合の動作は以下のとおりである。
 
-- `Transfer-Encoding: chunked`（大文字小文字問わず、OWS トリム後）：`501 Not Implemented` を返して接続を閉じる（action: close）。
-- カンマ区切りや複数値を含む `Transfer-Encoding`（例: `gzip, chunked`）：`Transfer-Encoding` が存在する時点でサポート対象外とみなし、`501` を返して接続を閉じる。
-- それ以外の `Transfer-Encoding` 値（例: `gzip` 単独）：同様に `501` を返して接続を閉じる。
+- 任意の `Transfer-Encoding` 値（chunked、gzip、複数値・カンマ区切りを含む）：`action: error_response, status_code: 501, reason: "Not Implemented", should_close: true` を返す。
 
 `Transfer-Encoding` と `Content-Length` が同時に存在する場合、RFC 7230 §3.3.3 に従い `Content-Length` を無視して `Transfer-Encoding` を優先し、上記の規則を適用する。
 
@@ -159,6 +173,7 @@ ctx.res.redirect(url, code)  # 任意のリダイレクトコード
 ```
 
 `dsl/sig.awk` における arity の扱いを、オプション引数に対応するよう修正する。
+`ctx.res.redirect` のシグネチャエントリは min arity = 1、max arity = 2 として表現する。他の関数への汎用的な min/max arity 機構は本フェーズでは導入しない。`ctx.res.redirect` 専用の特殊ケースとして実装する。
 `ctx.res.redirect(url)` は DSL デシュガー時に `ctx.res.redirect(url, 302)` に正規化する。
 既存のディスパッチャーは arity 0〜3 の固定テーブルで動作するため、正規化後の 2 引数呼び出しとして扱う。
 
@@ -171,7 +186,7 @@ ctx.res.redirect(url, code)  # 任意のリダイレクトコード
 デシュガーの生成規則は以下のとおりである。
 
 - 引数 0〜3 個：既存のディスパッチャー（`hawk_dispatch::call0`〜`call3`）をそのまま使う。
-- 引数 4 個以上：引数を AWK 配列 `_ds_frag_args` に格納し、`safe::fragment_v(_ds_frag_args, n)` を呼び出す特殊ディスパッチに展開する。
+- 引数 4 個以上：展開ごとに一意な名前（`_ds_frag_args_N`、N はデシュガー内の単調カウンター）の AWK 配列に引数を格納し、`safe::fragment_v(_ds_frag_args_N, n)` を呼び出す特殊ディスパッチに展開する。配列は使用前にクリア（`delete _ds_frag_args_N`）する。
 
 `safe::fragment_v(arr, n)` は `core/safe.awk` に追加するランタイム関数であり、`arr[1]`〜`arr[n]` を連結して返す。
 
@@ -236,8 +251,15 @@ function tsv_lock(path,    lockdir, pidfile, pid, i) {
         # スタールロック検出: PID ファイルを読んでオーナーが生存しているか確認する
         if ((getline pid < pidfile) > 0) {
             close(pidfile)
+            # PID を数字のみに制限してシェルインジェクションを防ぐ
+            if (pid !~ /^[0-9]+$/) {
+                system("rm -rf " shell_quote(lockdir))
+                continue
+            }
             if (system("kill -0 " pid " 2>/dev/null") != 0) {
                 # オーナープロセスが死亡 → スタールロックを削除して再試行する
+                # mkdir はアトミックなので rm -rf 後に別プロセスがロックを取得しても安全:
+                # その場合、次の mkdir が失敗し、そのプロセスの live PID を読んで待機する
                 system("rm -rf " shell_quote(lockdir))
                 continue
             }
@@ -414,12 +436,12 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 AWK の JSON データモデルを以下のように定義する。
 
 - **JSON オブジェクト**：AWK 配列で `arr["key"] = value` の形式。`arr["__json_type"]` が `"array"` でない場合はオブジェクトとして扱う。`__json_type` キー自体は JSON 出力に含めない。
-- **JSON 配列**：AWK 配列で `arr["__json_type"] = "array"` かつ `arr[1]`, `arr[2]`, ... の整数インデックスを使う。`arr["n"]` に要素数を格納することを推奨するが、`length(arr) - 1`（`__json_type` を除いた数）で代替できる。
+- **JSON 配列**：AWK 配列で `arr["__json_type"] = "array"` かつ `arr[1]`, `arr[2]`, ... の整数インデックスを使う。配列長の決定ルールは以下の優先順位で適用する: `arr["n"]` が存在する場合はその値を要素数として使う; `arr["n"]` が存在しない場合はすべての正の整数キーを列挙して最大インデックスを要素数とする。`length(arr) - 1` は使わない（メタキー `__json_type` のほか `n` 等が含まれると誤った値になるため）。スパース配列（`arr[1]`, `arr[3]` のみで `arr[2]` が欠落）は `null` で埋める。
 
 エンコード規則は以下のとおりである。
 
 - `isarray(val)` が真かつ `val["__json_type"] == "array"`：JSON 配列として `[val[1], val[2], ..., val[n]]` を生成する。各要素は `json_encode_any` を再帰的に呼び出してエンコードする。
-- `isarray(val)` が真かつ `val["__json_type"] != "array"`：JSON オブジェクトとして生成する。`__json_type` キーを除いた各キーと値を `json_encode_any` で再帰的にエンコードする。既存の `json_encode` はスカラー値を扱えないため、`json_encode_any` 自身で再帰処理を実装する。
+- `isarray(val)` が真かつ `val["__json_type"] != "array"`：JSON オブジェクトとして生成する。`__json_type` キーを除いた各キーと値を `json_encode_any` で再帰的にエンコードする。既存の `json_encode` はスカラー値を扱えないため、`json_encode_any` 自身で再帰処理を実装する。AWK の配列イテレーション順は未定義のため、テストでは厳密な文字列比較ではなく、期待するキーと値のペアがすべて含まれることを検証する（JSON パーサーで parse して比較するか、`sort` 済み出力で比較する）。
 - `typeof(val) == "number"`：JSON 数値（クォートなし）に変換する。
 - `typeof(val) == "strnum"`（数値として解釈可能な文字列、例: `"42"`, `"001"`, `"1e2"`）：JSON 文字列として扱う（クォートあり）。AWK の `strnum` は文字列として渡されたものであり、呼び出し元が数値として意図した場合は `typeof` で区別できないためである。
 - それ以外（通常の文字列）：JSON 文字列（`"..."` 形式、`\"`・`\\`・`\n`・`\r`・`\t`・制御文字をエスケープ）に変換する。
@@ -545,13 +567,14 @@ Result 式と Option 式が混在する `when...of` はサポート対象外で�
 アームの有効な順序は以下の規則に従う（Result 式と Option 式は別々の規則を持つ）。
 
 **Result 式の有効なアーム順序:**
-- `ok [bind]` アームは最初に置く（複数可、順序任意）
-- 型付き `ng e<Type>:` アームは `ok` の後、catch-all の前に置く（順序任意）
+- `ok [bind]` アームは最初に置く（複数不可。2 つ以上あるとエラー）
+- 型付き `ng e<Type>:` アームは `ok` の後、catch-all の前に置く（順序任意。同一型の重複はエラー）
 - catch-all（`ng:`, `ng err:`, `default:`, `default err:`）は必ず最後の 1 つだけ
 
 無効なパターン：
 - catch-all の後に型付き `ng e<Type>:` が続く → エラー
 - 重複した catch-all → エラー
+- `ok` アームが 2 つ以上ある → エラー
 - Result 式に `none:` が含まれる → エラー
 
 **Option 式の有効なアーム順序:**
@@ -611,39 +634,39 @@ end
 - `..` を含むパス
 - 空文字列
 
-パス正規化は以下の方法で行う。
-
-```awk
-cmd = "realpath -- " shell_quote(path) " 2>/dev/null"
-ret = (cmd | getline normalized)
-close(cmd)
-if (ret != 1) {
-    # realpath が利用できない、またはパスが存在しない
-    return render_error(500, "template path could not be verified")
-}
-```
-
 ベースディレクトリは `ENVIRON["PWD"]` ではなく、hawk 起動時に確定する信頼済みの定数 `HAWK_TEMPLATE_ROOT`（`views/` の絶対パス）を使う。
 `HAWK_TEMPLATE_ROOT` は `libexec/hawk-serve`（または serve を担当する libexec コマンド）がプロセス起動時に環境変数として設定し、`core/template.awk` はこれを参照する。
 `bin/hawk` は wrapper であり serve ロジックを持たないため、ここでは設定しない。
 
-`realpath` が利用できない環境（戻り値 `!= 1`）では fail-closed とし、`500 Internal Server Error` を返す。
+パス正規化は以下の手順で行う。
 
-パス境界の検証は以下の手順で行う。
-
-1. `HAWK_TEMPLATE_ROOT` 自体を `realpath` で正規化する（サーブ起動時に 1 回のみ実行し、キャッシュする）。
-2. テンプレートパスを `realpath` で正規化した結果 `normalized` を取得する（上記コード参照）。
-3. `normalized` が `root` と等しいか、または `root "/"` で始まるかを確認する。
+1. `HAWK_TEMPLATE_ROOT` 自体を `realpath` で正規化する（サーブ起動時に 1 回のみ実行し、`_hawk_template_root` 変数にキャッシュする）。
+2. 候補パスを `_hawk_template_root "/" path` として構築する（`path` が `views/` プレフィックスを持つ場合は除去してから結合する）。これにより CWD に依存しない。
+3. 候補パスを `realpath` で正規化する。
 
 ```awk
-if (normalized != root && index(normalized, root "/") != 1) {
+candidate = _hawk_template_root "/" path
+cmd = "realpath -- " shell_quote(candidate) " 2>/dev/null"
+ret = (cmd | getline normalized)
+close(cmd)
+if (ret != 1) {
+    return render_error(500, "template path could not be verified")
+}
+```
+
+4. `normalized` が `_hawk_template_root` と等しいか、または `_hawk_template_root "/"` で始まるかを確認する。
+
+```awk
+if (normalized != _hawk_template_root && index(normalized, _hawk_template_root "/") != 1) {
     return render_error(500, "template path outside root")
 }
 ```
 
 この条件により、`root = "/app/views"` のとき `normalized = "/app/views2/foo"` が誤って許可されない。
 シンボリックリンクは `realpath` が解決済みの実パスに展開するため、`HAWK_TEMPLATE_ROOT` 配下に収まることで保証する。
-テンプレートファイルは `normalized` を使って読み込む（元の `path` は使わない）。
+テンプレートファイルは `normalized` を使って読み込む（元の `path` や `candidate` は使わない）。
+
+`realpath` が利用できない環境（戻り値 `!= 1`）では fail-closed とし、`500 Internal Server Error` を返す。
 
 長期的な設計として `TemplatePath` ブランド型の導入を検討するが、本フェーズでは短期的なランタイムチェックのみを実装する。
 
@@ -687,7 +710,7 @@ if (normalized != root && index(normalized, root "/") != 1) {
 - `Option none` → 404（従来どおり）
 
 `Result ng` の型判定は `result_ng` の第 1 引数（エラー種別文字列）を取得するアクセサー `result_err_type(r)` で実装する。
-この関数が存在しない場合は `core/adt.awk` に追加する。
+この関数が存在しない場合は `dsl/adt.awk` に追加する（デシュガーレイヤーが参照するため、`core/adt.awk` ではなくデシュガー層のファイルに置く）。
 デシュガーが生成するコードは `result_err_type` を呼び出してマッピングテーブルを参照するパターンを使う。
 
 追加するテストは以下のとおりである。
@@ -701,7 +724,7 @@ if (normalized != root && index(normalized, root "/") != 1) {
 #### 変更対象ファイル
 
 - `dsl/desugar_nullcoalesce.awk`
-- `dsl/adt.awk`（`result_err_type` が未実装の場合のみ追加。既に存在する場合は変更不要）
+- `dsl/adt.awk`（`result_err_type` が存在しない場合のみ追加）
 - `README.md`
 
 ---
@@ -721,9 +744,9 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 - **`sanitizer`**: ブランドセーフな型を返す
 - **`sink`**: 終端コンシューマー
 
-`validator` によるバリデーション失敗の表現は DSL 型エラーとする。
-`Untrusted<T>` を `validator` 関数に渡した場合、戻り値の型は `T` として扱われる。
-検証ロジック自体が失敗する（`Result<T, E>` を返す）場合は、`classifier: validator` ではなく通常の関数として実装する。
+`classify: validator` は純粋な静的な信頼境界アノテーションである。「この関数はデータが有効であることを確認してから返す」という意図を型システムに伝えるものであり、ランタイムの成功/失敗とは独立している。
+`Untrusted<T>` を `validator` 関数に渡した場合、戻り値の型は `T`（`Untrusted` なし）として扱われる。これは「この関数を通過したデータは検証済みである」という静的な信頼付与である。
+ランタイムでバリデーションが失敗しうる（例: 長さチェック、形式チェック）場合は `Result<T, E>` を返す通常の関数として実装する。`classify: validator` は「成功すれば信頼済み」という前提を静的に注入するためのものであり、失敗パスを扱わない。
 
 #### 変更対象ファイル
 
@@ -828,12 +851,16 @@ DSL の型チェックフェーズがエラーなく通過していれば、型�
 
 `manifest.awk` を持たないプラグインディレクトリはスキップして警告を出力し、存在しない関数を indirect-call しない。
 `manifest.awk` は存在するが `plugin_<name>_manifest` 関数が定義されていない場合も同様にスキップして警告を出力する。
-関数の存在確認には gawk の `@include` 後に `(funcname) in FUNCTAB` で検証する。
+プラグインマニフェストのロードはサブプロセス分離を使う。AWK の `@include` はパーサー段階で静的に展開されるため、不正な AWK 構文を含む `manifest.awk` はインタープリター起動前にパース失敗し、同一プロセス内でエラーを回復できない。
 
-`@include` の実行順序と FUNCTAB の可視性については以下の制約が適用される。
-`@include` はパーサー段階で静的に展開されるため、`manifest.awk` のパスが実行時に動的に決まる場合は `@include` ではなく `ENVIRON` または外部コマンド経由の動的ロードを使う必要がある。
-プラグイン発見フロー（`hawk-libs`）で `manifest.awk` のパスを収集し、`gawk -f manifest.awk ...` の形式でサブプロセスとして呼び出す実装か、あるいは gawk の `extension()` / `-f` フラグを使う実装かを明示する。
-いずれの方式でも `plugin_<name>_manifest` 関数が FUNCTAB に存在しない場合はスキップして警告を出力する。
+ロード方式は以下のとおりとする。
+
+1. `hawk-libs` が各プラグインディレクトリを走査し、`manifest.awk` の存在を確認する。
+2. `manifest.awk` が存在するプラグインに対し、`gawk -f manifest.awk` をサブプロセスとして実行して標準出力にマニフェスト情報を出力させる。
+3. サブプロセスの終了コードが非ゼロの場合、またはマニフェスト関数が定義されていない場合（関数名の規約が守られていない場合を含む）はスキップして警告をエラー出力に書く。
+4. サブプロセスが正常終了した場合のみ、その出力を本体の発見結果に統合する。
+
+この方式により、不正な構文・未定義関数・クラッシュするプラグインが本体 AWK プロセスを停止させない。
 
 #### 変更対象ファイル
 
@@ -857,7 +884,7 @@ Phase 1〜3 の実装完了後、`README.md` を以下の観点で更新する�
 2. TSV ストレージの `mkdir` ベースのロック実装を説明し、マルチワーカーでの利用条件を明示する。
 3. `ctx.res.json` が AWK 配列と値を JSON エンコードすること、および `ctx.res.json_raw` が事前エンコード済み文字列用であることを説明する。
 4. `safe.html.fragment` が可変長引数を受け付けることを明示する。
-5. `render()` が `views/` 配下のパスのみを許可すること。`realpath` が利用できない環境では fail-closed として 500 を返すこと。る制限回避の可能性があることを注記する。
+5. `render()` が `HAWK_TEMPLATE_ROOT` 配下のパスのみを許可すること。`realpath` が利用できない環境では fail-closed として 500 を返すこと。
 6. `?=` のデフォルトエラーマッピング（型別対応表）を記載する。
 7. 以下の使用例を追加する。
    - `hawk.app.on`（3 引数形式）
@@ -899,6 +926,7 @@ make ci-full
 - `ctx.res.redirect` の動作がランタイムと DSL チェッカーで一致していること。
 - `safe.html.fragment` の動作がランタイム、DSL チェッカー、README で一致していること。
 - `libs/net` が不完全な POST ボディをエンキューしないこと。
+- `libs/net` がヘッダーサイズ超過（`MAX_HEADER_SIZE` = 8 KiB 超）で `431` を返すこと。
 - `libs/net` が `Transfer-Encoding: chunked` に対して `501` を返し接続を閉じること。
 - `libs/net` が任意の `Transfer-Encoding` 値（複数値・カンマ区切りを含む）に対して `501` を返し接続を閉じること。
 - `libs/net` が無効・重複・負数の `Content-Length` に対して `400` を返すこと。
@@ -927,22 +955,33 @@ make ci-full
 
 以下の順序でコミットを分割する（フェーズ順に対応）。
 
+Phase 1（P0）、Phase 2（P1）、Phase 3（P2）の順に対応する。
+
 ```
+# Phase 1: P0 Critical Fixes
+fix(net): add header size limit, reject oversized headers with 431
 fix(net): wait for complete content-length body before enqueue
-fix(net): return 501 and close connection for chunked encoding
+fix(net): return 501 and close for any transfer-encoding value
 fix(dsl): align signature arities with runtime dispatch
 fix(tsv): add mkdir-based write locking with PID owner token
 fix(dsl): ignore braces inside strings and comments
+
+# Phase 2: P1 Correctness Fixes
 fix(ctx): distinguish missing request keys from empty values
 fix(ctx): encode data in ctx.res.json, add json_raw helper
 fix(dsl): transform pipe preludes inside when arms
 fix(dsl): reject catch-all when arms before typed arms
-fix(template): restrict render path to views/ directory
+fix(template): restrict render path to hawk_template_root
 fix(response): reject invalid header names
+
+# Phase 3: P2 Design Cleanup
+fix(dsl): improve ?= error type mapping with type-based defaults
 fix(dsl): fix validator classify to unwrap Untrusted
 fix(dsl): avoid type::coerce for complex type reassignment
-fix(dsl): improve ?= error type mapping with type-based defaults
-fix(plugin): tolerate missing manifest in plugin discovery
+fix(response): add preflight header name validation
+fix(plugin): tolerate missing or malformed manifest in plugin discovery
+
+# Phase 4
 docs: clarify storage, json, render, and DSL semantics
 test: add regressions for reviewed edge cases
 ```
