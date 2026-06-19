@@ -272,14 +272,17 @@ function _ds_is_func_def(line) {
   return (line ~ /^[[:space:]]*function[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(.*\)[[:space:]]*(->.*)?[[:space:]]*\{[[:space:]]*$/)
 }
 
-function _ds_net_braces(line,    n, i, c) {
+function _ds_net_braces(line,    n, i, j, c, segs, ns, text) {
   n = 0
-  # NOTE: brace count does not mask string literals; unbalanced { or } inside
-  # strings would throw off depth — same limitation as the main pass brace tracker.
-  for (i = 1; i <= length(line); i++) {
-    c = substr(line, i, 1)
-    if      (c == "{") n++
-    else if (c == "}") n--
+  ns = _ds_split_code_segs(line, segs)
+  for (i = 1; i <= ns; i++) {
+    if (!segs[i, "safe"]) continue
+    text = segs[i, "text"]
+    for (j = 1; j <= length(text); j++) {
+      c = substr(text, j, 1)
+      if      (c == "{") n++
+      else if (c == "}") n--
+    }
   }
   return n
 }
