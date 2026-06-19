@@ -1,5 +1,5 @@
-function handler(    _ds_tc_1, raw, _ds_err_type__ds_tc_1, msg) {
-  _ds_tc_1 = ctx::dispatch("req.form", "title")
+function h(    _ds_tc_1, user, _ds_err_type__ds_tc_1) {
+  _ds_tc_1 = authenticate(ctx::dispatch("req.get_header", "Authorization"))
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)
     if (_ds_err_type__ds_tc_1 == "ParseError") return ctx::dispatch("res.status", 400)
@@ -7,7 +7,6 @@ function handler(    _ds_tc_1, raw, _ds_err_type__ds_tc_1, msg) {
     if (_ds_err_type__ds_tc_1 == "NotFoundError") return ctx::dispatch("res.status", 404)
     return ctx::dispatch("res.status", 500)
   }
-  raw = result_val(_ds_tc_1)
-  msg = sprintf("title: %s", raw)
-  return ctx::dispatch("res.text", msg)
+  user = result_val(_ds_tc_1)
+  return ctx::dispatch("res.text", user["name"])
 }
