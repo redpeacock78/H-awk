@@ -106,6 +106,9 @@ function delete_todo() -> Response {
 }
 ```
 
+> **Note:** TSV ヘルパーは `mkdir` ベースのロックと一意 tmp パスを使用しており、マルチワーカーモード下でも安全に動作する。
+> ただし、高スループット本番環境では libSQL・SQLite・PostgreSQL などの外部ストアを推奨する。
+
 ## DSL Preprocessing
 
 `bin/hawk` runs every app file through `dsl/desugar.awk` before passing it to gawk. The following transforms are applied.

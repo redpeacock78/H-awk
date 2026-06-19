@@ -53,7 +53,45 @@ function _tsv_read_header(path, header,    line, i, n, parts) {
   return n
 }
 
+function _tsv_safe_path(path) {
+    if (path ~ /[^A-Za-z0-9_.\/-]/) {
+        print "tsv: unsafe path rejected: " path > "/dev/stderr"
+        return 0
+    }
+    return 1
+}
+
+function _tsv_lock(path,    lock_dir, attempts, lock_pid) {
+    if (!_tsv_safe_path(path)) return 0
+    lock_dir = path ".lock"
+    attempts = 0
+    while ((system("mkdir -- " lock_dir " 2>/dev/null")) != 0) {
+        if (++attempts > 100) {
+            if ((getline lock_pid < (lock_dir "/pid")) > 0 && lock_pid != "") {
+                close(lock_dir "/pid")
+                if ((system("kill -0 " lock_pid " 2>/dev/null")) != 0) {
+                    system("rm -rf -- " lock_dir)
+                    continue
+                }
+            }
+            print "tsv: lock timeout on " path > "/dev/stderr"
+            return 0
+        }
+        system("sleep 0.05")
+    }
+    print PROCINFO["pid"] > (lock_dir "/pid")
+    close(lock_dir "/pid")
+    return 1
+}
+
+function _tsv_unlock(path) {
+    if (!_tsv_safe_path(path)) return
+    system("rm -rf -- " path ".lock")
+}
+
 function append_tsv(path, row,    header, n, i, line, key, names, ncols) {
+  if (!_tsv_lock(path)) return 0
+
   # ヘッダ未存在 → row のキーをヘッダとして書出
   if ((getline line < path) <= 0) {
     close(path)
@@ -76,6 +114,7 @@ function append_tsv(path, row,    header, n, i, line, key, names, ncols) {
   }
   print line >> path
   close(path)
+  _tsv_unlock(path)
   return 1
 }
 
@@ -122,11 +161,35 @@ function find_tsv(path, key, val, row,    line, header, ncols, i, parts, n) {
   return 0
 }
 
-function delete_tsv(path, key, val,    line, header, ncols, i, parts, n, count, tmppath) {
-  ncols = _tsv_read_header(path, header)
-  if (ncols == 0) return 0
+function delete_tsv(path, key, val,    line, header, ncols, i, parts, n, count, tmppath, headerless) {
+  if (!_tsv_lock(path)) return 0
 
-  tmppath = path ".tmp"
+  tmppath = path ".tmp." PROCINFO["pid"] "." systime() "." int(rand() * 1000000)
+  headerless = (key ~ /^[0-9]+$/)
+
+  if (headerless) {
+    count = 0
+    while ((getline line < path) > 0) {
+      split(line, parts, "\t")
+      if (_tsv_unescape(parts[key]) == val) {
+        count++
+        continue
+      }
+      print line > tmppath
+    }
+    close(path)
+    close(tmppath)
+    system(sprintf("mv -- %s %s", _shellquote(tmppath), _shellquote(path)))
+    _tsv_unlock(path)
+    return count
+  }
+
+  ncols = _tsv_read_header(path, header)
+  if (ncols == 0) {
+    _tsv_unlock(path)
+    return 0
+  }
+
   count = 0
   n = 0
   while ((getline line < path) > 0) {
@@ -148,14 +211,43 @@ function delete_tsv(path, key, val,    line, header, ncols, i, parts, n, count, 
   close(path)
   close(tmppath)
   system(sprintf("mv -- %s %s", _shellquote(tmppath), _shellquote(path)))
+  _tsv_unlock(path)
   return count
 }
 
-function update_tsv(path, key, val, update,    line, header, ncols, i, parts, n, count, tmppath, j, row, newline) {
-  ncols = _tsv_read_header(path, header)
-  if (ncols == 0) return 0
+function update_tsv(path, key, val, update, update_val,    line, header, ncols, i, parts, n, count, tmppath, j, row, newline, headerless) {
+  if (!_tsv_lock(path)) return 0
 
-  tmppath = path ".tmp"
+  tmppath = path ".tmp." PROCINFO["pid"] "." systime() "." int(rand() * 1000000)
+  headerless = (key ~ /^[0-9]+$/ && !isarray(update))
+
+  if (headerless) {
+    count = 0
+    while ((getline line < path) > 0) {
+      split(line, parts, "\t")
+      if (_tsv_unescape(parts[key]) == val) {
+        parts[update] = _tsv_escape(update_val)
+        count++
+      }
+      newline = ""
+      for (i = 1; i <= length(parts); i++) {
+        newline = newline (i > 1 ? "\t" : "") parts[i]
+      }
+      print newline > tmppath
+    }
+    close(path)
+    close(tmppath)
+    system(sprintf("mv -- %s %s", _shellquote(tmppath), _shellquote(path)))
+    _tsv_unlock(path)
+    return count
+  }
+
+  ncols = _tsv_read_header(path, header)
+  if (ncols == 0) {
+    _tsv_unlock(path)
+    return 0
+  }
+
   count = 0
   n = 0
   while ((getline line < path) > 0) {
@@ -182,6 +274,7 @@ function update_tsv(path, key, val, update,    line, header, ncols, i, parts, n,
   close(path)
   close(tmppath)
   system(sprintf("mv -- %s %s", _shellquote(tmppath), _shellquote(path)))
+  _tsv_unlock(path)
   return count
 }
 
