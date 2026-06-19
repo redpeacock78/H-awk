@@ -8,6 +8,8 @@ fi
 
 set -e
 
+export HAWK_TEMPLATE_ROOT="${HAWK_TEMPLATE_ROOT:-views}"
+
 HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
 HAWK_LIBEXEC="${HAWK_LIBEXEC:-$(cd "$(dirname "$0")" && pwd)}"
 LIBS="${HAWK_LIBEXEC}/hawk-libs"
