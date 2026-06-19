@@ -58,10 +58,24 @@ POST / PUT リクエストではリクエストボディが後続の TCP パケ�
 `http_parser.zig` に `parseFrameResult` 構造体を追加し、フレーミング判定を一箇所に集約する。
 `parseFrameResult` は以下のフィールドを持つ。
 
-- `complete_len: usize` — 現在のバッファで消費するバイト数（完全なリクエスト 1 件分）
-- `action: enum { enqueue, wait, error_response, close }`
+```zig
+const ParseFrameResult = struct {
+    action: enum { enqueue, wait, error_response, close },
+    // action == enqueue のとき: バッファから取り除くバイト数（ヘッダー + ボディ）
+    // action == wait のとき: 0（バッファを変更しない）
+    // action == error_response / close のとき: ヘッダー全体のバイト数（不正なリクエストを消費する）
+    consume_len: usize,
+    // action == error_response のときのみ有効
+    status_code: u16,  // 400, 413, 501 など
+    reason: []const u8,
+    // error_response の後に接続を閉じるか
+    should_close: bool,
+};
+```
 
-`event_loop.zig` は `complete_len` バイトだけバッファから取り除き、残余バイトはそのまま保持する。
+`event_loop.zig` は `consume_len` バイトだけバッファから取り除き、残余バイトはそのまま保持する。
+`action == close` の場合は `consume_len` バイト消費後に接続を閉じる。
+`action == error_response` かつ `should_close == true` の場合はレスポンス送信後に接続を閉じる。
 
 リクエストが完了したとみなす条件は以下の 3 つをすべて満たすこととする。
 
@@ -138,8 +152,9 @@ ctx.res.redirect(url, code)  # 任意のリダイレクトコード
 
 `dsl/sig.awk` における arity の扱いを、オプション引数に対応するよう修正する。
 
-**`hawk.app.on`** および **`ctx.res.redirect`** のオプション引数は、DSL デシュガー時に正規化する。
+**`ctx.res.redirect`** のオプション引数は、DSL デシュガー時に正規化する。
 `ctx.res.redirect(url)` は `ctx.res.redirect(url, 302)` にデシュガーする。
+**`hawk.app.on`** はオプション引数を持たない固定 3 引数（method, path, handler）として実装する。
 既存のディスパッチャーは arity 0〜3 の固定テーブルで動作するため、正規化後の 2 引数呼び出しとして扱う。
 
 **`safe.html.fragment`** は可変長引数に対応する。
@@ -184,32 +199,41 @@ TSV ヘルパー関数は複数ワーカーによる同時書き込みに対し�
 
 #### 要求仕様
 
-ロック機構は `scripts/tsv-lock.sh` として事前に実装した固定シェルスクリプトに委譲する。
-AWK がデータをシェルに渡す際に動的なスクリプト生成は行わない（シェルインジェクション防止）。
+ロック機構は `mkdir` を使ったアトミックなロックディレクトリ方式で AWK 内に直接実装する。
+シェルスクリプトへの委譲は行わない（AWK と外部プロセス間でロックのライフタイムを共有できないため）。
 
-**`scripts/tsv-lock.sh` の仕様:**
+**ロック取得:**
 
-```sh
-# 使用方法
-scripts/tsv-lock.sh lock   <lockfile>   # ロック取得、成功=0, 失敗=1
-scripts/tsv-lock.sh unlock <lockfile>   # ロック解放
+```awk
+function tsv_lock(path,    lockdir, pidfile, pid, i) {
+    lockdir = path ".lock"
+    pidfile = lockdir "/pid"
+    for (i = 0; i < 50; i++) {
+        if (system("mkdir " shell_quote(lockdir) " 2>/dev/null") == 0) {
+            print PROCINFO["pid"] > pidfile
+            close(pidfile)
+            return 1  # 取得成功
+        }
+        # スタールロック検出: PID が存在しない場合は削除して再試行
+        if ((getline pid < pidfile) > 0) {
+            close(pidfile)
+            if (system("kill -0 " pid " 2>/dev/null") != 0) {
+                system("rm -rf " shell_quote(lockdir))
+                continue
+            }
+        }
+        system("sleep 0.1 2>/dev/null || sleep 1")
+    }
+    return 0  # タイムアウト
+}
+
+function tsv_unlock(path) {
+    system("rm -rf " shell_quote(path ".lock"))
+}
 ```
 
-データの受け渡しは stdin / stdout / 環境変数を使わず、AWK 側が読み取りと書き込みを直接行う。
-ロックの役割はクリティカルセクションの排他制御のみとし、データ変換はすべて AWK 側で実施する。
-
-**ロック取得の実装（`scripts/tsv-lock.sh lock <lockfile>`）:**
-
-`flock` が利用可能な場合は `flock -xn "$lockfile"` で排他ロックを取得し、取得後に 0 を返してプロセスを継続させる。
-`flock` が利用できない場合は `mkdir "$lockfile.dir"` のアトミック成功 / 失敗でロックを判定する。
-リトライは `sleep 0.1` × 50 回（合計 5 秒）。`sleep 0.1` が利用できない環境（古い sleep）では `sleep 1` × 5 回にフォールバックする。
-
-**スタールロックの検出:**
-`mkdir` 方式の場合のみ適用する。ロックディレクトリ内に PID ファイル（`pid` という名前）を置き、PID のプロセスが生存していない（`kill -0 <pid>` が失敗する）場合にスタールロックと判定して削除する。
-30 秒 mtime ルールは使用しない（実行時間が長い書き込みを誤って割り込む危険があるため）。
-
-**ロック取得失敗時の動作:**
-タイムアウトした場合は書き込みを中断し、呼び出し元の AWK 関数に `-1` を返す。
+`shell_quote(s)` は AWK 組み込みの文字列クォート関数として実装する。
+`gsub(/'/, "'\\''", s)` を使い、結果を `'` で囲む。
 
 **一時ファイルのパス:**
 `srand(PROCINFO["pid"] + systime())` を `BEGIN` ルールで必ず実行する。
@@ -219,12 +243,9 @@ scripts/tsv-lock.sh unlock <lockfile>   # ロック解放
 path ".tmp." PROCINFO["pid"] "." systime() "." int(rand() * 1000000)
 ```
 
-`mv` の戻り値（`system()` の戻り値）を確認し、失敗した場合はテンポラリファイルを `system("rm -f " tmppath)` で削除してエラーを返す。
-
-**シェルメタキャラクター対応:**
-`path` は AWK 変数であり、シェルコマンドに渡す前に `scripts/tsv-lock.sh` が `$1` として受け取る。
-スクリプト内でパスを `"$1"` とクォートして使用する。
-スペース、引用符、セミコロン、改行、グロブを含むパスのテストを追加する。
+`mv` は `system("mv " shell_quote(tmppath) " " shell_quote(path))` で実行し、戻り値を確認する。
+失敗した場合は `system("rm -f " shell_quote(tmppath))` でクリーンアップしてエラーを返す。
+すべてのコマンド引数に `shell_quote()` を適用する。
 
 #### 変更対象ファイル
 
@@ -266,7 +287,7 @@ function f() -> Str {
 `_ds_split_code_segs()` が以下のケースを正しく処理することを実装前に確認し、対応していない場合は先に修正する。
 
 - エスケープシーケンスを含む文字列（例: `"{\"ok\": true}"`）
-- 複数行にまたがる文字列連結
+- H-awk の文字列連結構文（隣接する文字列リテラルを 1 行内で連結する形式、例: `"hello" " " "world"`）。`_ds_split_code_segs()` は 1 行単位で動作するため、複数行にまたがる文字列連結は各行を独立して処理し、状態を行をまたいで引き継がない。
 - コメント行（`#` 以降）
 
 #### 変更対象ファイル
@@ -351,7 +372,15 @@ return v != "" ? result_ok_make(v) : result_ng("ParseError", "missing " key)
 既存の `json_encode` は `for (key in data)` による配列専用であり、スカラーを渡すと不定動作になる。
 `json_encode_any` のエンコード規則は以下のとおりである。
 
-- `isarray(val)` が真：既存の `json_encode(val)` に委譲する
+AWK の JSON データモデルを以下のように定義する。
+
+- **JSON オブジェクト**：AWK 配列で `arr["key"] = value` の形式。`arr["__json_type"]` に `"object"` を設定しない場合はデフォルトでオブジェクトとして扱う。
+- **JSON 配列**：AWK 配列で `arr["__json_type"] = "array"` かつ `arr[1]`, `arr[2]`, ... の整数インデックスを使う。
+- **ネスト**：本フェーズの `ctx.res.json` は 1 段のオブジェクト / 配列のみを対象とし、ネスト構造は既存の `json_encode` の動作に委譲する。`json_encode` が対応していないネストは本フェーズでは修正しない。
+
+エンコード規則は以下のとおりである。
+
+- `isarray(val)` が真：`json_encode(val)` に委譲する（フラットなオブジェクトとして処理）
 - `typeof(val) == "number"`：JSON 数値（クォートなし）に変換する
 - `typeof(val) == "strnum"`（数値として解釈可能な文字列、例: `"42"`, `"001"`, `"1e2"`）：JSON 文字列として扱う（クォートあり）。AWK の `strnum` は文字列として渡されたものであり、呼び出し元が数値として意図した場合は `typeof` で区別できないためである。
 - それ以外（通常の文字列）：JSON 文字列（`"..."` 形式、`\"`・`\\`・`\n`・`\r`・`\t`・制御文字をエスケープ）に変換する
@@ -554,7 +583,8 @@ if (ret != 1) {
 ```
 
 ベースディレクトリは `ENVIRON["PWD"]` ではなく、hawk 起動時に確定する信頼済みの定数 `HAWK_TEMPLATE_ROOT`（`views/` の絶対パス）を使う。
-`HAWK_TEMPLATE_ROOT` は `bin/hawk` がプロセス起動時に環境変数として設定し、`core/template.awk` はこれを参照する。
+`HAWK_TEMPLATE_ROOT` は `libexec/hawk-serve`（または serve を担当する libexec コマンド）がプロセス起動時に環境変数として設定し、`core/template.awk` はこれを参照する。
+`bin/hawk` は wrapper であり serve ロジックを持たないため、ここでは設定しない。
 
 `realpath` が利用できない環境（戻り値 `!= 1`）では fail-closed とし、`500 Internal Server Error` を返す。
 シンボリックリンクの許容は `realpath` 正規化後のパスが `HAWK_TEMPLATE_ROOT` 配下に収まることで保証する。
@@ -613,7 +643,7 @@ if (ret != 1) {
 #### 変更対象ファイル
 
 - `dsl/desugar_nullcoalesce.awk`
-- `core/adt.awk`（`result_err_type` 追加）
+- `dsl/adt.awk`（`result_err_type` が未実装の場合のみ追加。既に存在する場合は変更不要）
 - `README.md`
 
 ---
@@ -667,32 +697,17 @@ README は `validator` が `Untrusted<T>` を受け取り plain `T` を返すと
 #### 要求仕様
 
 複合型への再代入では `type::coerce` を使用しない。
-代わりに新規追加する `type::assert_accepts(val, "TypeName")` を呼び出すランタイムアサーションヘルパーを生成する。
-既存の `type::accepts(val, typename)` は boolean を返す互換チェック関数であり、上書きしない。
+複合型への再代入では `type::coerce` を生成せず、型アノテーションなしのシンプルな代入にデシュガーする。
+`type::accepts(expected, actual)` は型文字列同士の互換性チェック（静的）であり、ランタイム値の検査には使用できない（引数の意味が違うため）。
+したがってランタイムアサーション（`type::assert_accepts`）は本フェーズでは導入しない。
 
-`type::assert_accepts` の契約は以下のとおりである。
+複合型への再代入の生成規則は以下のとおりである。
 
-- 引数：値と型名文字列
-- 戻り値：型が一致する場合は `val` をそのまま返す
-- 型不一致の場合：`_hawk_fatal` でランタイムエラーを出力して終了する
-- ブランド型への強制変換は `type::assert_accepts` でも行わない
-- 内部で `type::accepts(val, typename)` を呼び出して判定する
+- プリミティブ型（`Int`, `Float`, `Str`, `Bool`）：従来どおり `type::coerce(rhs, "Type")` を生成する
+- union 型、alias 型、ブランド型、`Option<T>`、`Result<T,E>`、`Effect<T>`：`var = rhs` のみを生成する（`type::coerce` を生成しない）
 
-**`type::accepts` の対応型の監査と補完:**
-実装前に `dsl/type.awk` 内の `type::accepts` が以下のすべての型を正しく処理することを確認する。
-対応していない型がある場合は `type::accepts` を先に修正し、その変更を本 P2-3 タスクに含める。
-
-確認対象の型ファミリー：
-- プリミティブ（`Int`, `Float`, `Str`, `Bool`）— 既存
-- union 型（`A | B`）
-- alias 型（`type Foo = Bar`）
-- ブランド型（`brand Foo(Str)`）— accepts は構造チェックのみで強制変換しない
-- `Option<T>`
-- `Result<T, E>`
-- `Effect<T>`
-
-静的型チェックで代入の型整合性が確定している場合は `type::assert_accepts` の呼び出し自体を省略する。
-「確定」の条件：DSL の型チェックフェーズがエラーなく通過し、かつ両辺の型が同一である場合。
+DSL の型チェックフェーズがエラーなく通過していれば、型の整合性は静的に保証されている。
+ブランド型への強制変換はデシュガー層でも行わない。
 
 #### 変更対象ファイル
 
@@ -779,7 +794,7 @@ Phase 1〜3 の実装完了後、`README.md` を以下の観点で更新する�
 2. TSV ストレージのロック実装（`flock` / `mkdir` フォールバック）を説明し、マルチワーカーでの利用条件を明示する。
 3. `ctx.res.json` が AWK 配列と値を JSON エンコードすること、および `ctx.res.json_raw` が事前エンコード済み文字列用であることを説明する。
 4. `safe.html.fragment` が可変長引数を受け付けることを明示する。
-5. `render()` が `views/` 配下のパスのみを許可すること、および `realpath` が利用できない環境ではシンボリックリンクによる制限回避の可能性があることを注記する。
+5. `render()` が `views/` 配下のパスのみを許可すること。`realpath` が利用できない環境では fail-closed として 500 を返すこと。る制限回避の可能性があることを注記する。
 6. `?=` のデフォルトエラーマッピング（型別対応表）を記載する。
 7. 以下の使用例を追加する。
    - `hawk.app.on`（3 引数形式）
@@ -822,6 +837,8 @@ make ci-full
 - `safe.html.fragment` の動作がランタイム、DSL チェッカー、README で一致していること。
 - `libs/net` が不完全な POST ボディをエンキューしないこと。
 - `libs/net` が `Transfer-Encoding: chunked` に対して `501` を返し接続を閉じること。
+- `libs/net` が無効・重複・負数の `Content-Length` に対して `400` を返すこと。
+- `libs/net` が `MAX_BODY_SIZE` 超の `Content-Length` に対して `413` を返すこと。
 - `ctx.req.form("x")` が `x=` に対して `ok("")` を返すこと。
 - `ctx.res.json(data)` が AWK 配列を JSON エンコードすること。
 - `when` アーム内のパイプ右辺の dot 記法が正しくデシュガーされること。
@@ -832,6 +849,9 @@ make ci-full
 - `?=` が `ParseError` を 400 に、`AuthError` を 401 に、未知エラーを 500 にマッピングすること。
 - `classify: validator` 関数が `Untrusted<T>` から `T` にアンラップすること。
 - 複合型再代入が `type::coerce` を使わないこと。
+- `ctx.res.json_raw(str)` が文字列をそのままボディにセットすること。
+- TSV ロックが死亡 PID のスタールロックを自動解除すること。
+- `render()` が `realpath` 利用不可の環境で fail-closed（500）を返すこと。
 - プラグイン探索が `manifest.awk` 欠落または関数未定義のディレクトリをスキップすること。
 - README が実際の動作と一致していること。
 
