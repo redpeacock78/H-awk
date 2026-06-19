@@ -6,8 +6,50 @@
 # When a match is found, output pre-match verbatim, emit dispatch, then skip
 # past the args + ")" in the full remaining line.
 function _ds_dot_transform(line,    segs, n, i) {
+  line = _ds_expand_fragment_v_calls(line)
   n = _ds_split_code_segs(line, segs)
   return _ds_dot_transform_segs(segs, n)
+}
+
+function _ds_expand_fragment_v_calls(line,    pre, segs, n, i, offset, found, pos, call_len, \
+    args, argc, split_args, name, indent, j, before, after, replacement) {
+  pre = ""
+  while (1) {
+    delete segs
+    n = _ds_split_code_segs(line, segs)
+    offset = 0
+    found = 0
+    for (i = 1; i <= n; i++) {
+      if (segs[i, "safe"] && match(segs[i, "text"], /safe\.html\.fragment\(/)) {
+        pos = offset + RSTART
+        call_len = RLENGTH
+        found = 1
+        break
+      }
+      offset += length(segs[i, "text"])
+    }
+    if (!found) return pre line
+
+    args = _ds_extract_args(substr(line, pos + call_len))
+    argc = _ds_count_args(args)
+    if (argc < 4) return pre line
+
+    _ds_typecheck_call("safe.html.fragment", args)
+    delete split_args
+    _ds_split_args(args, split_args)
+    name = "_ds_frag_args_" (++_ds_frag_n)
+
+    match(line, /^[[:space:]]*/)
+    indent = substr(line, 1, RLENGTH)
+    pre = pre indent "delete " name "\n"
+    for (j = 1; j <= argc; j++)
+      pre = pre indent name "[" j "] = " _ds_dot_transform(split_args[j]) "\n"
+
+    before = substr(line, 1, pos - 1)
+    after = substr(line, pos + call_len + length(args) + 1)
+    replacement = "safe::fragment_v(" name ", " argc ")"
+    line = before replacement after
+  }
 }
 
 # Process all segments together so we can skip consumed string segments.
@@ -63,6 +105,9 @@ function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
     path = path (j > 2 ? "." : "") parts[j]
 
   _ds_typecheck_call(ns "." path, args)
+
+  if (ns == "ctx" && path == "res.redirect" && _ds_count_args(args) == 1)
+    args = args ", 302"
 
   # option constructors emit direct function calls, not ns::dispatch
   if (ns == "option" && path == "some") {

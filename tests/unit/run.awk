@@ -54,6 +54,9 @@ BEGIN {
   test_response_header_crlf_strip()
   test_response_redirect_crlf_strip()
 
+  test_safe_fragment_v_empty()
+  test_safe_fragment_v_concatenates()
+
   test_router_register_and_match()
   test_router_404()
   test_router_405()
@@ -137,6 +140,7 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_static.awk"
 @include "tests/unit/test_request.awk"
 @include "tests/unit/test_response.awk"
+@include "tests/unit/test_safe.awk"
 @include "tests/unit/test_router.awk"
 @include "tests/unit/test_plugin.awk"
 @include "tests/unit/test_libs.awk"

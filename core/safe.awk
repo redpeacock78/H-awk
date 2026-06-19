@@ -46,6 +46,12 @@ function html_fragment(a, b, c) {
     return a b c
 }
 
+function fragment_v(arr, n,    i, out) {
+    out = ""
+    for (i = 1; i <= n; i++) out = out arr[i]
+    return out
+}
+
 function dispatch(path, a1, a2, a3) {
     return hawk_dispatch::call("safe", _SAFE_ROUTES, _SAFE_ARITY, path, a1, a2, a3)
 }

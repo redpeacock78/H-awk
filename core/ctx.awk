@@ -47,7 +47,7 @@ BEGIN {
     _CTX_ROUTES["res.html"]     = "ctx::html";       _CTX_ARITY["res.html"]     = 1
     _CTX_ROUTES["res.text"]     = "ctx::text";       _CTX_ARITY["res.text"]     = 1
     _CTX_ROUTES["res.json"]     = "ctx::json";       _CTX_ARITY["res.json"]     = 1
-    _CTX_ROUTES["res.render"]   = "ctx::render";     _CTX_ARITY["res.render"]   = 2
+    _CTX_ROUTES["res.render"]   = "ctx::render";     _CTX_ARITY["res.render"]   = 1
     _CTX_ROUTES["res.status"]   = "ctx::status";     _CTX_ARITY["res.status"]   = 1
     _CTX_ROUTES["res.header"]   = "ctx::set_header"; _CTX_ARITY["res.header"]   = 2
     _CTX_ROUTES["res.redirect"] = "ctx::redirect";   _CTX_ARITY["res.redirect"] = 2
