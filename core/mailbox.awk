@@ -2,12 +2,18 @@
 # core/mailbox.awk -- FIFO transport
 @namespace "mailbox"
 
+function _fs_key(s,    k) {
+  k = s
+  gsub(/[^[:alnum:]_.-]/, "_", k)
+  return k
+}
+
 function path(pid) {
-  return ENVIRON["HAWK_RUN_DIR"] "/mailbox/" pid ".fifo"
+  return ENVIRON["HAWK_RUN_DIR"] "/mailbox/" _fs_key(pid) ".fifo"
 }
 
 function _reply_path(ref_val) {
-  return ENVIRON["HAWK_RUN_DIR"] "/reply/" ref_val ".fifo"
+  return ENVIRON["HAWK_RUN_DIR"] "/reply/" _fs_key(ref_val) ".fifo"
 }
 
 function ensure(pid,    p) {
@@ -24,21 +30,18 @@ function send(pid, encoded,    p, cmd) {
   return 1
 }
 
-function call(pid, encoded, timeout_ms,    reply_fifo, ref_val, out, line, sec, cmd) {
-  delete out
-  if (!message::decode(encoded, out)) return ""
-  ref_val    = out["ref"]
+function wait_reply(ref_val, timeout_ms,    reply_fifo, line, sec, cmd) {
   reply_fifo = _reply_path(ref_val)
-  system("mkfifo \"" reply_fifo "\"")
+  system("mkfifo " shell_quote(reply_fifo))
   sec = int((timeout_ms + 999) / 1000)
   cmd = "bash -c 'read -t " sec " line < " shell_quote(reply_fifo) " && printf \"%s\\n\" \"$line\"'"
   if ((cmd | getline line) > 0) {
     close(cmd)
-    system("rm -f \"" reply_fifo "\"")
+    system("rm -f " shell_quote(reply_fifo))
     return line
   }
   close(cmd)
-  system("rm -f \"" reply_fifo "\"")
+  system("rm -f " shell_quote(reply_fifo))
   return ""
 }
 

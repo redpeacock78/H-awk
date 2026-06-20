@@ -29,8 +29,9 @@ function call(name, selector, args_str, timeout_ms,    oid, reply_to, ref_val, e
   ref_val  = message::ref()
   reply_to = mailbox::_reply_path(ref_val)
   enc      = message::make_call(oid, ENVIRON["HAWK_PROC_ID"], selector, args_str, reply_to, timeout_ms)
+  system("mkfifo " mailbox::shell_quote(reply_to))
   mailbox::send(oid, enc)
-  line = mailbox::call(oid, enc, timeout_ms)
+  line = mailbox::wait_reply(ref_val, timeout_ms)
   if (line == "") return ""
   delete out
   if (!message::decode(line, out)) return ""
