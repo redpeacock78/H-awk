@@ -124,6 +124,10 @@ BEGIN {
   test_cache_backend_memory()
   test_cache_backend_off()
   test_cache_stats()
+  test_cache_file_set_get()
+  test_cache_file_tab_newline()
+  test_cache_file_ttl_expired()
+  test_cache_file_escape_unescape()
 
   test_adt_result_ok_roundtrip()
   test_adt_result_ok_xif_roundtrip()

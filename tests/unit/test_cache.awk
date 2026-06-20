@@ -76,3 +76,67 @@ function test_cache_stats(    s) {
   assert_true(index(s, "miss=1") > 0, "cache stats: miss=1")
   assert_true(index(s, "set=1") > 0,  "cache stats: set=1")
 }
+
+function test_cache_file_set_get(    saved_be, saved_dir, dir) {
+  if (ENVIRON["CI"] == "1") { TESTS_SKIPPED++; return }
+  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
+  saved_dir = ENVIRON["HAWK_RUN_DIR"]
+  dir = "/tmp/hawk_cache_test_" PROCINFO["pid"]
+  system("mkdir -p " dir "/cache")
+  ENVIRON["HAWK_CACHE_BACKEND"] = "file"
+  ENVIRON["HAWK_RUN_DIR"] = dir
+  cache::_reset()
+  cache::set("fk1", "world", 60)
+  assert_eq(cache::get("fk1"), "world", "cache/file: set/get")
+  assert_eq(cache::found(), 1, "cache/file: found=1")
+  system("rm -rf " dir)
+  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  ENVIRON["HAWK_RUN_DIR"] = saved_dir
+}
+
+function test_cache_file_tab_newline(    saved_be, saved_dir, dir) {
+  if (ENVIRON["CI"] == "1") { TESTS_SKIPPED++; return }
+  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
+  saved_dir = ENVIRON["HAWK_RUN_DIR"]
+  dir = "/tmp/hawk_cache_file2_" PROCINFO["pid"]
+  system("mkdir -p " dir "/cache")
+  ENVIRON["HAWK_CACHE_BACKEND"] = "file"
+  ENVIRON["HAWK_RUN_DIR"] = dir
+  cache::_reset()
+  cache::set("tab_key", "line1\nline2\ttab", 60)
+  assert_eq(cache::get("tab_key"), "line1\nline2\ttab", "cache/file: tab/newline round-trip")
+  system("rm -rf " dir)
+  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  ENVIRON["HAWK_RUN_DIR"] = saved_dir
+}
+
+function test_cache_file_ttl_expired(    saved_be, saved_dir, dir) {
+  if (ENVIRON["CI"] == "1") { TESTS_SKIPPED++; return }
+  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
+  saved_dir = ENVIRON["HAWK_RUN_DIR"]
+  dir = "/tmp/hawk_cache_file3_" PROCINFO["pid"]
+  system("mkdir -p " dir "/cache")
+  ENVIRON["HAWK_CACHE_BACKEND"] = "file"
+  ENVIRON["HAWK_RUN_DIR"] = dir
+  cache::_reset()
+  cache::set("exp_k", "v", 1)
+  # Force expire by rewriting tsv with past timestamp
+  cmd = "echo '0\t" (awk::systime() - 10) "\texp_k\tv' > " dir "/cache/cache.tsv"
+  system(cmd)
+  cache::_reset()
+  ENVIRON["HAWK_CACHE_BACKEND"] = "file"
+  ENVIRON["HAWK_RUN_DIR"] = dir
+  assert_eq(cache::get("exp_k"), "", "cache/file: expired TTL is miss")
+  system("rm -rf " dir)
+  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  ENVIRON["HAWK_RUN_DIR"] = saved_dir
+}
+
+function test_cache_file_escape_unescape() {
+  assert_eq(cache::_escape("a\tb"), "a\\tb",   "cache: escape tab")
+  assert_eq(cache::_escape("a\nb"), "a\\nb",   "cache: escape newline")
+  assert_eq(cache::_escape("a\\b"), "a\\\\b",  "cache: escape backslash")
+  assert_eq(cache::_unescape("a\\tb"),  "a\tb",  "cache: unescape tab")
+  assert_eq(cache::_unescape("a\\nb"),  "a\nb",  "cache: unescape newline")
+  assert_eq(cache::_unescape("a\\\\b"), "a\\b",  "cache: unescape backslash")
+}
