@@ -31,5 +31,6 @@
 @include "core/safe.awk"
 @include "core/router.awk"
 @include "core/ctx.awk"
+@include "core/cache.awk"
 @include "core/plugin.awk"
 @include "core/http.awk"
