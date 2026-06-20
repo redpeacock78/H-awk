@@ -3,6 +3,7 @@
 # hawk.awk (core/*.awk を @include) と一緒に gawk に渡す。
 
 BEGIN {
+  ENVIRON["HAWK_NO_SERVE"] = 1
   TESTS_PASSED = 0
   TESTS_FAILED = 0
   TESTS_SKIPPED = 0
@@ -114,6 +115,16 @@ BEGIN {
   test_libs_crypto_argon2id_verify()
   test_libs_crypto_sha256_no_lib()
 
+  test_cache_memory_get_set()
+  test_cache_memory_miss()
+  test_cache_memory_del()
+  test_cache_memory_has()
+  test_cache_memory_ttl_zero()
+  test_cache_off()
+  test_cache_backend_memory()
+  test_cache_backend_off()
+  test_cache_stats()
+
   test_adt_result_ok_roundtrip()
   test_adt_result_ok_xif_roundtrip()
   test_adt_result_ng_roundtrip()
@@ -153,3 +164,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_hawk.awk"
 @include "tests/unit/test_env.awk"
 @include "tests/unit/test_adt.awk"
+@include "tests/unit/test_cache.awk"

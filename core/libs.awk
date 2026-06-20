@@ -17,4 +17,5 @@ BEGIN {
   if (HAWK_LIBS_crypto)    LIBS_LOADED["crypto"]    = 1
   if (HAWK_LIBS_gzip)      LIBS_LOADED["gzip"]      = 1
   if (HAWK_LIBS_url)       LIBS_LOADED["url"]       = 1
+  if (HAWK_LIBS_cache)     LIBS_LOADED["cache"]     = 1
 }
