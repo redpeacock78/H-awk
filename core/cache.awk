@@ -57,7 +57,7 @@ function stats() {
   return "backend=" _BACKEND " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
 }
 
-function _detect_backend(    b) {
+function _detect_backend(    b, rd) {
   if (_BACKEND != "") return _BACKEND
   b = ENVIRON["HAWK_CACHE_BACKEND"]
   if (b == "") b = "auto"
@@ -81,7 +81,6 @@ function _detect_backend(    b) {
   }
 
   if (b == "auto") {
-    # ponytail: file/zig detection added in Task 2/7; auto=memory until then
     _BACKEND = "memory"; return _BACKEND
   }
 
@@ -114,10 +113,147 @@ function _del_memory(key) {
   delete _mem_expires[key]
 }
 
-# stubs — Task 2 で実装
-function _get_file(key)                 { _STATS_MISS++; return "" }
-function _set_file(key, value, ttl_sec) { }
-function _del_file(key)                 { }
+# escape / unescape for file backend
+function _escape(v,    s) {
+  s = v
+  gsub(/\\/, "\\\\", s)
+  gsub(/\t/, "\\t",  s)
+  gsub(/\n/, "\\n",  s)
+  gsub(/\r/, "\\r",  s)
+  return s
+}
+
+function _unescape(v,    out, i, n, c, nc) {
+  out = ""; n = length(v)
+  for (i = 1; i <= n; i++) {
+    c = substr(v, i, 1)
+    if (c == "\\" && i < n) {
+      nc = substr(v, i + 1, 1); i++
+      if      (nc == "\\") out = out "\\"
+      else if (nc == "t")  out = out "\t"
+      else if (nc == "n")  out = out "\n"
+      else if (nc == "r")  out = out "\r"
+      else                 out = out nc
+    } else {
+      out = out c
+    }
+  }
+  return out
+}
+
+# djb2-like hash for file backend (collision-safe: full key compare follows)
+function _key_hash(key,    h, i) {
+  h = 5381
+  for (i = 1; i <= length(key); i++)
+    h = (h * 33 + (index(" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~", substr(key, i, 1)) + 32)) % 1000003
+  return sprintf("%d", h)
+}
+
+function _file_path(    rd) {
+  rd = ENVIRON["HAWK_RUN_DIR"]
+  return rd "/cache/cache.tsv"
+}
+
+function _lock_path(    rd) {
+  rd = ENVIRON["HAWK_RUN_DIR"]
+  return rd "/cache/cache.lock.d"
+}
+
+function _lock_acquire(lockdir,    owner_file, pid, i) {
+  owner_file = lockdir "/owner_pid"
+  for (i = 0; i < 20; i++) {
+    if (system("mkdir \"" lockdir "\" 2>/dev/null") == 0) {
+      print PROCINFO["pid"] > owner_file
+      close(owner_file)
+      return 1
+    }
+    if ((getline pid < owner_file) > 0) {
+      close(owner_file)
+      if (system("kill -0 " pid " 2>/dev/null") != 0) {
+        system("rm -rf \"" lockdir "\"")
+        continue
+      }
+    } else { close(owner_file) }
+    system("sleep 0.05")
+  }
+  return 0
+}
+
+function _lock_release(lockdir) {
+  system("rm -rf \"" lockdir "\"")
+}
+
+function _get_file(key,    fpath, line, parts, n, kh, now, xp) {
+  _FOUND = 0
+  fpath = _file_path()
+  kh    = _key_hash(key)
+  now   = awk::systime()
+  while ((getline line < fpath) > 0) {
+    n = split(line, parts, "\t")
+    if (n < 4) continue
+    if (parts[1] != kh) continue
+    if (_unescape(parts[3]) != key) continue
+    xp = parts[2] + 0
+    if (xp > 0 && now >= xp) continue
+    close(fpath)
+    _FOUND = 1; _STATS_HIT++
+    return _unescape(parts[4])
+  }
+  close(fpath)
+  _STATS_MISS++
+  return ""
+}
+
+function _set_file(key, value, ttl_sec,    fpath, lockdir, tmp, kh, ek, ev, xp, now, line, parts, n, out) {
+  fpath   = _file_path()
+  lockdir = _lock_path()
+  tmp     = fpath "." PROCINFO["pid"] ".tmp"
+  kh      = _key_hash(key)
+  ek      = _escape(key)
+  ev      = _escape(value)
+  xp      = (ttl_sec > 0) ? awk::systime() + ttl_sec : 0
+  now     = awk::systime()
+
+  if (!_lock_acquire(lockdir)) { _LAST_ERROR = "CacheLockTimeout"; return }
+
+  out = ""
+  while ((getline line < fpath) > 0) {
+    n = split(line, parts, "\t")
+    if (n < 4) continue
+    if (parts[1] == kh && _unescape(parts[3]) == key) continue
+    if ((parts[2] + 0) > 0 && now >= (parts[2] + 0)) continue
+    out = out line "\n"
+  }
+  close(fpath)
+  out = out kh "\t" xp "\t" ek "\t" ev "\n"
+  printf "%s", out > tmp; close(tmp)
+  system("mv \"" tmp "\" \"" fpath "\"")
+  _lock_release(lockdir)
+  _STATS_SET++
+}
+
+function _del_file(key,    fpath, lockdir, tmp, kh, now, line, parts, n, out) {
+  fpath   = _file_path()
+  lockdir = _lock_path()
+  tmp     = fpath "." PROCINFO["pid"] ".tmp"
+  kh      = _key_hash(key)
+  now     = awk::systime()
+
+  if (!_lock_acquire(lockdir)) { _LAST_ERROR = "CacheLockTimeout"; return }
+
+  out = ""
+  while ((getline line < fpath) > 0) {
+    n = split(line, parts, "\t")
+    if (n < 4) continue
+    if (parts[1] == kh && _unescape(parts[3]) == key) continue
+    if ((parts[2] + 0) > 0 && now >= (parts[2] + 0)) continue
+    out = out line "\n"
+  }
+  close(fpath)
+  printf "%s", out > tmp; close(tmp)
+  system("mv \"" tmp "\" \"" fpath "\"")
+  _lock_release(lockdir)
+}
 
 # stubs — Task 7 で実装
 function _get_zig(key)                  { _STATS_MISS++; return "" }
