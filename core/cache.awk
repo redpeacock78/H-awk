@@ -121,10 +121,19 @@ function _del_memory(key) {
   delete _mem_expires[key]
 }
 
-# stubs — Task 7 で hawk_cache_get() 等に置き換える
-function _get_zig(key) { _STATS_MISS++; return "" }
-function _set_zig(key, value, ttl_sec) { }
-function _del_zig(key) { }
+function _get_zig(key,    v) {
+  v = hawk_cache_get(key)
+  if (v != "") { _FOUND = 1; _STATS_HIT++; return v }
+  _STATS_MISS++
+  return ""
+}
+function _set_zig(key, value, ttl_sec) {
+  hawk_cache_set(key, value, ttl_sec * 1000)
+  _STATS_SET++
+}
+function _del_zig(key) {
+  hawk_cache_del(key)
+}
 
 # escape / unescape for file backend
 function _escape(v,    s) {
