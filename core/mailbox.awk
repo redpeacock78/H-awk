@@ -34,7 +34,7 @@ function wait_reply(ref_val, timeout_ms,    reply_fifo, line, sec, cmd) {
   reply_fifo = _reply_path(ref_val)
   system("mkfifo " shell_quote(reply_fifo))
   sec = int((timeout_ms + 999) / 1000)
-  cmd = "bash -c 'read -t " sec " line < " shell_quote(reply_fifo) " && printf \"%s\\n\" \"$line\"'"
+  cmd = "HAWK_REPLY_FIFO=" shell_quote(reply_fifo) " bash -c 'read -t " sec " line < \"$HAWK_REPLY_FIFO\" && printf \"%s\\n\" \"$line\"'"
   if ((cmd | getline line) > 0) {
     close(cmd)
     system("rm -f " shell_quote(reply_fifo))
