@@ -155,11 +155,17 @@ Supervisor を使わない場合はプロセスローカルの AWK 配列にフ�
 
 - **更新はロック付き atomic write のみ**: tmp file に書き込んでから `mv` で置換する。
   ロックには file backend と同様の `mkdir` ロックを使う（`$HAWK_RUN_DIR/registry.lock.d/`）。
-- **エントリには所有者 PID と起動時刻を記録する**:
-  `name<TAB>object_id<TAB>owner_pid<TAB>started_at` の形式で保存する。
-- **`resolve` は生存確認を行う**: `kill -0 $owner_pid` が失敗した場合、エントリを stale として miss 扱いにする。
-- **Supervisor はクラッシュした actor/worker の名前を unregister する**: restart 前に古いエントリを削除し、
-  新しい PID で再登録する。これにより stale エントリが蓄積しない。
+- **エントリには所有者 PID・起動時刻・登録トークンを記録する**:
+  `name<TAB>object_id<TAB>owner_pid<TAB>started_at<TAB>reg_token` の形式で保存する。
+  `reg_token` は各プロセスの起動時に生成するランダム文字列（例: `$RANDOM$RANDOM`）。
+  Supervisor は `$HAWK_RUN_DIR/pids/$pid.token` にも同じトークンを書き込む。
+- **`resolve` はトークンで同一性を検証する**: `kill -0 $owner_pid` の成功だけではなく、
+  `$HAWK_RUN_DIR/pids/$pid.token` の内容が registry の `reg_token` と一致するかを確認する。
+  OS による PID 再利用後は元のトークンファイルが Supervisor によって削除されているため、
+  一致しなくなり stale エントリとして miss 扱いになる。
+- **Supervisor はクラッシュした actor/worker の名前を unregister する**: restart 前に
+  `$HAWK_RUN_DIR/pids/$old_pid.token` を削除し、古いエントリを registry から除去する。
+  新しい PID と新しいトークンで再登録する。これにより stale エントリが蓄積しない。
 - **registry が破損した場合の挙動**: resolve が失敗したとき、呼び出し元は `UnknownProcess` エラーを受け取る。
   Supervisor が存在しないスタンドアロン実行では AWK 配列のみを使い、`registry.tsv` は作成しない。
 
@@ -293,10 +299,11 @@ key_hash<TAB>expires_at<TAB>escaped_key<TAB>escaped_value
 
 ロック方針: `mkdir "$lockdir"` 成功でロック取得、`rmdir "$lockdir"` で解放。
 
-ステールロック対応（Backlog）: ロック取得を一定時間内にリトライし、タイムアウト時は `CacheLockTimeout`
-エラーを返す。将来的にはロックディレクトリ内に所有者 PID と取得時刻を記録し、PID が死んでいれば
-`rmdir` してロックを奪取できるようにする。初期実装ではリトライ上限（例: 50ms × 20回）を設けることで
-無限ブロックを防ぐ。
+ステールロック対応（初期実装で必須）: ロック取得をリトライ上限付きで行う（例: 50ms × 20回 = 最大 1秒）。
+タイムアウト時は `CacheLockTimeout` エラーを返す。
+ロックディレクトリ内に所有者 PID を記録し（`$lockdir/owner_pid`）、再試行時に `kill -0 $owner_pid`
+が失敗していればロックを奪取して `rmdir` する。この動作は registry ロック（`$HAWK_RUN_DIR/registry.lock.d/`）
+にも同様に適用する。
 
 ### Zig cache backend
 
