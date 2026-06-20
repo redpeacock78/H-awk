@@ -73,7 +73,9 @@ BEGIN {
 function list_todos() {
   let rows = []
   let n: Int = read_tsv("data/todos.tsv", rows)
-  return ctx.res.json(sprintf("{\"count\":%d}", n))
+  let payload = []
+  payload["count"] = n
+  return ctx.res.json(payload)
 }
 
 function add_todo() {
@@ -106,8 +108,8 @@ function delete_todo() -> Response {
 }
 ```
 
-> **Note:** TSV ヘルパーは `mkdir` ベースのロックと一意 tmp パスを使用しており、マルチワーカーモード下でも安全に動作する。
-> ただし、高スループット本番環境では libSQL・SQLite・PostgreSQL などの外部ストアを推奨する。
+> **Note:** TSV helpers use `mkdir`-based locks and unique tmp paths containing `PROCINFO["pid"]`, `systime()`, and `rand()`, so `append_tsv`, `delete_tsv`, and `update_tsv` are safe under multi-worker mode.
+> For high-throughput production use, prefer an external store such as libSQL, SQLite, or PostgreSQL.
 
 ## DSL Preprocessing
 
@@ -271,10 +273,10 @@ Four sanitizers in the `safe.*` namespace produce these brand types:
 | `safe.html.escape(s)` | `Str\|Untrusted<Str>` | `HtmlEscapedStr` | Escape user-supplied text for HTML body |
 | `safe.attr.escape(s)` | `Str\|Untrusted<Str>` | `HtmlAttrEscapedStr` | Escape user-supplied text for HTML attributes |
 | `safe.html.raw(s)` | `Str` | `HtmlFragment` | Trust assertion — use only for known-safe strings |
-| `safe.html.fragment(parts...)` | `HtmlPart` args | `HtmlFragment` | Compose brand-typed HTML parts into a fragment |
+| `safe.html.fragment(parts...)` | `HtmlPart` args | `HtmlFragment` | Compose brand-typed HTML parts into a fragment; supports variadic calls, including 4+ parts |
 | `safe.str.trust(s)` | `Untrusted<Str>` | `Str` | Explicit trust assertion — strips Untrusted wrapper without transformation |
 
-`HtmlPart` is an alias for `HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr`. Literal string arguments to `safe.html.fragment` are also accepted as trusted static HTML.
+`HtmlPart` is an alias for `HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr`. Literal string arguments to `safe.html.fragment` are also accepted as trusted static HTML. Calls with four or more parts are lowered through the variadic fragment helper.
 
 ```awk
 function render_item(id: Str, title: Str) -> HtmlFragment {
@@ -640,10 +642,10 @@ function find_title(id) {
 
 **`?=` safe unwrap operator**
 
-Unwrap a `Result<T, E>` or `Option<T>` value in one step. On failure the handler returns early with an error status — 500 for `Result` (`ng`) and 404 for `Option` (`none`). Only valid when the RHS type is `Option` or `Result`.
+Unwrap a `Result<T, E>` or `Option<T>` value in one step. On failure the handler returns early with an error status. `Option` `none` returns 404. `Result` `ng` maps error types to HTTP status codes: `ParseError` → 400, `AuthError` → 401, `NotFoundError` → 404, and all other errors → 500. Only valid when the RHS type is `Option` or `Result`.
 
 ```awk
-# DSL — Result<T, E> (returns 500 on ng)
+# DSL — Result<T, E> (returns by error type on ng)
 function create_todo() {
   let body ?= ctx.req.json()
   # body is now the unwrapped Untrusted<Map> value
@@ -653,6 +655,10 @@ function create_todo() {
 function create_todo(    _ds_tc_1, body) {
   _ds_tc_1 = ctx::dispatch("req.json")
   if (!result_ok(_ds_tc_1)) {
+    _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)
+    if (_ds_err_type__ds_tc_1 == "ParseError") return ctx::dispatch("res.status", 400)
+    if (_ds_err_type__ds_tc_1 == "AuthError") return ctx::dispatch("res.status", 401)
+    if (_ds_err_type__ds_tc_1 == "NotFoundError") return ctx::dispatch("res.status", 404)
     return ctx::dispatch("res.status", 500)
   }
   body = result_val(_ds_tc_1)
@@ -730,10 +736,12 @@ function strip(s: Str) -> Str {
 ```
 
 Marks a function's role in the dataflow:
-- `transform` — accepts `Untrusted<T>` input; strips Untrusted wrapper from output
-- `validator` — accepts `Untrusted<T>` input; output is plain `T` (checked, not sanitized)
+- `transform` — accepts `Untrusted<T>` input; propagates `Untrusted` to the output when the input is untrusted
+- `validator` — accepts `Untrusted<T>` input; removes the `Untrusted` wrapper and returns plain `T` (checked, not sanitized)
 - `sanitizer` — accepts `Untrusted<T>` input; produces a brand-safe output (e.g. `HtmlEscapedStr`)
 - `sink` — terminal consumer (no output)
+
+In other words, `classify: validator` turns a validated `Untrusted<T>` result into plain `T`; it does not produce an HTML-safe brand.
 
 `classify:` lines are stripped from gawk output — annotation only.
 
@@ -772,27 +780,28 @@ hawk.app.put(path, handler)
 hawk.app.del(path, handler)
 hawk.app.patch(path, handler)
 hawk.app.head(path, handler)
+hawk.app.on(methods, paths, handler)
 hawk.app.listen(port)
 ```
 
-### `hawk::on(methods, paths, handler)`
+### `hawk.app.on(methods, paths, handler)`
 
 Register routes for multiple methods and/or paths. Pass strings or gawk arrays.
 
 ```awk
 # single method + path
-hawk::on("GET", "/todos", "list_todos")
+hawk.app.on("GET", "/todos", "list_todos")
 
 # multiple methods (array)
 delete ms; ms[1] = "GET"; ms[2] = "POST"
-hawk::on(ms, "/todos", "list_todos")
+hawk.app.on(ms, "/todos", "list_todos")
 
 # multiple paths (array)
 delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
-hawk::on("GET", ps, "list_todos")
+hawk.app.on("GET", ps, "list_todos")
 
 # custom method
-hawk::on("PURGE", "/cache", "purge_cache")
+hawk.app.on("PURGE", "/cache", "purge_cache")
 ```
 
 ### `hawk::all(paths, handler)`
@@ -808,7 +817,7 @@ hawk::all(ps, "handler")
 
 ### Context API reference
 
-Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` or `?=` to unwrap.
+Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` or `?=` to unwrap. Empty values are present values and return `ok("")`; missing keys return `ng(ParseError, "missing ...")`.
 
 | DSL | Desugared | Return type |
 |---|---|---|
@@ -819,12 +828,21 @@ Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` 
 | `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Map>, ParseError>` |
 | `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | `Response` |
+| `ctx.res.json_raw(str)` | `ctx::dispatch("res.json_raw", str)` | `Response` |
 | `ctx.res.text(data)` | `ctx::dispatch("res.text", data)` | `Response` |
 | `ctx.res.html(data)` | `ctx::dispatch("res.html", data)` | `Response` (`HtmlEscapedStr\|HtmlFragment` required) |
 | `ctx.res.render(path)` | `ctx::dispatch("res.render", path)` | `Response` |
 | `ctx.res.status(code)` | `ctx::dispatch("res.status", code)` | `Response` |
 | `ctx.res.header(name, val)` | `ctx::dispatch("res.header", name, val)` | `Response` |
-| `ctx.res.redirect(url)` | `ctx::dispatch("res.redirect", url)` | `Response` |
+| `ctx.res.redirect(url)` | `ctx::dispatch("res.redirect", url, 302)` | `Response` |
+| `ctx.res.redirect(url, code)` | `ctx::dispatch("res.redirect", url, code)` | `Response` |
+
+`ctx.res.json(data)` JSON-encodes an AWK array or scalar value and sets the response body with `Content-Type: application/json; charset=utf-8`. Use `ctx.res.json_raw(str)` only when `str` is already encoded JSON and should be sent as-is.
+
+> **Breaking change:** `ctx.res.json(data)` now JSON-encodes an AWK array or value and sets it on the response.
+> For the previous behavior, where a pre-encoded JSON string was passed through unchanged, use `ctx.res.json_raw(str)`.
+
+`ctx.res.render(path)` reads templates through `HAWK_TEMPLATE_ROOT` when that environment variable is set. In that mode, absolute paths, `..` traversal, unsafe path characters, and resolved paths outside the template root are rejected. If `HAWK_TEMPLATE_ROOT` is unset, the path is used as provided.
 
 ### Router files
 
