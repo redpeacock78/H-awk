@@ -40,7 +40,11 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-PLUGIN_FILES="$("$LIBS" plugins)"
+mapfile -t _plugin_paths < <("$LIBS" plugins)
+_plugin_args=()
+for p in "${_plugin_paths[@]}"; do
+  [[ -n "$p" ]] && _plugin_args+=(-f "$p")
+done
 eval "$("$LIBS" libs)"
 
 if [[ "$HAS_NET" -eq 1 ]]; then
@@ -83,7 +87,7 @@ APP_AWK="$("$LIBS" desugar "$APP")"
 
 for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do
   # shellcheck disable=SC2086
-  gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP_AWK" &
+  gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk "${_plugin_args[@]}" -f "$APP_AWK" &
   WORKER_PIDS+=($!)
 done
 
@@ -105,7 +109,7 @@ while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
         echo "[hawk] worker $pid exited $status, restart in 1s" >&2
         sleep 1
         # shellcheck disable=SC2086
-        gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk $PLUGIN_FILES -f "$APP_AWK" &
+        gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk "${_plugin_args[@]}" -f "$APP_AWK" &
         new_pids+=($!)
       fi
     fi

@@ -7,17 +7,15 @@ shift
 
 case "$subcmd" in
   plugins)
-    result=""
     for d in plugins/*/; do
       [[ -d "$d" ]] || continue
       [[ -f "${d}.disabled" ]] && continue
       name=$(basename "$d")
       manifest="${d}manifest.awk"
       impl="${d}${name}.awk"
-      [[ -f "$manifest" ]] && result="$result -f $manifest"
-      [[ -f "$impl" ]]     && result="$result -f $impl"
+      [[ -f "$manifest" ]] && printf '%s\n' "$manifest"
+      [[ -f "$impl" ]]     && printf '%s\n' "$impl"
     done
-    printf '%s\n' "$result"
     ;;
   libs)
     libs_args=""

@@ -9,6 +9,22 @@ function test_response_header() {
   delete res
   header(res, "X-Foo", "bar")
   assert_eq(res["header:x-foo"], "bar", "res: header lower-cased key")
+
+  delete res
+  header(res, "X-Trace.ID_123", "ok")
+  assert_eq(res["header:x-trace.id_123"], "ok", "res: valid header name accepted")
+
+  delete res
+  header(res, "X-Bad\rName", "bad")
+  assert_true(!("header:x-bad\rname" in res), "res: header name with CR rejected")
+
+  delete res
+  header(res, "X-Bad\nName", "bad")
+  assert_true(!("header:x-bad\nname" in res), "res: header name with LF rejected")
+
+  delete res
+  header(res, "", "bad")
+  assert_true(!("header:" in res), "res: empty header name rejected")
 }
 
 function test_response_header_append() {
