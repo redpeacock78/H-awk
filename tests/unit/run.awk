@@ -128,6 +128,8 @@ BEGIN {
   test_cache_file_tab_newline()
   test_cache_file_ttl_expired()
   test_cache_file_escape_unescape()
+  test_cache_auto_no_zig_no_dir()
+  test_cache_auto_with_dir()
 
   test_adt_result_ok_roundtrip()
   test_adt_result_ok_xif_roundtrip()
