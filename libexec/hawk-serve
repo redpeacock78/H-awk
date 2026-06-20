@@ -85,6 +85,11 @@ APP_AWK="$("$LIBS" desugar "$APP")"
 # shellcheck disable=SC2064
 [[ -z "${HAWK_DEBUG}" ]] && trap "rm -f '$APP_AWK'" EXIT
 
+# --workers N かつ supervisor 利用可能な場合は hawk-supervise に委譲する
+if [[ "$EFFECTIVE_WORKERS" -gt 1 && "$HAS_NET" -eq 1 ]]; then
+  exec "$HAWK_LIBEXEC/hawk-supervise" "$APP_AWK"
+fi
+
 for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do
   # shellcheck disable=SC2086
   gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk "${_plugin_args[@]}" -f "$APP_AWK" &
