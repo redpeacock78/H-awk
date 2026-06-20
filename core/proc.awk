@@ -22,11 +22,19 @@ function cast(name_or_pid, message_str,    oid) {
   mailbox::send(oid, message_str)
 }
 
-function call(name_or_pid, message_str, timeout_ms,    oid, out) {
+function call(name_or_pid, message_str, timeout_ms,    oid, out, ref_val, reply_fifo) {
   oid = objectspace::resolve(name_or_pid)
   if (oid == "") oid = name_or_pid
+  delete out
   if (!message::decode(message_str, out)) return ""
-  return mailbox::wait_reply(out["ref"], timeout_ms)
+  ref_val    = out["ref"]
+  reply_fifo = mailbox::_reply_path(ref_val)
+  system("mkfifo " mailbox::shell_quote(reply_fifo))
+  if (!mailbox::send(oid, message_str)) {
+    system("rm -f " mailbox::shell_quote(reply_fifo))
+    return ""
+  }
+  return mailbox::wait_reply(ref_val, timeout_ms)
 }
 
 @namespace "awk"
