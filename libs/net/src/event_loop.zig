@@ -198,6 +198,31 @@ pub const EventLoop = struct {
         return false;
     }
 
+    fn responseHasConnectionClose(data: []const u8) bool {
+        const headers_end = std.mem.indexOf(u8, data, "\r\n\r\n") orelse return false;
+        const headers = data[0..headers_end];
+        var it = std.mem.splitSequence(u8, headers, "\r\n");
+        _ = it.next(); // skip status line
+        while (it.next()) |line| {
+            const colon = std.mem.indexOf(u8, line, ":") orelse continue;
+            const name = std.mem.trim(u8, line[0..colon], " \t");
+            if (std.ascii.eqlIgnoreCase(name, "Connection")) {
+                const val = std.mem.trim(u8, line[colon + 1 ..], " \t");
+                return std.ascii.eqlIgnoreCase(val, "close");
+            }
+        }
+        return false;
+    }
+
+    fn fdIsHalfClosed(fd: std.posix.socket_t) bool {
+        var byte: [1]u8 = undefined;
+        const rc = std.c.recv(fd, &byte, byte.len, std.posix.MSG.PEEK);
+        if (rc == 0) return true;
+        if (rc > 0) return false;
+        const e = std.posix.errno(rc);
+        return e != .AGAIN;
+    }
+
     fn sweepIdleConns(self: *EventLoop) void {
         const now_ms = @divTrunc(monoNanos(), 1_000_000);
         var ids: [256]u64 = undefined;
@@ -397,6 +422,12 @@ pub const EventLoop = struct {
         if (@as(isize, @intCast(r)) <= 0 or e != .SUCCESS) {
             // Connection closed or error
             self.pool.mu.lock();
+            if (self.pool.conns.getPtr(conn_id)) |conn| {
+                if (conn.state == .ready) {
+                    self.pool.mu.unlock();
+                    return;
+                }
+            }
             if (self.pool.conns.fetchRemove(conn_id)) |kv| {
                 var conn = kv.value;
                 conn.read_buf.deinit(self.alloc);
@@ -471,6 +502,7 @@ pub const EventLoop = struct {
                         self.pool.mu.unlock();
                         return;
                     }
+                    conn_ptr.?.state = .ready;
                     if (conn_ptr.?.read_buf.items.len == 0) break :drain;
                 },
                 .wait_header => break :drain,
@@ -530,10 +562,12 @@ pub const EventLoop = struct {
                 written += @intCast(rc);
             }
 
-            if (responseIsKeepAlive(resp.data)) {
+            const should_close = responseHasConnectionClose(resp.data) or fdIsHalfClosed(fd) or !responseIsKeepAlive(resp.data);
+            if (!should_close) {
                 // Keep connection open; update idle timestamp
                 self.pool.mu.lock();
                 if (self.pool.conns.getPtr(resp.conn_id)) |conn| {
+                    conn.state = .reading;
                     conn.keep_alive = true;
                     conn.last_used = monoNanos();
                 }
