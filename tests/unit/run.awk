@@ -131,6 +131,16 @@ BEGIN {
   test_cache_auto_no_zig_no_dir()
   test_cache_auto_with_dir()
 
+  test_message_make_cast_decode()
+  test_message_make_call_has_reply_to()
+  test_message_ref_unique()
+  test_message_decode_bad_line()
+  test_message_make_error_decode()
+
+  test_objectspace_register_resolve()
+  test_objectspace_resolve_unknown()
+  test_objectspace_unregister()
+
   test_adt_result_ok_roundtrip()
   test_adt_result_ok_xif_roundtrip()
   test_adt_result_ng_roundtrip()
@@ -171,3 +181,5 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_env.awk"
 @include "tests/unit/test_adt.awk"
 @include "tests/unit/test_cache.awk"
+@include "tests/unit/test_message.awk"
+@include "tests/unit/test_objectspace.awk"

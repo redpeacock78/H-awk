@@ -32,5 +32,8 @@
 @include "core/router.awk"
 @include "core/ctx.awk"
 @include "core/cache.awk"
+@include "core/message.awk"
+@include "core/objectspace.awk"
+@include "core/mailbox.awk"
 @include "core/plugin.awk"
 @include "core/http.awk"
