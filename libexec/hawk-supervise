@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# libexec/hawk-supervise -- wait -n ベース supervisor
+
+if [[ "${BASH_VERSINFO[0]}" -lt 4 || ( "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -lt 3 ) ]]; then
+  echo "[hawk-supervise] bash 4.3+ required (got ${BASH_VERSION})" >&2
+  exit 1
+fi
+
+set -e
+
+HAWK_LIBEXEC="${HAWK_LIBEXEC:-$(cd "$(dirname "$0")" && pwd)}"
+HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
+LIBS="${HAWK_LIBEXEC}/hawk-libs"
+
+APP_AWK="${1:?app artifact path required}"
+WORKERS="${HAWK_WORKERS:-4}"
+RESTART_MAX="${HAWK_RESTART_MAX:-5}"
+RESTART_WINDOW="${HAWK_RESTART_WINDOW:-10}"
+
+_setup_run_dir() {
+  if [[ -z "${HAWK_RUN_DIR:-}" ]]; then
+    HAWK_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hawk-run-$(id -u)-XXXXXX")"
+  else
+    if [[ -L "$HAWK_RUN_DIR" ]]; then
+      echo "[hawk-supervise] HAWK_RUN_DIR is a symlink: $HAWK_RUN_DIR" >&2; exit 1
+    fi
+    [[ -d "$HAWK_RUN_DIR" ]] || mkdir -p "$HAWK_RUN_DIR"
+    local owner
+    owner="$(stat -c '%u' "$HAWK_RUN_DIR" 2>/dev/null || stat -f '%u' "$HAWK_RUN_DIR")"
+    if [[ "$owner" != "$(id -u)" ]]; then
+      echo "[hawk-supervise] HAWK_RUN_DIR not owned by current user: $HAWK_RUN_DIR" >&2; exit 1
+    fi
+  fi
+  chmod 0700 "$HAWK_RUN_DIR"
+  export HAWK_RUN_DIR
+  mkdir -p "$HAWK_RUN_DIR"/{pids,mailbox,reply,log,cache}
+  touch "$HAWK_RUN_DIR/registry.tsv"
+}
+
+_setup_run_dir
+
+eval "$("$LIBS" libs)"
+mapfile -t _plugin_paths < <("$LIBS" plugins)
+_plugin_args=()
+for p in "${_plugin_paths[@]}"; do
+  [[ -n "$p" ]] && _plugin_args+=(-f "$p")
+done
+
+declare -A _pid_to_role _pid_to_token _restart_count _restart_window_start
+WORKER_PIDS=()
+
+_reg_token() {
+  echo "$RANDOM$RANDOM$RANDOM"
+}
+
+_worker_start() {
+  local id="$1"
+  local role="web:$id"
+  local token
+  token="$(_reg_token)"
+  HAWK_SUPERVISED=1 \
+  HAWK_RUN_DIR="$HAWK_RUN_DIR" \
+  HAWK_WORKER_ID="$id" \
+  HAWK_PROC_ID="$role" \
+  HAWK_WORKER_TOKEN="$token" \
+    "$HAWK_LIBEXEC/hawk-worker" "$APP_AWK" "${_plugin_args[@]}" &
+  local pid=$!
+  echo "$token" > "$HAWK_RUN_DIR/pids/$pid.token"
+  _pid_to_role[$pid]="$role"
+  _pid_to_token[$pid]="$token"
+  WORKER_PIDS+=("$pid")
+}
+
+_check_intensity() {
+  local role="$1"
+  local now
+  now="$(date +%s)"
+  local start="${_restart_window_start[$role]:-$now}"
+  if (( now - start >= RESTART_WINDOW )); then
+    _restart_window_start[$role]="$now"
+    _restart_count[$role]=0
+  fi
+  local count="${_restart_count[$role]:-0}"
+  if [[ "$count" -ge "$RESTART_MAX" ]]; then
+    echo "[hawk-supervise] restart intensity exceeded for $role, shutting down" >&2
+    return 1
+  fi
+  _restart_window_start[$role]="${_restart_window_start[$role]:-$now}"
+  _restart_count[$role]=$(( count + 1 ))
+  return 0
+}
+
+shutdown() {
+  for pid in "${WORKER_PIDS[@]}"; do
+    rm -f "$HAWK_RUN_DIR/pids/$pid.token"
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  for pid in "${WORKER_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  rm -rf "$HAWK_RUN_DIR"
+  exit 0
+}
+trap shutdown INT TERM
+
+for (( i=0; i<WORKERS; i++ )); do
+  _worker_start "$i"
+done
+
+while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
+  wait -n 2>/dev/null || true
+  new_pids=()
+  for pid in "${WORKER_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      new_pids+=("$pid")
+      continue
+    fi
+    status=0; wait "$pid" 2>/dev/null || status=$?
+    role="${_pid_to_role[$pid]:-unknown}"
+    rm -f "$HAWK_RUN_DIR/pids/$pid.token"
+    unset "_pid_to_role[$pid]" "_pid_to_token[$pid]"
+    if [[ "$status" -ne 0 ]]; then
+      echo "[hawk-supervise] worker $pid ($role) exited $status" >&2
+    else
+      echo "[hawk-supervise] worker $pid ($role) exited cleanly, restarting (permanent)" >&2
+    fi
+    if ! _check_intensity "$role"; then
+      shutdown
+    fi
+    sleep 1
+    local_id="${role#web:}"
+    _worker_start "${local_id:-$pid}"
+    new_pids+=("${WORKER_PIDS[-1]}")
+  done
+  WORKER_PIDS=("${new_pids[@]}")
+done
