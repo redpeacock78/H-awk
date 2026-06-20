@@ -47,7 +47,7 @@ for p in "${_plugin_paths[@]}"; do
   [[ -n "$p" ]] && _plugin_args+=(-f "$p")
 done
 
-declare -A _pid_to_role _pid_to_token _restart_count
+declare -A _pid_to_role _pid_to_token _restart_count _restart_window_start
 WORKER_PIDS=()
 
 _reg_token() {
@@ -74,11 +74,19 @@ _worker_start() {
 
 _check_intensity() {
   local role="$1"
+  local now
+  now="$(date +%s)"
+  local start="${_restart_window_start[$role]:-$now}"
+  if (( now - start >= RESTART_WINDOW )); then
+    _restart_window_start[$role]="$now"
+    _restart_count[$role]=0
+  fi
   local count="${_restart_count[$role]:-0}"
   if [[ "$count" -ge "$RESTART_MAX" ]]; then
     echo "[hawk-supervise] restart intensity exceeded for $role, shutting down" >&2
     return 1
   fi
+  _restart_window_start[$role]="${_restart_window_start[$role]:-$now}"
   _restart_count[$role]=$(( count + 1 ))
   return 0
 }
