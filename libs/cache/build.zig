@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tests.step);
 }
 
-fn findGawkInclude(_: *std.Build) ?[]const u8 {
+fn findGawkInclude(b: *std.Build) ?[]const u8 {
     const candidates = [_][]const u8{
         "/opt/homebrew/include/gawk",
         "/usr/local/include/gawk",
@@ -67,6 +67,8 @@ fn findGawkInclude(_: *std.Build) ?[]const u8 {
         "/usr/include/gawk",
     };
     for (candidates) |p| {
+        const dir = std.Io.Dir.openDirAbsolute(b.graph.io, p, .{}) catch continue;
+        dir.close(b.graph.io);
         return p;
     }
     return null;

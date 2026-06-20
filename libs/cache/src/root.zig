@@ -22,7 +22,14 @@ fn cacheSet(args: ffi.Args) ffi.Result {
     ensureInit();
     const key    = args.getString(0);
     const val    = args.getString(1);
-    const ttl_ms = args.getInt(2);
+    const ttl_arg = args.getDouble(2);
+    if (!std.math.isFinite(ttl_arg)) return .{ .string = "0" };
+    if (ttl_arg < @as(f64, @floatFromInt(std.math.minInt(i64))) or
+        ttl_arg > @as(f64, @floatFromInt(std.math.maxInt(i64))))
+    {
+        return .{ .string = "0" };
+    }
+    const ttl_ms: i64 = @intFromFloat(ttl_arg);
     cache.set(key, val, ttl_ms) catch return .{ .string = "0" };
     return .{ .string = "1" };
 }
@@ -35,7 +42,7 @@ fn cacheDel(args: ffi.Args) ffi.Result {
 
 fn cacheHas(args: ffi.Args) ffi.Result {
     ensureInit();
-    return .{ .string = if (cache.has(args.getString(0))) "1" else "0" };
+    return .{ .int = if (cache.has(args.getString(0))) 1 else 0 };
 }
 
 fn cacheStats(_: ffi.Args) ffi.Result {

@@ -59,7 +59,10 @@ fn writeEntry(e: *Entry, h: u64, key: []const u8, val: []const u8, ttl_ms: i64) 
     e.hash = h;
     e.key_len = @intCast(key.len);
     e.val_len = @intCast(val.len);
-    e.expires_at = if (ttl_ms > 0) nowMs() + ttl_ms else 0;
+    e.expires_at = if (ttl_ms > 0) blk: {
+        const now = nowMs();
+        break :blk now +| ttl_ms;
+    } else 0;
     e.flags = FLAG_LIVE;
     @memcpy(e.key[0..key.len], key);
     @memcpy(e.val[0..val.len], val);

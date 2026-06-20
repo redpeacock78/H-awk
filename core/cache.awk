@@ -122,10 +122,10 @@ function _del_memory(key) {
 }
 
 function _get_zig(key,    v) {
+  if (hawk_cache_has(key) != "1") { _STATS_MISS++; return "" }
   v = hawk_cache_get(key)
-  if (v != "") { _FOUND = 1; _STATS_HIT++; return v }
-  _STATS_MISS++
-  return ""
+  _FOUND = 1; _STATS_HIT++
+  return v
 }
 function _set_zig(key, value, ttl_sec) {
   hawk_cache_set(key, value, ttl_sec * 1000)
