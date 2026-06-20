@@ -15,9 +15,9 @@ function get(key,    b) {
   _FOUND = 0
   b = _detect_backend()
   if (b == "off")    return ""
-  if (b == "memory") return _get_memory(key)
-  if (b == "file")   return _get_file(key)
   if (b == "zig")    return _get_zig(key)
+  if (b == "file")   return _get_file(key)
+  if (b == "memory") return _get_memory(key)
   _STATS_MISS++
   return ""
 }
@@ -25,17 +25,17 @@ function get(key,    b) {
 function set(key, value, ttl_sec,    b) {
   b = _detect_backend()
   if (b == "off")    return
+  if (b == "zig")    { _set_zig(key, value, ttl_sec); return }
+  if (b == "file")   { _set_file(key, value, ttl_sec); return }
   if (b == "memory") { _set_memory(key, value, ttl_sec); return }
-  if (b == "file")   { _set_file(key, value, ttl_sec);   return }
-  if (b == "zig")    { _set_zig(key, value, ttl_sec);    return }
 }
 
 function del(key,    b) {
   b = _detect_backend()
   if (b == "off")    return
+  if (b == "zig")    { _del_zig(key); return }
+  if (b == "file")   { _del_file(key); return }
   if (b == "memory") { _del_memory(key); return }
-  if (b == "file")   { _del_file(key);   return }
-  if (b == "zig")    { _del_zig(key);    return }
 }
 
 function has(key) { get(key); return _FOUND }
@@ -57,7 +57,7 @@ function stats() {
   return "backend=" _BACKEND " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
 }
 
-function _detect_backend(    b, rd) {
+function _detect_backend(    b, rd, test_f, rc) {
   if (_BACKEND != "") return _BACKEND
   b = ENVIRON["HAWK_CACHE_BACKEND"]
   if (b == "") b = "auto"
@@ -74,6 +74,7 @@ function _detect_backend(    b, rd) {
   if (b == "file") {
     rd = ENVIRON["HAWK_RUN_DIR"]
     if (rd == "") {
+      _LAST_ERROR = "HAWK_RUN_DIR not set"
       print "[hawk] cache: HAWK_CACHE_BACKEND=file requires HAWK_RUN_DIR" > "/dev/stderr"
       exit 1
     }
@@ -81,6 +82,13 @@ function _detect_backend(    b, rd) {
   }
 
   if (b == "auto") {
+    if (LIBS_LOADED["cache"]) { _BACKEND = "zig"; return _BACKEND }
+    rd = ENVIRON["HAWK_RUN_DIR"]
+    if (rd != "") {
+      test_f = rd "/cache/.hawk_write_test_" PROCINFO["pid"]
+      rc = system("mkdir -p \"" rd "/cache\" && touch \"" test_f "\" 2>/dev/null && rm -f \"" test_f "\"")
+      if (rc == 0) { _BACKEND = "file"; return _BACKEND }
+    }
     _BACKEND = "memory"; return _BACKEND
   }
 
@@ -112,6 +120,11 @@ function _del_memory(key) {
   delete _mem_value[key]
   delete _mem_expires[key]
 }
+
+# stubs — Task 7 で hawk_cache_get() 等に置き換える
+function _get_zig(key) { _STATS_MISS++; return "" }
+function _set_zig(key, value, ttl_sec) { }
+function _del_zig(key) { }
 
 # escape / unescape for file backend
 function _escape(v,    s) {
@@ -254,11 +267,6 @@ function _del_file(key,    fpath, lockdir, tmp, kh, now, line, parts, n, out) {
   system("mv \"" tmp "\" \"" fpath "\"")
   _lock_release(lockdir)
 }
-
-# stubs — Task 7 で実装
-function _get_zig(key)                  { _STATS_MISS++; return "" }
-function _set_zig(key, value, ttl_sec)  { }
-function _del_zig(key)                  { }
 
 function _reset(    k) {
   _BACKEND    = ""

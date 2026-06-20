@@ -139,3 +139,30 @@ function test_cache_file_escape_unescape() {
   assert_eq(cache::_unescape("a\\nb"),  "a\nb",  "cache: unescape newline")
   assert_eq(cache::_unescape("a\\\\b"), "a\\b",  "cache: unescape backslash")
 }
+
+function test_cache_auto_no_zig_no_dir(    saved_be, saved_dir) {
+  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
+  saved_dir = ENVIRON["HAWK_RUN_DIR"]
+  ENVIRON["HAWK_CACHE_BACKEND"] = "auto"
+  ENVIRON["HAWK_RUN_DIR"] = ""
+  cache::_reset()
+  assert_eq(cache::backend(), "memory", "cache: auto falls back to memory")
+  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  ENVIRON["HAWK_RUN_DIR"] = saved_dir
+}
+
+function test_cache_auto_with_dir(    saved_be, saved_dir, dir, b) {
+  if (ENVIRON["CI"] == "1") { TESTS_SKIPPED++; return }
+  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
+  saved_dir = ENVIRON["HAWK_RUN_DIR"]
+  dir = "/tmp/hawk_cache_auto_" PROCINFO["pid"]
+  system("mkdir -p " dir "/cache")
+  ENVIRON["HAWK_CACHE_BACKEND"] = "auto"
+  ENVIRON["HAWK_RUN_DIR"] = dir
+  cache::_reset()
+  b = cache::backend()
+  assert_true((b == "file" || b == "zig"), "cache: auto selects file or zig when dir available")
+  system("rm -rf " dir)
+  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  ENVIRON["HAWK_RUN_DIR"] = saved_dir
+}
