@@ -57,7 +57,7 @@ function stats() {
   return "backend=" _BACKEND " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
 }
 
-function _detect_backend(    b, rd, test_f, rc) {
+function _detect_backend(    b) {
   if (_BACKEND != "") return _BACKEND
   b = ENVIRON["HAWK_CACHE_BACKEND"]
   if (b == "") b = "auto"
@@ -81,13 +81,7 @@ function _detect_backend(    b, rd, test_f, rc) {
   }
 
   if (b == "auto") {
-    if (LIBS_LOADED["cache"]) { _BACKEND = "zig"; return _BACKEND }
-    rd = ENVIRON["HAWK_RUN_DIR"]
-    if (rd != "") {
-      test_f = rd "/cache/.hawk_write_test_" PROCINFO["pid"]
-      rc = system("mkdir -p \"" rd "/cache\" && touch \"" test_f "\" 2>/dev/null && rm -f \"" test_f "\"")
-      if (rc == 0) { _BACKEND = "file"; return _BACKEND }
-    }
+    # ponytail: file/zig detection added in Task 2/7; auto=memory until then
     _BACKEND = "memory"; return _BACKEND
   }
 
