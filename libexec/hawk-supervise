@@ -114,14 +114,16 @@ while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
     unset "_pid_to_role[$pid]" "_pid_to_token[$pid]"
     if [[ "$status" -ne 0 ]]; then
       echo "[hawk-supervise] worker $pid ($role) exited $status" >&2
-      if ! _check_intensity "$role"; then
-        shutdown
-      fi
-      sleep 1
-      local_id="${role#web:}"
-      _worker_start "${local_id:-$pid}"
-      new_pids+=("${WORKER_PIDS[-1]}")
+    else
+      echo "[hawk-supervise] worker $pid ($role) exited cleanly, restarting (permanent)" >&2
     fi
+    if ! _check_intensity "$role"; then
+      shutdown
+    fi
+    sleep 1
+    local_id="${role#web:}"
+    _worker_start "${local_id:-$pid}"
+    new_pids+=("${WORKER_PIDS[-1]}")
   done
   WORKER_PIDS=("${new_pids[@]}")
 done
