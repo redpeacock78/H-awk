@@ -149,6 +149,20 @@ message::decode(line, out)
 初期実装の registry は `$HAWK_RUN_DIR/registry.tsv`。
 Supervisor を使わない場合はプロセスローカルの AWK 配列にフォールバックする。
 
+**registry の安全契約**:
+
+`registry.tsv` は複数プロセスが同時に読み書きするため、以下のルールを仕様として定める。
+
+- **更新はロック付き atomic write のみ**: tmp file に書き込んでから `mv` で置換する。
+  ロックには file backend と同様の `mkdir` ロックを使う（`$HAWK_RUN_DIR/registry.lock.d/`）。
+- **エントリには所有者 PID と起動時刻を記録する**:
+  `name<TAB>object_id<TAB>owner_pid<TAB>started_at` の形式で保存する。
+- **`resolve` は生存確認を行う**: `kill -0 $owner_pid` が失敗した場合、エントリを stale として miss 扱いにする。
+- **Supervisor はクラッシュした actor/worker の名前を unregister する**: restart 前に古いエントリを削除し、
+  新しい PID で再登録する。これにより stale エントリが蓄積しない。
+- **registry が破損した場合の挙動**: resolve が失敗したとき、呼び出し元は `UnknownProcess` エラーを受け取る。
+  Supervisor が存在しないスタンドアロン実行では AWK 配列のみを使い、`registry.tsv` は作成しない。
+
 ```awk
 objectspace::register(name, object_id)
 objectspace::resolve(name)
@@ -206,11 +220,39 @@ mailbox への書き込み失敗は `ProcessDown` 相当のエラーとして扱
 - **`memory`**: プロセスローカルな AWK 配列 cache
 - **`off`**: cache 無効（get は miss、set は no-op）
 
-`HAWK_RUN_DIR` のデフォルト値:
+`HAWK_RUN_DIR` のデフォルト値と作成ルール:
+
+明示的に `HAWK_RUN_DIR` が指定されていない場合、`hawk-supervise` が安全なランタイムディレクトリを作成する。
+パスの予測可能性によるハイジャックを防ぐため、以下のルールに従う。
 
 ```bash
-HAWK_RUN_DIR="${HAWK_RUN_DIR:-${TMPDIR:-/tmp}/hawk-run-$(pwd | tr '/' '_')}"
+# hawk-supervise が起動時に実行する run dir セットアップ
+_setup_run_dir() {
+  if [[ -z "${HAWK_RUN_DIR:-}" ]]; then
+    # UID + nonce でパス予測を困難にする
+    HAWK_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hawk-run-$(id -u)-XXXXXX")"
+  else
+    # 既存パスの安全性を検証する
+    if [[ -L "$HAWK_RUN_DIR" ]]; then
+      echo "[hawk] HAWK_RUN_DIR is a symlink: $HAWK_RUN_DIR" >&2; exit 1
+    fi
+    if [[ ! -d "$HAWK_RUN_DIR" ]]; then
+      mkdir -p "$HAWK_RUN_DIR"
+    fi
+    # オーナーが自分自身であることを確認する
+    local owner
+    owner="$(stat -c '%u' "$HAWK_RUN_DIR" 2>/dev/null || stat -f '%u' "$HAWK_RUN_DIR")"
+    if [[ "$owner" != "$(id -u)" ]]; then
+      echo "[hawk] HAWK_RUN_DIR not owned by current user: $HAWK_RUN_DIR" >&2; exit 1
+    fi
+  fi
+  chmod 0700 "$HAWK_RUN_DIR"
+  export HAWK_RUN_DIR
+}
 ```
+
+supervisor を使わず `HAWK_CACHE_BACKEND=file` を直接使うケース（スタンドアロン実行）では、
+`cache::_detect_backend()` が同様の安全チェックを実行し、問題があれば `memory` にフォールバックする。
 
 `cache::_detect_backend()` が `$HAWK_RUN_DIR/cache/` への書き込み可否を確認し、
 可能なら `file`、不可なら `memory` にフォールバックする。
@@ -250,6 +292,11 @@ key_hash<TAB>expires_at<TAB>escaped_key<TAB>escaped_value
 - 性能より正しさを優先する fallback として位置づける
 
 ロック方針: `mkdir "$lockdir"` 成功でロック取得、`rmdir "$lockdir"` で解放。
+
+ステールロック対応（Backlog）: ロック取得を一定時間内にリトライし、タイムアウト時は `CacheLockTimeout`
+エラーを返す。将来的にはロックディレクトリ内に所有者 PID と取得時刻を記録し、PID が死んでいれば
+`rmdir` してロックを奪取できるようにする。初期実装ではリトライ上限（例: 50ms × 20回）を設けることで
+無限ブロックを防ぐ。
 
 ### Zig cache backend
 
