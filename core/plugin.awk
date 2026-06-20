@@ -29,6 +29,10 @@ function plugin_discover(   cmd, pname, func_name, meta) {
 
     func_name = "plugin_" pname "_manifest"
     delete meta
+    if (!(func_name in FUNCTAB)) {
+      print "plugin: function not found: " func_name > "/dev/stderr"
+      continue
+    }
     @func_name(meta)
     plugin_register(pname, meta)
   }

@@ -85,4 +85,25 @@ function test_plugin_missing_config(   meta) {
   plugin_register("needs_env", meta)
   PLUGIN_QUIET = 0
   assert_eq(PLUGIN_REGISTER_ERROR, 1, "plugin: config missing flagged")
+  _test_plugin_discover_unknown_function_guard()
+}
+
+function _test_plugin_discover_unknown_function_guard(   cmd, line, output, rc) {
+  cmd = "tmp=$(mktemp -d); " \
+        "mkdir -p \"$tmp/plugins/missing\"; " \
+        "err=\"$tmp/err\"; " \
+        "(cd \"$tmp\" && gawk -f \"" ENVIRON["PWD"] "/core/plugin.awk\" -e 'BEGIN { plugin_discover(); exit 0 }') 2>\"$err\"; " \
+        "rc=$?; " \
+        "printf 'RC:%s\\n' \"$rc\"; " \
+        "cat \"$err\"; " \
+        "rm -rf \"$tmp\""
+  output = ""
+  while ((cmd | getline line) > 0) {
+    output = output line "\n"
+  }
+  close(cmd)
+
+  assert_true(index(output, "RC:0\n") > 0, "plugin: unknown manifest function does not crash")
+  assert_true(index(output, "plugin: function not found: plugin_missing_manifest") > 0,
+              "plugin: unknown manifest function logs stderr")
 }

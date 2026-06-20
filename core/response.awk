@@ -17,7 +17,17 @@ function status(res, code) {
   res["status"] = code
 }
 
+function _response_valid_header_name(name) {
+  if (name == "") return 0
+  if (name ~ /[^a-zA-Z0-9!#$%&'*+\-.^_`|~]/) return 0
+  return 1
+}
+
 function header(res, name, value) {
+  if (!_response_valid_header_name(name)) {
+    print "response: invalid header name: " name > "/dev/stderr"
+    return
+  }
   gsub(/[\r\n]/, "", value)
   res["header:" to_lower(name)] = value
 }
