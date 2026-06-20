@@ -110,7 +110,7 @@ function test_cache_file_tab_newline(    saved_be, saved_dir, dir) {
   ENVIRON["HAWK_RUN_DIR"] = saved_dir
 }
 
-function test_cache_file_ttl_expired(    saved_be, saved_dir, dir) {
+function test_cache_file_ttl_expired(    saved_be, saved_dir, dir, cmd) {
   if (ENVIRON["CI"] == "1") { TESTS_SKIPPED++; return }
   saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
   saved_dir = ENVIRON["HAWK_RUN_DIR"]
@@ -119,9 +119,8 @@ function test_cache_file_ttl_expired(    saved_be, saved_dir, dir) {
   ENVIRON["HAWK_CACHE_BACKEND"] = "file"
   ENVIRON["HAWK_RUN_DIR"] = dir
   cache::_reset()
-  cache::set("exp_k", "v", 1)
-  # Force expire by rewriting tsv with past timestamp
-  cmd = "echo '0\t" (awk::systime() - 10) "\texp_k\tv' > " dir "/cache/cache.tsv"
+  cache::set("exp_k", "v", 60)
+  cmd = "gawk -F'\\t' 'BEGIN{OFS=\"\\t\"} {$2=" (awk::systime() - 10) "; print}' " dir "/cache/cache.tsv > " dir "/cache/cache.tsv.tmp && mv " dir "/cache/cache.tsv.tmp " dir "/cache/cache.tsv"
   system(cmd)
   cache::_reset()
   ENVIRON["HAWK_CACHE_BACKEND"] = "file"
