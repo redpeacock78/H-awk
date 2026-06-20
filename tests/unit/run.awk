@@ -141,6 +141,11 @@ BEGIN {
   test_objectspace_resolve_unknown()
   test_objectspace_unregister()
 
+  test_proc_self_has_value()
+  test_proc_self_env()
+  test_proc_register_whereis()
+  test_proc_whereis_unknown()
+
   test_adt_result_ok_roundtrip()
   test_adt_result_ok_xif_roundtrip()
   test_adt_result_ng_roundtrip()
@@ -183,3 +188,4 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_cache.awk"
 @include "tests/unit/test_message.awk"
 @include "tests/unit/test_objectspace.awk"
+@include "tests/unit/test_proc.awk"

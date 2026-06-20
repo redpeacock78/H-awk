@@ -35,5 +35,6 @@
 @include "core/message.awk"
 @include "core/objectspace.awk"
 @include "core/mailbox.awk"
+@include "core/proc.awk"
 @include "core/plugin.awk"
 @include "core/http.awk"
