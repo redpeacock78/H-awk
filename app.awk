@@ -22,6 +22,10 @@ function todo_index() -> Response {
 }
 
 function todo_list_html() -> Response {
+  let cached: Str = cache.get("todos:html")
+  if (cache.found()) {
+    return ctx.res.html(safe.html.raw(cached))
+  }
   let rows = []
   let n: Int = read_tsv("data/todos.tsv", rows)
   let out: Str = ""
@@ -29,6 +33,7 @@ function todo_list_html() -> Response {
   for (i = 1; i <= n; i++) {
     out = out _todo_tr(rows[i, "id"], rows[i, "title"])
   }
+  cache.set("todos:html", out, 30)
   return ctx.res.html(safe.html.raw(out))
 }
 
@@ -48,6 +53,8 @@ function todo_add() -> Response {
       row["id"] = "#{systime()}_#{int(rand() * 100000)}"
       row["title"] = safe.str.trust(raw)
       append_tsv("data/todos.tsv", row)
+      cache.del("todos:html")
+      cache.del("todos:json")
       ctx.res.status(201)
       return ctx.res.html(_todo_tr(row["id"], row["title"]))
     ng err:
@@ -63,11 +70,17 @@ function todo_delete() -> Response {
     ctx.res.status(404)
     return ctx.res.text("not found")
   }
+  cache.del("todos:html")
+  cache.del("todos:json")
   ctx.res.status(200)
   return ctx.res.html(safe.html.raw(""))
 }
 
 function todo_list_json() -> Response {
+  let cached: Str = cache.get("todos:json")
+  if (cache.found()) {
+    return ctx.res.json_raw(cached)
+  }
   let rows = []
   let n: Int = read_tsv("data/todos.tsv", rows)
   let item = []
@@ -79,7 +92,9 @@ function todo_list_json() -> Response {
     let sep: Str = (i > 1 ? "," : "")
     items_json = "#{items_json}#{sep}#{json_encode(item)}"
   }
-  return ctx.res.json_raw("{\"count\":#{n},\"items\":[#{items_json}]}")
+  let result: Str = "{\"count\":#{n},\"items\":[#{items_json}]}"
+  cache.set("todos:json", result, 30)
+  return ctx.res.json_raw(result)
 }
 
 function _todo_tr(id: Str, title: Str) -> HtmlFragment {
