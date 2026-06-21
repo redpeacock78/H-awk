@@ -9,6 +9,19 @@ BEGIN {
   _STATS_HIT  = 0
   _STATS_MISS = 0
   _STATS_SET  = 0
+
+  _CACHE_ROUTES["get"]      = "cache::get";      _CACHE_ARITY["get"]      = 1
+  _CACHE_ROUTES["set"]      = "cache::set";      _CACHE_ARITY["set"]      = 3
+  _CACHE_ROUTES["del"]      = "cache::del";      _CACHE_ARITY["del"]      = 1
+  _CACHE_ROUTES["has"]      = "cache::has";      _CACHE_ARITY["has"]      = 1
+  _CACHE_ROUTES["remember"] = "cache::remember"; _CACHE_ARITY["remember"] = 3
+  _CACHE_ROUTES["stats"]    = "cache::stats";    _CACHE_ARITY["stats"]    = 0
+  _CACHE_ROUTES["backend"]  = "cache::backend";  _CACHE_ARITY["backend"]  = 0
+  _CACHE_ROUTES["found"]    = "cache::found";    _CACHE_ARITY["found"]    = 0
+}
+
+function dispatch(path, a1, a2, a3) {
+  return hawk_dispatch::call("cache", _CACHE_ROUTES, _CACHE_ARITY, path, a1, a2, a3)
 }
 
 function get(key,    b) {

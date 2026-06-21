@@ -209,4 +209,38 @@ BEGIN {
 
     _DS_SIG_RET["option.none"]    = "Option<Any>"
     _DS_SIG_ARITY["option.none"]  = 0
+
+    # cache.*
+    _DS_SIG_RET["cache.get"]         = "Str"
+    _DS_SIG_ARITY["cache.get"]       = 1
+    _DS_SIG_ARG["cache.get", 1]      = "Str"
+
+    _DS_SIG_RET["cache.set"]         = "Void"
+    _DS_SIG_ARITY["cache.set"]       = 3
+    _DS_SIG_ARG["cache.set", 1]      = "Str"
+    _DS_SIG_ARG["cache.set", 2]      = "Any"
+    _DS_SIG_ARG["cache.set", 3]      = "Int"
+
+    _DS_SIG_RET["cache.del"]         = "Void"
+    _DS_SIG_ARITY["cache.del"]       = 1
+    _DS_SIG_ARG["cache.del", 1]      = "Str"
+
+    _DS_SIG_RET["cache.has"]         = "Bool"
+    _DS_SIG_ARITY["cache.has"]       = 1
+    _DS_SIG_ARG["cache.has", 1]      = "Str"
+
+    _DS_SIG_RET["cache.remember"]    = "Str"
+    _DS_SIG_ARITY["cache.remember"]  = 3
+    _DS_SIG_ARG["cache.remember", 1] = "Str"
+    _DS_SIG_ARG["cache.remember", 2] = "Int"
+    _DS_SIG_ARG["cache.remember", 3] = "HandlerName"
+
+    _DS_SIG_RET["cache.stats"]       = "Str"
+    _DS_SIG_ARITY["cache.stats"]     = 0
+
+    _DS_SIG_RET["cache.backend"]     = "Str"
+    _DS_SIG_ARITY["cache.backend"]   = 0
+
+    _DS_SIG_RET["cache.found"]       = "Bool"
+    _DS_SIG_ARITY["cache.found"]     = 0
 }
