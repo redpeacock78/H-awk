@@ -43,7 +43,8 @@ function wait_reply(ref_val, timeout_ms,    reply_fifo, line, sec, cmd, rd) {
   if (reply_fifo == "") return ""
   rd = ENVIRON["HAWK_RUN_DIR"]
   system("mkdir -p " shell_quote(rd "/reply"))
-  system("mkfifo -- " shell_quote(reply_fifo))
+  if (system("test -p " shell_quote(reply_fifo)) != 0)
+    if (system("mkfifo -- " shell_quote(reply_fifo)) != 0) return ""
   sec = int((timeout_ms + 999) / 1000)
   cmd = "HAWK_REPLY_FIFO=" shell_quote(reply_fifo) " bash -c 'read -t " sec " line < \"$HAWK_REPLY_FIFO\" && printf \"%s\\n\" \"$line\"'"
   if ((cmd | getline line) > 0) {
