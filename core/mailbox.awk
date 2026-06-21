@@ -25,14 +25,14 @@ function ensure(pid,    p, rd) {
   if (p == "") return
   rd = ENVIRON["HAWK_RUN_DIR"]
   system("mkdir -p " shell_quote(rd "/mailbox"))
-  if (system("test -p -- " shell_quote(p)) != 0)
+  if (system("test -p " shell_quote(p)) != 0)
     system("mkfifo -- " shell_quote(p))
 }
 
 function send(pid, encoded,    p, cmd) {
   p = path(pid)
   if (p == "") return 0
-  if (system("test -p -- " shell_quote(p)) != 0) return 0
+  if (system("test -p " shell_quote(p)) != 0) return 0
   cmd = "echo " (shell_quote(encoded)) " > " shell_quote(p) " &"
   system(cmd)
   return 1
