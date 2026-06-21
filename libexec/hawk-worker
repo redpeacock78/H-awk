@@ -13,7 +13,9 @@ PLUGIN_ARGS=("$@")
 if [[ -n "${HAWK_RUN_DIR:-}" && -n "${HAWK_PROC_ID:-}" ]]; then
   safe_pid="$BASHPID"
   fifo_path="$HAWK_RUN_DIR/mailbox/$safe_pid.fifo"
-  [[ -p "$fifo_path" ]] || mkfifo "$fifo_path"
+  if [[ ! -p "$fifo_path" ]]; then
+    mkfifo -- "$fifo_path" || { echo "[hawk-worker] failed to create mailbox FIFO: $fifo_path" >&2; exit 1; }
+  fi
   export HAWK_WORKER_PID="$safe_pid"
 fi
 
