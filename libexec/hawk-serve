@@ -87,7 +87,7 @@ APP_AWK="$("$LIBS" desugar "$APP")"
 
 # --workers N かつ supervisor 利用可能な場合は hawk-supervise に委譲する
 if [[ "$EFFECTIVE_WORKERS" -gt 1 && "$HAS_NET" -eq 1 ]]; then
-  "$HAWK_LIBEXEC/hawk-supervise" "$APP_AWK" &
+  HAWK_WORKERS="$EFFECTIVE_WORKERS" "$HAWK_LIBEXEC/hawk-supervise" "$APP_AWK" &
   WORKER_PIDS+=($!)
   echo $! > "$HAWK_PIDFILE"
   wait "${WORKER_PIDS[@]}"
