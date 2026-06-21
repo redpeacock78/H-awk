@@ -40,7 +40,7 @@ pub fn djb2(key: []const u8) u64 {
 
 fn nowMs() i64 {
     var ts: std.c.timespec = undefined;
-    if (std.c.clock_gettime(.REALTIME, &ts) != 0) @panic("clock_gettime failed");
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) @panic("clock_gettime failed");
     return @as(i64, @intCast(ts.sec)) * std.time.ms_per_s +
         @divFloor(@as(i64, @intCast(ts.nsec)), std.time.ns_per_ms);
 }
