@@ -87,7 +87,7 @@ pub fn deinit() void {
 
 pub fn set(key: []const u8, val: []const u8, ttl_ms: i64) !void {
     if (key.len > KEY_MAX or val.len > VAL_MAX) return error.TooLarge;
-    if (!lockAcquire()) return error.LockFailed;
+    if (!lockAcquireExclusive()) return error.LockFailed;
     defer lockRelease();
     const slot_count = g_header.?.slot_count;
     const h = djb2(key);
@@ -120,7 +120,7 @@ pub fn set(key: []const u8, val: []const u8, ttl_ms: i64) !void {
 }
 
 pub fn get(key: []const u8) ?[]const u8 {
-    if (!lockAcquire()) return null;
+    if (!lockAcquireShared()) return null;
     defer lockRelease();
     const slot_count = g_header.?.slot_count;
     const h = djb2(key);
@@ -131,11 +131,7 @@ pub fn get(key: []const u8) ?[]const u8 {
         if (isTombstone(e)) continue;
         if (isEmpty(e)) return null;
         if (e.hash == h and e.key_len == key.len and std.mem.eql(u8, e.key[0..e.key_len], key)) {
-            if (isExpired(e)) {
-                e.key_len = 0;
-                e.flags   = FLAG_TOMBSTONE;
-                return null;
-            }
+            if (isExpired(e)) return null;
             const len = e.val_len;
             @memcpy(get_result_buf[0..len], e.val[0..len]);
             return get_result_buf[0..len];
@@ -145,7 +141,7 @@ pub fn get(key: []const u8) ?[]const u8 {
 }
 
 pub fn del(key: []const u8) void {
-    if (!lockAcquire()) return;
+    if (!lockAcquireExclusive()) return;
     defer lockRelease();
     const slot_count = g_header.?.slot_count;
     const h = djb2(key);
@@ -164,7 +160,21 @@ pub fn del(key: []const u8) void {
 }
 
 pub fn has(key: []const u8) bool {
-    return get(key) != null;
+    if (!lockAcquireShared()) return false;
+    defer lockRelease();
+    const slot_count = g_header.?.slot_count;
+    const h = djb2(key);
+    var i: usize = @intCast(h % @as(u64, slot_count));
+    var probes: usize = 0;
+    while (probes < slot_count) : ({ i = (i + 1) % slot_count; probes += 1; }) {
+        const e = &g_slots.?[i];
+        if (isTombstone(e)) continue;
+        if (isEmpty(e)) return false;
+        if (e.hash == h and e.key_len == key.len and std.mem.eql(u8, e.key[0..e.key_len], key)) {
+            return !isExpired(e);
+        }
+    }
+    return false;
 }
 
 pub fn isShared() bool   { return g_is_shared; }
@@ -204,7 +214,14 @@ fn alignToPage(size: usize) usize {
     return (size + page - 1) & ~(page - 1);
 }
 
-fn lockAcquire() bool {
+fn lockAcquireShared() bool {
+    if (g_lock_fd) |fd| {
+        if (std.c.flock(fd, std.posix.LOCK.SH) != 0) return false;
+    }
+    return true;
+}
+
+fn lockAcquireExclusive() bool {
     if (g_lock_fd) |fd| {
         if (std.c.flock(fd, std.posix.LOCK.EX) != 0) return false;
     }

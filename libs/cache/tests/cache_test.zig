@@ -42,6 +42,51 @@ test "has returns correct result" {
     try std.testing.expect(!cache.has("no_has"));
 }
 
+test "has() does not overwrite get_result_buf" {
+    cache.init();
+    defer cache.deinit();
+    try cache.set("key_aaa", "aaaaaaa", 60_000);
+    try cache.set("key_bbb", "bbbbbbb", 60_000);
+    const va = cache.get("key_aaa") orelse return error.Miss;
+    _ = cache.has("key_bbb");
+    try std.testing.expectEqualStrings("aaaaaaa", va);
+}
+
+test "set() reclaims expired slot not tombstoned by get()" {
+    cache.init();
+    defer cache.deinit();
+    var buf_a: [32]u8 = undefined;
+    var buf_b: [32]u8 = undefined;
+    var key_exp: []const u8 = "";
+    var key_disp: []const u8 = "";
+    outer: for (0..2000) |i| {
+        key_exp = std.fmt.bufPrint(&buf_a, "exp_{d}", .{i}) catch continue;
+        const slot_a = cache.djb2(key_exp) % @as(u64, cache.slotCount());
+        for (i + 1..4000) |j| {
+            key_disp = std.fmt.bufPrint(&buf_b, "exp_{d}", .{j}) catch continue;
+            if (cache.djb2(key_disp) % @as(u64, cache.slotCount()) == slot_a) break :outer;
+        }
+    }
+    try std.testing.expect(key_exp.len > 0);
+    try cache.set(key_exp, "expval", 1);
+    var ts = std.c.timespec{ .sec = 0, .nsec = 2_000_000 };
+    _ = std.c.nanosleep(&ts, null);
+    try cache.set(key_disp, "dispval", 60_000);
+    const vd = cache.get(key_disp);
+    try std.testing.expectEqualStrings("dispval", vd orelse return error.DispKeyMiss);
+    try std.testing.expect(cache.get(key_exp) == null);
+}
+
+test "expired entry is miss under shared lock" {
+    cache.init();
+    defer cache.deinit();
+    try cache.set("sl_exp", "val", 1);
+    var ts = std.c.timespec{ .sec = 0, .nsec = 2_000_000 };
+    _ = std.c.nanosleep(&ts, null);
+    try std.testing.expect(cache.get("sl_exp") == null);
+    try std.testing.expect(!cache.has("sl_exp"));
+}
+
 test "tombstone: del does not break displaced key" {
     cache.init();
     defer cache.deinit();
