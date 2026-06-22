@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
-.PHONY: run dev check emit test test-unit test-dsl test-e2e lint clean help ci build-libs fetch-libs test-libs libs-clean ci-full
+.PHONY: run dev bench check emit test test-unit test-dsl test-e2e lint clean help ci build-libs fetch-libs test-libs libs-clean ci-full
 
 APP     ?= app.awk
 WORKERS ?= 4
+PORT    ?= 8080
 STRICT  ?=
 GAWK_OPTS ?=
 
@@ -14,6 +15,19 @@ help: ## 利用可能なターゲット一覧
 
 run: ## サーバー起動 (WORKERS=N, STRICT=1)
 	./bin/hawk serve --workers $(WORKERS) $(APP)
+
+bench: ## cache on/off benchmark (hey が必要)
+	@echo "=== cache on (zig backend, 8 workers) ===" && \
+	HAWK_CACHE_BACKEND=zig ./bin/hawk serve --workers 8 $(APP) & BENCH_PID=$$!; \
+	sleep 2; \
+	hey -n 10000 -c 100 http://127.0.0.1:$(PORT)/todos.json; \
+	kill $$BENCH_PID 2>/dev/null || true
+	@echo ""
+	@echo "=== cache off (8 workers) ===" && \
+	HAWK_CACHE_BACKEND=off ./bin/hawk serve --workers 8 $(APP) & BENCH_PID=$$!; \
+	sleep 2; \
+	hey -n 10000 -c 100 http://127.0.0.1:$(PORT)/todos.json; \
+	kill $$BENCH_PID 2>/dev/null || true
 
 dev: ## DEV=1 でログ詳細
 	DEV=1 ./bin/hawk serve --workers $(WORKERS) $(APP)

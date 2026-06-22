@@ -2,7 +2,7 @@
 # Split receive test: header and body arrive in separate writes.
 set -euo pipefail
 
-PORT=18765
+PORT=18766
 OUT=/tmp/hawk_split_test
 
 ./libs/net/zig-out/bin/hawk-net-test-server "$PORT" &
