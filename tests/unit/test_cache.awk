@@ -202,3 +202,28 @@ function test_cache_zig_found_api(    saved_be, v) {
 
   ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
 }
+
+function test_cache_stats_init_before_other_calls(    s) {
+  cache::_reset()
+  ENVIRON["HAWK_CACHE_BACKEND"] = "memory"
+  s = cache::stats()
+  assert_true(index(s, "backend=memory") > 0, "cache stats: backend present before any get/set")
+  assert_true(index(s, "hit=0") > 0,  "cache stats: hit=0 on fresh stats")
+  assert_true(index(s, "miss=0") > 0, "cache stats: miss=0 on fresh stats")
+  assert_true(index(s, "set=0") > 0,  "cache stats: set=0 on fresh stats")
+}
+
+function test_cache_zig_stats_init(    saved_be, s) {
+  if (!LIBS_LOADED["cache"]) { TESTS_SKIPPED++; return }
+  saved_be = ENVIRON["HAWK_CACHE_BACKEND"]
+  ENVIRON["HAWK_CACHE_BACKEND"] = "zig"
+  cache::_reset()
+
+  s = cache::stats()
+  assert_true(index(s, "backend=zig") > 0,  "cache zig stats: backend=zig present")
+  assert_true(index(s, "shared=") > 0,       "cache zig stats: shared= present")
+  assert_true(index(s, "size=0") == 0,       "cache zig stats: size != 0")
+  assert_true(index(s, "slots=0") == 0,      "cache zig stats: slots != 0")
+
+  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+}

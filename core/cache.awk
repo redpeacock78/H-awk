@@ -66,12 +66,13 @@ function remember(key, ttl_sec, fn,    v) {
   return v
 }
 
-function stats(    zig_stats) {
+function stats(    zig_stats, b) {
+  b = _detect_backend()
   zig_stats = ""
-  if (_BACKEND == "zig" && awk::LIBS_LOADED["cache"]) {
+  if (b == "zig" && awk::LIBS_LOADED["cache"]) {
     zig_stats = " " awk::hawk_cache_stats()
   }
-  return "backend=" _BACKEND zig_stats " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
+  return "backend=" b zig_stats " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
 }
 
 function _detect_backend(    b, rd, test_f, rc) {
