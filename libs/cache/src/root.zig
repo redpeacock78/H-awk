@@ -7,6 +7,7 @@ const cache = @import("cache");
 
 var _inited = false;
 var _stats_buf: [256]u8 = undefined;
+var _last_found: bool = false;
 
 fn ensureInit() void {
     if (!_inited) { cache.init(); _inited = true; }
@@ -15,8 +16,16 @@ fn ensureInit() void {
 fn cacheGet(args: ffi.Args) ffi.Result {
     ensureInit();
     const key = args.getString(0);
-    const v = cache.get(key) orelse return .{ .string = "" };
+    const v = cache.get(key) orelse {
+        _last_found = false;
+        return .{ .string = "" };
+    };
+    _last_found = true;
     return .{ .string = v };
+}
+
+fn cacheFound(_: ffi.Args) ffi.Result {
+    return .{ .int = if (_last_found) 1 else 0 };
 }
 
 fn cacheSet(args: ffi.Args) ffi.Result {
@@ -65,6 +74,7 @@ const _ffi_entry = ffi.makeDlLoad(.{
         .{ .name = "hawk_cache_del",   .impl = &cacheDel,   .args = 1 },
         .{ .name = "hawk_cache_has",   .impl = &cacheHas,   .args = 1 },
         .{ .name = "hawk_cache_stats", .impl = &cacheStats, .args = 0 },
+        .{ .name = "hawk_cache_found", .impl = &cacheFound, .args = 0 },
     },
 });
 comptime { _ = _ffi_entry; }

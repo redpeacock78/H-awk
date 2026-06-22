@@ -68,8 +68,8 @@ function remember(key, ttl_sec, fn,    v) {
 
 function stats(    zig_stats) {
   zig_stats = ""
-  if (_BACKEND == "zig" && LIBS_LOADED["cache"]) {
-    zig_stats = " " hawk_cache_stats()
+  if (_BACKEND == "zig" && awk::LIBS_LOADED["cache"]) {
+    zig_stats = " " awk::hawk_cache_stats()
   }
   return "backend=" _BACKEND zig_stats " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
 }
@@ -83,7 +83,7 @@ function _detect_backend(    b, rd, test_f, rc) {
   if (b == "memory") { _BACKEND = "memory"; return _BACKEND }
 
   if (b == "zig") {
-    if (LIBS_LOADED["cache"]) { _BACKEND = "zig"; return _BACKEND }
+    if (awk::LIBS_LOADED["cache"]) { _BACKEND = "zig"; return _BACKEND }
     print "[hawk] cache: HAWK_CACHE_BACKEND=zig but libhawk_cache not loaded" > "/dev/stderr"
     exit 1
   }
@@ -99,8 +99,8 @@ function _detect_backend(    b, rd, test_f, rc) {
   }
 
   if (b == "auto") {
-    if (LIBS_LOADED["cache"]) { _BACKEND = "zig"; return _BACKEND }
     rd = ENVIRON["HAWK_RUN_DIR"]
+    if (rd != "" && awk::LIBS_LOADED["cache"]) { _BACKEND = "zig"; return _BACKEND }
     if (rd != "") {
       test_f = rd "/cache/.hawk_write_test_" PROCINFO["pid"]
       rc = system("mkdir -p \"" rd "/cache\" && touch \"" test_f "\" 2>/dev/null && rm -f \"" test_f "\"")
@@ -139,17 +139,21 @@ function _del_memory(key) {
 }
 
 function _get_zig(key,    v) {
-  if (hawk_cache_has(key) != "1") { _STATS_MISS++; return "" }
-  v = hawk_cache_get(key)
-  _FOUND = 1; _STATS_HIT++
+  v = awk::hawk_cache_get(key)
+  if (awk::hawk_cache_found() != 1) {
+    _STATS_MISS++
+    return ""
+  }
+  _FOUND = 1
+  _STATS_HIT++
   return v
 }
 function _set_zig(key, value, ttl_sec) {
-  hawk_cache_set(key, value, ttl_sec * 1000)
+  awk::hawk_cache_set(key, value, ttl_sec * 1000)
   _STATS_SET++
 }
 function _del_zig(key) {
-  hawk_cache_del(key)
+  awk::hawk_cache_del(key)
 }
 
 # escape / unescape for file backend

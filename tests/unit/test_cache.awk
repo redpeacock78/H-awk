@@ -166,3 +166,39 @@ function test_cache_auto_with_dir(    saved_be, saved_dir, dir, b) {
   ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
   ENVIRON["HAWK_RUN_DIR"] = saved_dir
 }
+
+function test_cache_empty_string_hit_vs_miss(    v) {
+  cache::_reset()
+  ENVIRON["HAWK_CACHE_BACKEND"] = "memory"
+  cache::set("empty", "", 60)
+  v = cache::get("empty")
+  assert_eq(v, "", "cache: empty string value returns ''")
+  assert_eq(cache::found(), 1, "cache: empty string value is hit (found=1)")
+
+  v = cache::get("missing")
+  assert_eq(v, "", "cache: missing key returns ''")
+  assert_eq(cache::found(), 0, "cache: missing key is miss (found=0)")
+}
+
+function test_cache_zig_found_api(    saved_be, v) {
+  if (!LIBS_LOADED["cache"]) { TESTS_SKIPPED++; return }
+  saved_be = ENVIRON["HAWK_CACHE_BACKEND"]
+  ENVIRON["HAWK_CACHE_BACKEND"] = "zig"
+  cache::_reset()
+
+  cache::set("zfound", "zval", 60)
+  v = cache::get("zfound")
+  assert_eq(v, "zval", "cache zig found: get returns value")
+  assert_eq(cache::found(), 1, "cache zig found: hit -> found=1")
+
+  v = cache::get("zfound_missing")
+  assert_eq(v, "", "cache zig found: missing returns ''")
+  assert_eq(cache::found(), 0, "cache zig found: miss -> found=0")
+
+  cache::set("zempty", "", 60)
+  v = cache::get("zempty")
+  assert_eq(v, "", "cache zig found: empty value returns ''")
+  assert_eq(cache::found(), 1, "cache zig found: empty value hit -> found=1")
+
+  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+}
