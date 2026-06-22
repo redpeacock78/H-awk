@@ -4,16 +4,16 @@
 
 `hawk.app.*` は主要なルーティングインターフェースです。すべてのメソッドは `hawk::dispatch("app.*", ...)` に脱糖されます。
 
-## 標準メソッド
-
-```awk
-hawk.app.get(path, handler)    # GET
-hawk.app.post(path, handler)   # POST
-hawk.app.put(path, handler)    # PUT
-hawk.app.del(path, handler)    # DELETE
-hawk.app.patch(path, handler)  # PATCH
-hawk.app.head(path, handler)   # HEAD
-```
+| DSL | 脱糖後 |
+|---|---|
+| `hawk.app.get(path, handler)` | `hawk::dispatch("app.get", path, handler)` |
+| `hawk.app.post(path, handler)` | `hawk::dispatch("app.post", path, handler)` |
+| `hawk.app.put(path, handler)` | `hawk::dispatch("app.put", path, handler)` |
+| `hawk.app.del(path, handler)` | `hawk::dispatch("app.del", path, handler)` |
+| `hawk.app.patch(path, handler)` | `hawk::dispatch("app.patch", path, handler)` |
+| `hawk.app.head(path, handler)` | `hawk::dispatch("app.head", path, handler)` |
+| `hawk.app.on(methods, paths, handler)` | `hawk::dispatch("app.on", methods, paths, handler)` |
+| `hawk.app.listen(port)` | `hawk::dispatch("app.listen", port)` |
 
 `handler` は関数名を表す文字列です。ルートは登録順にマッチします。
 
@@ -63,7 +63,7 @@ hawk::all(ps, "handler")
 
 ## リクエスト (ctx.req.*)
 
-リクエストヘルパーは `Result<Untrusted<Str>, ParseError>` を返します。`when...of` または `?=` でアンラップしてください。空の値は存在する値として `ok("")` を返し、欠落キーは `ng(ParseError, "missing ...")` を返します。
+リクエストヘルパーは `Result<Untrusted<Str>, ParseError>` を返します。`when...of` または `?=` でアンラップしてください。空の値は `ok("")` を返し、欠落キーは `ng(ParseError, "missing ...")` を返します。
 
 | DSL | 脱糖後 | 戻り値の型 |
 |---|---|---|
@@ -156,14 +156,12 @@ HAWK_CACHE_BACKEND=off  ./bin/hawk app.awk
 
 `env.` / `env::` は [Deno.env](https://deno.land/api?s=Deno.env) スタイルの実行時環境変数読み書き用の名前空間です。
 
-```awk
-env.get("KEY")           # ENVIRON["KEY"] を返す。未設定なら ""
-env.set("KEY", "val")    # ENVIRON["KEY"] = "val"（現在のプロセスのみ）
-env.del("KEY")           # ENVIRON["KEY"] を削除
-env.has("KEY")           # 設定されていれば 1、そうでなければ 0
-```
-
-`env::` （直接名前空間）と `env.`（ドット記法 DSL）の両形式が使用できます。
+| DSL | 脱糖後 | 説明 |
+|---|---|---|
+| `env.get("KEY")` | `env::get("KEY")` | `ENVIRON["KEY"]` を返す。未設定なら `""` |
+| `env.set("KEY", val)` | `env::set("KEY", val)` | `ENVIRON["KEY"] = val`（現在のプロセスのみ） |
+| `env.del("KEY")` | `env::del("KEY")` | `ENVIRON["KEY"]` を削除 |
+| `env.has("KEY")` | `env::has("KEY")` | 設定されていれば `1`、そうでなければ `0` |
 
 `env.set` / `env.del` で設定・削除した変数は同じ gawk プロセス内の後続の `env.get` から参照できますが、`system()` やパイプで起動した子プロセスには**伝播されません**。
 

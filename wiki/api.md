@@ -4,16 +4,16 @@
 
 `hawk.app.*` is the primary routing interface. All methods desugar to `hawk::dispatch("app.*", ...)`.
 
-## Standard methods
-
-```awk
-hawk.app.get(path, handler)    # GET
-hawk.app.post(path, handler)   # POST
-hawk.app.put(path, handler)    # PUT
-hawk.app.del(path, handler)    # DELETE
-hawk.app.patch(path, handler)  # PATCH
-hawk.app.head(path, handler)   # HEAD
-```
+| DSL | Desugared |
+|---|---|
+| `hawk.app.get(path, handler)` | `hawk::dispatch("app.get", path, handler)` |
+| `hawk.app.post(path, handler)` | `hawk::dispatch("app.post", path, handler)` |
+| `hawk.app.put(path, handler)` | `hawk::dispatch("app.put", path, handler)` |
+| `hawk.app.del(path, handler)` | `hawk::dispatch("app.del", path, handler)` |
+| `hawk.app.patch(path, handler)` | `hawk::dispatch("app.patch", path, handler)` |
+| `hawk.app.head(path, handler)` | `hawk::dispatch("app.head", path, handler)` |
+| `hawk.app.on(methods, paths, handler)` | `hawk::dispatch("app.on", methods, paths, handler)` |
+| `hawk.app.listen(port)` | `hawk::dispatch("app.listen", port)` |
 
 `handler` is a function name as a string. Routes are matched in registration order.
 
@@ -48,7 +48,7 @@ hawk.app.listen(env.get("PORT") ?? 8080)
 
 ## hawk::all(paths, handler)
 
-Register all standard HTTP methods (GET POST PUT DELETE PATCH HEAD OPTIONS) for one or more paths. Uses the direct `hawk::` namespace — there is no `hawk.app.all` DSL form.
+Register all standard HTTP methods (GET POST PUT DELETE PATCH HEAD OPTIONS) for one or more paths. This is a direct `hawk::` namespace call — there is no `hawk.app.all` DSL form.
 
 ```awk
 hawk::all("/health", "ping")
@@ -63,7 +63,7 @@ hawk::all(ps, "handler")
 
 ## Request (ctx.req.*)
 
-Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` or `?=` to unwrap. Empty values are present values and return `ok("")`; missing keys return `ng(ParseError, "missing ...")`.
+Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` or `?=` to unwrap. Empty values return `ok("")`; missing keys return `ng(ParseError, "missing ...")`.
 
 | DSL | Desugared | Return type |
 |---|---|---|
@@ -156,14 +156,12 @@ HAWK_CACHE_BACKEND=off  ./bin/hawk app.awk
 
 `env.` / `env::` is a [Deno.env](https://deno.land/api?s=Deno.env)-style namespace for reading and writing environment variables at runtime.
 
-```awk
-env.get("KEY")           # returns ENVIRON["KEY"]; "" if unset
-env.set("KEY", "val")    # ENVIRON["KEY"] = "val" (current process only)
-env.del("KEY")           # delete ENVIRON["KEY"]
-env.has("KEY")           # 1 if set, 0 if not
-```
-
-Both `env::` (direct namespace) and `env.` (dot-notation DSL) forms are supported.
+| DSL | Desugared | Description |
+|---|---|---|
+| `env.get("KEY")` | `env::get("KEY")` | Returns `ENVIRON["KEY"]`; `""` if unset |
+| `env.set("KEY", val)` | `env::set("KEY", val)` | `ENVIRON["KEY"] = val` (current process only) |
+| `env.del("KEY")` | `env::del("KEY")` | Deletes `ENVIRON["KEY"]` |
+| `env.has("KEY")` | `env::has("KEY")` | Returns `1` if set, `0` if not |
 
 Variables set or deleted via `env.set` / `env.del` are visible to subsequent `env.get` calls within the same gawk process, but are **not** propagated to child processes spawned via `system()` or pipes.
 
