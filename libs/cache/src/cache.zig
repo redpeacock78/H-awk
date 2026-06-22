@@ -138,3 +138,34 @@ pub fn del(key: []const u8) void {
 pub fn has(key: []const u8) bool {
     return get(key) != null;
 }
+
+const DEFAULT_CACHE_SIZE: usize = 512 * 1024;
+const MIN_CACHE_SIZE: usize = 64 * 1024;
+const MAX_CACHE_SIZE: usize = 64 * 1024 * 1024;
+
+pub fn parseCacheSize(env_val: ?[*:0]const u8) usize {
+    const raw: []const u8 = if (env_val) |p| std.mem.sliceTo(p, 0) else return alignToPage(DEFAULT_CACHE_SIZE);
+    if (raw.len == 0) return alignToPage(DEFAULT_CACHE_SIZE);
+    var multiplier: usize = 1;
+    var num_part = raw;
+    if (raw.len > 0) {
+        const last = raw[raw.len - 1];
+        if (last == 0x4B or last == 0x6B) {
+            multiplier = 1024;
+            num_part = raw[0 .. raw.len - 1];
+        } else if (last == 0x4D or last == 0x6D) {
+            multiplier = 1024 * 1024;
+            num_part = raw[0 .. raw.len - 1];
+        }
+    }
+    const n = std.fmt.parseInt(usize, num_part, 10) catch return alignToPage(DEFAULT_CACHE_SIZE);
+    if (n == 0) return alignToPage(DEFAULT_CACHE_SIZE);
+    const bytes = n *| multiplier;
+    const clamped = @min(@max(bytes, MIN_CACHE_SIZE), MAX_CACHE_SIZE);
+    return alignToPage(clamped);
+}
+
+fn alignToPage(size: usize) usize {
+    const page = std.heap.pageSize();
+    return (size + page - 1) & ~(page - 1);
+}
