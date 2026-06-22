@@ -56,6 +56,7 @@ fn cacheHas(args: ffi.Args) ffi.Result {
 }
 
 fn cacheStats(_: ffi.Args) ffi.Result {
+    ensureInit();
     const s = std.fmt.bufPrint(&_stats_buf, "shared={d} size={d} slots={d} key_max={d} val_max={d}", .{
         @intFromBool(cache.isShared()),
         cache.getCacheSize(),
