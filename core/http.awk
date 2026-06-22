@@ -133,6 +133,10 @@ function _http_serve_inet(    sock, line, headers_raw, body, content_length, raw
 
 function _http_serve_zig(    poll_result, req, res, conn_id, dispatch_ok, start_ms, parts, n) {
   if (!hawk_net_listen(HAWK_PORT)) {
+    if (env::get("HAWK_SUPERVISED") == "1" || env::get("HAWK_WORKERS") + 0 > 1) {
+      log_error(sprintf("libs/net: failed to bind port %d in multi-worker mode", HAWK_PORT))
+      exit 1
+    }
     log_warn(sprintf("libs/net: failed to bind port %d, falling back to /inet/tcp/", HAWK_PORT))
     _http_serve_inet()
     return
@@ -141,6 +145,10 @@ function _http_serve_zig(    poll_result, req, res, conn_id, dispatch_ok, start_
   while (!HAWK_SHUTDOWN) {
     poll_result = hawk_net_poll()
     if (poll_result == "") {
+      if (env::get("HAWK_SUPERVISED") == "1" || env::get("HAWK_WORKERS") + 0 > 1) {
+        log_error("libs/net: event loop stopped in multi-worker mode, exiting")
+        exit 1
+      }
       log_warn("libs/net: event loop stopped unexpectedly, falling back to /inet/tcp/")
       _http_serve_inet()
       return
@@ -228,7 +236,9 @@ function _zig_http_send(conn_id, res, req, start_ms,    wire, split_pos, head_pa
 
   dur = now_ms() - start_ms
   ts  = strftime("%Y-%m-%dT%H:%M:%S%z")
-  printf "%s\tINFO\t%s\t%s\t%d\t%d\n", ts, req["method"], req["path"], res["status"], dur
+  printf "%s\tINFO\t%s%s\t%s\t%d\t%d\n", ts, \
+    (ENVIRON["HAWK_WORKER_ID"] != "" ? "worker=" ENVIRON["HAWK_WORKER_ID"] " " : ""), \
+    req["method"], req["path"], res["status"], dur
   fflush()
 }
 
@@ -290,7 +300,9 @@ function http_send(sock, res, req, start_ms,    wire, content, dur, ts) {
 
   dur = now_ms() - start_ms
   ts  = strftime("%Y-%m-%dT%H:%M:%S%z")
-  printf "%s\tINFO\t%s\t%s\t%d\t%d\n", ts, req["method"], req["path"], res["status"], dur
+  printf "%s\tINFO\t%s%s\t%s\t%d\t%d\n", ts, \
+    (ENVIRON["HAWK_WORKER_ID"] != "" ? "worker=" ENVIRON["HAWK_WORKER_ID"] " " : ""), \
+    req["method"], req["path"], res["status"], dur
   fflush()
 }
 
