@@ -130,6 +130,8 @@ BEGIN {
   test_cache_file_escape_unescape()
   test_cache_auto_no_zig_no_dir()
   test_cache_auto_with_dir()
+  test_cache_empty_string_hit_vs_miss()
+  test_cache_zig_found_api()
 
   test_message_make_cast_decode()
   test_message_make_call_has_reply_to()
