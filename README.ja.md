@@ -1,8 +1,10 @@
 <div align="center">
 
-# H-awk
-
-**GNU AWK 向け Express スタイル HTTP サーバー**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/h-awk-logo-faithful-dark-crop.png">
+  <source media="(prefers-color-scheme: light)" srcset="./docs/assets/h-awk-logo-faithful-light-crop.png">
+  <img alt="H-awk" src="./docs/assets/h-awk-logo-faithful-light-crop.png" width="420">
+</picture>
 
 [![CI](https://github.com/redpeacock78/H-awk/actions/workflows/ci.yml/badge.svg)](https://github.com/redpeacock78/H-awk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
