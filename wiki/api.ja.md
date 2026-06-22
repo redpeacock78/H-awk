@@ -2,18 +2,19 @@
 
 # アプリケーション API (hawk.app.*)
 
-`hawk.app.*` は主要なルーティングインターフェースです。すべてのメソッドは `hawk::dispatch("app.*", ...)` に脱糖されます。
+`hawk.app.*` は主要なルーティングインターフェースです。DSL のドット記法は `hawk::dispatch("app.*", ...)` に脱糖され、対応する `hawk::` 関数にルーティングされます。両形式は実行時に等価です。
 
-| DSL | 脱糖後 |
+| DSL | 名前空間形式 |
 |---|---|
-| `hawk.app.get(path, handler)` | `hawk::dispatch("app.get", path, handler)` |
-| `hawk.app.post(path, handler)` | `hawk::dispatch("app.post", path, handler)` |
-| `hawk.app.put(path, handler)` | `hawk::dispatch("app.put", path, handler)` |
-| `hawk.app.del(path, handler)` | `hawk::dispatch("app.del", path, handler)` |
-| `hawk.app.patch(path, handler)` | `hawk::dispatch("app.patch", path, handler)` |
-| `hawk.app.head(path, handler)` | `hawk::dispatch("app.head", path, handler)` |
-| `hawk.app.on(methods, paths, handler)` | `hawk::dispatch("app.on", methods, paths, handler)` |
-| `hawk.app.listen(port)` | `hawk::dispatch("app.listen", port)` |
+| `hawk.app.get(path, handler)` | `hawk::get(path, handler)` |
+| `hawk.app.post(path, handler)` | `hawk::post(path, handler)` |
+| `hawk.app.put(path, handler)` | `hawk::put(path, handler)` |
+| `hawk.app.del(path, handler)` | `hawk::del(path, handler)` |
+| `hawk.app.patch(path, handler)` | `hawk::patch(path, handler)` |
+| `hawk.app.head(path, handler)` | `hawk::head(path, handler)` |
+| `hawk.app.on(methods, paths, handler)` | `hawk::on(methods, paths, handler)` |
+| `hawk.app.all(paths, handler)` | `hawk::all(paths, handler)` |
+| `hawk.app.listen(port)` | `hawk::listen(port)` |
 
 `handler` は関数名を表す文字列です。ルートは登録順にマッチします。
 
@@ -37,6 +38,17 @@ hawk.app.on("GET", ps, "list_todos")
 hawk.app.on("PURGE", "/cache", "purge_cache")
 ```
 
+## hawk.app.all(paths, handler)
+
+標準 HTTP メソッド（GET POST PUT DELETE PATCH HEAD OPTIONS）すべてを 1 つまたは複数のパスに登録します。
+
+```awk
+hawk.app.all("/health", "ping")
+
+delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
+hawk.app.all(ps, "handler")
+```
+
 ## hawk.app.listen(port)
 
 指定ポートで HTTP サーバーを起動します。`BEGIN` ブロック内で 1 回呼び出してください。
@@ -46,26 +58,17 @@ hawk.app.listen(8080)
 hawk.app.listen(env.get("PORT") ?? 8080)
 ```
 
-## hawk::all(paths, handler)
-
-標準 HTTP メソッド（GET POST PUT DELETE PATCH HEAD OPTIONS）すべてを 1 つまたは複数のパスに登録します。`hawk::` 名前空間を直接使用するため、`hawk.app.all` という DSL 形式は存在しません。
-
-```awk
-hawk::all("/health", "ping")
-
-delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
-hawk::all(ps, "handler")
-```
-
 ---
 
 # Context API (ctx.*)
+
+`ctx.*` は `ctx::dispatch(...)` 経由でディスパッチされ、対応する内部ハンドラにルーティングされます。DSL 形式と `ctx::dispatch(...)` 直接呼び出しは実行時に等価です。
 
 ## リクエスト (ctx.req.*)
 
 リクエストヘルパーは `Result<Untrusted<Str>, ParseError>` を返します。`when...of` または `?=` でアンラップしてください。空の値は `ok("")` を返し、欠落キーは `ng(ParseError, "missing ...")` を返します。
 
-| DSL | 脱糖後 | 戻り値の型 |
+| DSL | 直接呼び出し | 戻り値の型 |
 |---|---|---|
 | `ctx.req.query(key)` | `ctx::dispatch("req.query", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.param(key)` | `ctx::dispatch("req.param", key)` | `Result<Untrusted<Str>, ParseError>` |
@@ -76,7 +79,7 @@ hawk::all(ps, "handler")
 
 ## レスポンス (ctx.res.*)
 
-| DSL | 脱糖後 | 戻り値の型 |
+| DSL | 直接呼び出し | 戻り値の型 |
 |---|---|---|
 | `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | `Response` |
 | `ctx.res.json_raw(str)` | `ctx::dispatch("res.json_raw", str)` | `Response` |
@@ -120,16 +123,18 @@ function todo_add() -> Response {
 
 ## メソッド
 
-| DSL | 戻り値の型 | 説明 |
+| DSL | 名前空間形式 | 戻り値の型 |
 |---|---|---|
-| `cache.get(key)` | `Str` | キャッシュされた値を取得します。ヒットと空文字列を区別するには `cache.found()` を確認してください。 |
-| `cache.set(key, value, ttl)` | `Void` | TTL（秒）付きで値を保存します。`ttl=0` は無期限です。 |
-| `cache.del(key)` | `Void` | キーを削除します。存在しない場合は何もしません。 |
-| `cache.has(key)` | `Bool` | キーが存在し有効期限が切れていない場合は 1 を返します。 |
-| `cache.found()` | `Bool` | 最後の `cache.get` がヒットした場合は 1 を返します。 |
-| `cache.remember(key, ttl, fn)` | `Str` | キャッシュから取得、またはミス時に `fn()` を呼び出して結果をキャッシュして返します。 |
-| `cache.backend()` | `Str` | アクティブなバックエンド名（`zig`、`file`、`memory`、または `off`）を返します。 |
-| `cache.stats()` | `Str` | ヒット/ミス/セットカウンタを文字列で返します。 |
+| `cache.get(key)` | `cache::get(key)` | `Str` |
+| `cache.set(key, value, ttl)` | `cache::set(key, value, ttl)` | `Void` |
+| `cache.del(key)` | `cache::del(key)` | `Void` |
+| `cache.has(key)` | `cache::has(key)` | `Bool` |
+| `cache.found()` | `cache::found()` | `Bool` |
+| `cache.remember(key, ttl, fn)` | `cache::remember(key, ttl, fn)` | `Str` |
+| `cache.backend()` | `cache::backend()` | `Str` |
+| `cache.stats()` | `cache::stats()` | `Str` |
+
+`cache.get(key)` はキャッシュミスとキャッシュ済みの空文字列のどちらでも `""` を返します。`cache.get` の直後に `cache.found()` で区別してください。
 
 ## バックエンド選択
 
@@ -154,14 +159,14 @@ HAWK_CACHE_BACKEND=off  ./bin/hawk app.awk
 
 # 環境変数 (env.*)
 
-`env.` / `env::` は [Deno.env](https://deno.land/api?s=Deno.env) スタイルの実行時環境変数読み書き用の名前空間です。
+`env.*` / `env::` は [Deno.env](https://deno.land/api?s=Deno.env) スタイルの実行時環境変数読み書き用の名前空間です。
 
-| DSL | 脱糖後 | 説明 |
+| DSL | 名前空間形式 | 戻り値の型 |
 |---|---|---|
-| `env.get("KEY")` | `env::get("KEY")` | `ENVIRON["KEY"]` を返す。未設定なら `""` |
-| `env.set("KEY", val)` | `env::set("KEY", val)` | `ENVIRON["KEY"] = val`（現在のプロセスのみ） |
-| `env.del("KEY")` | `env::del("KEY")` | `ENVIRON["KEY"]` を削除 |
-| `env.has("KEY")` | `env::has("KEY")` | 設定されていれば `1`、そうでなければ `0` |
+| `env.get("KEY")` | `env::get("KEY")` | `Str` |
+| `env.set("KEY", val)` | `env::set("KEY", val)` | `Void` |
+| `env.del("KEY")` | `env::del("KEY")` | `Void` |
+| `env.has("KEY")` | `env::has("KEY")` | `Bool` |
 
 `env.set` / `env.del` で設定・削除した変数は同じ gawk プロセス内の後続の `env.get` から参照できますが、`system()` やパイプで起動した子プロセスには**伝播されません**。
 

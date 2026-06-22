@@ -2,18 +2,19 @@
 
 # App API (hawk.app.*)
 
-`hawk.app.*` is the primary routing interface. All methods desugar to `hawk::dispatch("app.*", ...)`.
+`hawk.app.*` is the primary routing interface. The DSL dot-notation form desugars to `hawk::dispatch("app.*", ...)`, which routes to the corresponding `hawk::` function. Both forms are equivalent at runtime.
 
-| DSL | Desugared |
+| DSL | Namespace form |
 |---|---|
-| `hawk.app.get(path, handler)` | `hawk::dispatch("app.get", path, handler)` |
-| `hawk.app.post(path, handler)` | `hawk::dispatch("app.post", path, handler)` |
-| `hawk.app.put(path, handler)` | `hawk::dispatch("app.put", path, handler)` |
-| `hawk.app.del(path, handler)` | `hawk::dispatch("app.del", path, handler)` |
-| `hawk.app.patch(path, handler)` | `hawk::dispatch("app.patch", path, handler)` |
-| `hawk.app.head(path, handler)` | `hawk::dispatch("app.head", path, handler)` |
-| `hawk.app.on(methods, paths, handler)` | `hawk::dispatch("app.on", methods, paths, handler)` |
-| `hawk.app.listen(port)` | `hawk::dispatch("app.listen", port)` |
+| `hawk.app.get(path, handler)` | `hawk::get(path, handler)` |
+| `hawk.app.post(path, handler)` | `hawk::post(path, handler)` |
+| `hawk.app.put(path, handler)` | `hawk::put(path, handler)` |
+| `hawk.app.del(path, handler)` | `hawk::del(path, handler)` |
+| `hawk.app.patch(path, handler)` | `hawk::patch(path, handler)` |
+| `hawk.app.head(path, handler)` | `hawk::head(path, handler)` |
+| `hawk.app.on(methods, paths, handler)` | `hawk::on(methods, paths, handler)` |
+| `hawk.app.all(paths, handler)` | `hawk::all(paths, handler)` |
+| `hawk.app.listen(port)` | `hawk::listen(port)` |
 
 `handler` is a function name as a string. Routes are matched in registration order.
 
@@ -37,6 +38,17 @@ hawk.app.on("GET", ps, "list_todos")
 hawk.app.on("PURGE", "/cache", "purge_cache")
 ```
 
+## hawk.app.all(paths, handler)
+
+Register all standard HTTP methods (GET POST PUT DELETE PATCH HEAD OPTIONS) for one or more paths.
+
+```awk
+hawk.app.all("/health", "ping")
+
+delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
+hawk.app.all(ps, "handler")
+```
+
 ## hawk.app.listen(port)
 
 Start the HTTP server on the given port. Call once in `BEGIN`.
@@ -46,26 +58,17 @@ hawk.app.listen(8080)
 hawk.app.listen(env.get("PORT") ?? 8080)
 ```
 
-## hawk::all(paths, handler)
-
-Register all standard HTTP methods (GET POST PUT DELETE PATCH HEAD OPTIONS) for one or more paths. This is a direct `hawk::` namespace call — there is no `hawk.app.all` DSL form.
-
-```awk
-hawk::all("/health", "ping")
-
-delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
-hawk::all(ps, "handler")
-```
-
 ---
 
 # Context API (ctx.*)
+
+`ctx.*` dispatches through `ctx::dispatch(...)`, which routes to the corresponding internal handler. Both the DSL form and the `ctx::dispatch(...)` direct call are equivalent at runtime.
 
 ## Request (ctx.req.*)
 
 Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` or `?=` to unwrap. Empty values return `ok("")`; missing keys return `ng(ParseError, "missing ...")`.
 
-| DSL | Desugared | Return type |
+| DSL | Direct call | Return type |
 |---|---|---|
 | `ctx.req.query(key)` | `ctx::dispatch("req.query", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.param(key)` | `ctx::dispatch("req.param", key)` | `Result<Untrusted<Str>, ParseError>` |
@@ -76,7 +79,7 @@ Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` 
 
 ## Response (ctx.res.*)
 
-| DSL | Desugared | Return type |
+| DSL | Direct call | Return type |
 |---|---|---|
 | `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | `Response` |
 | `ctx.res.json_raw(str)` | `ctx::dispatch("res.json_raw", str)` | `Response` |
@@ -120,16 +123,18 @@ function todo_add() -> Response {
 
 ## Methods
 
-| DSL | Return type | Description |
+| DSL | Namespace form | Return type |
 |---|---|---|
-| `cache.get(key)` | `Str` | Get cached value. Check `cache.found()` to distinguish a hit from an empty string. |
-| `cache.set(key, value, ttl)` | `Void` | Store value with TTL in seconds. `ttl=0` means no expiry. |
-| `cache.del(key)` | `Void` | Remove a key. No-op if key does not exist. |
-| `cache.has(key)` | `Bool` | Return 1 if key exists and has not expired. |
-| `cache.found()` | `Bool` | Return 1 if the most recent `cache.get` was a hit. |
-| `cache.remember(key, ttl, fn)` | `Str` | Get or compute: call `fn()` on miss, cache the result, return it. |
-| `cache.backend()` | `Str` | Return the active backend name (`zig`, `file`, `memory`, or `off`). |
-| `cache.stats()` | `Str` | Return hit/miss/set counters as a string. |
+| `cache.get(key)` | `cache::get(key)` | `Str` |
+| `cache.set(key, value, ttl)` | `cache::set(key, value, ttl)` | `Void` |
+| `cache.del(key)` | `cache::del(key)` | `Void` |
+| `cache.has(key)` | `cache::has(key)` | `Bool` |
+| `cache.found()` | `cache::found()` | `Bool` |
+| `cache.remember(key, ttl, fn)` | `cache::remember(key, ttl, fn)` | `Str` |
+| `cache.backend()` | `cache::backend()` | `Str` |
+| `cache.stats()` | `cache::stats()` | `Str` |
+
+`cache.get(key)` returns `""` on both a cache miss and a cached empty string — use `cache.found()` after `cache.get` to distinguish the two cases.
 
 ## Backend selection
 
@@ -154,14 +159,14 @@ HAWK_CACHE_BACKEND=off  ./bin/hawk app.awk
 
 # Environment (env.*)
 
-`env.` / `env::` is a [Deno.env](https://deno.land/api?s=Deno.env)-style namespace for reading and writing environment variables at runtime.
+`env.*` / `env::` is a [Deno.env](https://deno.land/api?s=Deno.env)-style namespace for reading and writing environment variables at runtime.
 
-| DSL | Desugared | Description |
+| DSL | Namespace form | Return type |
 |---|---|---|
-| `env.get("KEY")` | `env::get("KEY")` | Returns `ENVIRON["KEY"]`; `""` if unset |
-| `env.set("KEY", val)` | `env::set("KEY", val)` | `ENVIRON["KEY"] = val` (current process only) |
-| `env.del("KEY")` | `env::del("KEY")` | Deletes `ENVIRON["KEY"]` |
-| `env.has("KEY")` | `env::has("KEY")` | Returns `1` if set, `0` if not |
+| `env.get("KEY")` | `env::get("KEY")` | `Str` |
+| `env.set("KEY", val)` | `env::set("KEY", val)` | `Void` |
+| `env.del("KEY")` | `env::del("KEY")` | `Void` |
+| `env.has("KEY")` | `env::has("KEY")` | `Bool` |
 
 Variables set or deleted via `env.set` / `env.del` are visible to subsequent `env.get` calls within the same gawk process, but are **not** propagated to child processes spawned via `system()` or pipes.
 
