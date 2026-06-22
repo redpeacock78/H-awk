@@ -70,14 +70,14 @@ function add_todo() {
 
 | | |
 |---|---|
-| [セットアップ](wiki/setup.ja.md) | 動作要件、ビルド、バイナリ取得 |
-| [CLI リファレンス](wiki/cli.ja.md) | サブコマンドとフラグ |
-| [ルーティング](wiki/routing.ja.md) | ルート登録、ルーターファイル |
-| [DSL リファレンス](wiki/dsl.ja.md) | `let`、`when...of`、`??`、`|>`、型、safe HTML |
-| [API リファレンス](wiki/api.ja.md) | Context API、リクエスト/レスポンス、`env::` |
-| [プラグイン](wiki/plugins.ja.md) | プラグインフック、サブモジュール配布 |
-| [ネイティブ拡張](wiki/libs.ja.md) | Zig ライブラリ、キャッシュ API、マルチワーカー |
-| [テスト](wiki/testing.ja.md) | テストターゲットと CI |
+| [セットアップ](docs/ja/setup.ja.md) | 動作要件、ビルド、バイナリ取得 |
+| [CLI リファレンス](docs/ja/cli.ja.md) | サブコマンドとフラグ |
+| [ルーティング](docs/ja/routing.ja.md) | ルート登録、ルーターファイル |
+| [DSL リファレンス](docs/ja/dsl.ja.md) | `let`、`when...of`、`??`、`|>`、型、safe HTML |
+| [API リファレンス](docs/ja/api.ja.md) | Context API、リクエスト/レスポンス、`env::` |
+| [プラグイン](docs/ja/plugins.ja.md) | プラグインフック、サブモジュール配布 |
+| [ネイティブ拡張](docs/ja/libs.ja.md) | Zig ライブラリ、キャッシュ API、マルチワーカー |
+| [テスト](docs/ja/testing.ja.md) | テストターゲットと CI |
 
 ---
 

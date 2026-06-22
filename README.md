@@ -70,14 +70,14 @@ function add_todo() {
 
 | | |
 |---|---|
-| [Setup & Installation](wiki/setup.md) | Requirements, build-libs, fetch-libs |
-| [CLI Reference](wiki/cli.md) | Subcommands and flags |
-| [Routing](wiki/routing.md) | Route registration, router files |
-| [DSL Reference](wiki/dsl.md) | `let`, `when...of`, `??`, `|>`, types, safe HTML |
-| [API Reference](wiki/api.md) | Context API, request/response, `env::` |
-| [Plugins](wiki/plugins.md) | Plugin hooks, submodule distribution |
-| [Native Extensions](wiki/libs.md) | Zig libs, cache API, multi-worker |
-| [Testing](wiki/testing.md) | Test targets and CI |
+| [Setup & Installation](docs/setup.md) | Requirements, build-libs, fetch-libs |
+| [CLI Reference](docs/cli.md) | Subcommands and flags |
+| [Routing](docs/routing.md) | Route registration, router files |
+| [DSL Reference](docs/dsl.md) | `let`, `when...of`, `??`, `|>`, types, safe HTML |
+| [API Reference](docs/api.md) | Context API, request/response, `env::` |
+| [Plugins](docs/plugins.md) | Plugin hooks, submodule distribution |
+| [Native Extensions](docs/libs.md) | Zig libs, cache API, multi-worker |
+| [Testing](docs/testing.md) | Test targets and CI |
 
 ---
 MIT © redpeacock78 · 🌐 [日本語](README.ja.md)
