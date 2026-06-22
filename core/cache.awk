@@ -66,8 +66,12 @@ function remember(key, ttl_sec, fn,    v) {
   return v
 }
 
-function stats() {
-  return "backend=" _BACKEND " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
+function stats(    zig_stats) {
+  zig_stats = ""
+  if (_BACKEND == "zig" && LIBS_LOADED["cache"]) {
+    zig_stats = " " hawk_cache_stats()
+  }
+  return "backend=" _BACKEND zig_stats " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
 }
 
 function _detect_backend(    b, rd, test_f, rc) {
