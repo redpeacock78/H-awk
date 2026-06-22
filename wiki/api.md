@@ -155,6 +155,24 @@ HAWK_CACHE_BACKEND=file ./bin/hawk app.awk
 HAWK_CACHE_BACKEND=off  ./bin/hawk app.awk
 ```
 
+## Cache size (zig backend only)
+
+The `zig` backend allocates a fixed-size shared memory region (file-backed mmap). Control its size with `HAWK_SHARED_CACHE_SIZE`:
+
+```sh
+HAWK_SHARED_CACHE_SIZE=512K ./bin/hawk app.awk   # 512 KiB (default)
+HAWK_SHARED_CACHE_SIZE=1M   ./bin/hawk app.awk   # 1 MiB
+HAWK_SHARED_CACHE_SIZE=2097152 ./bin/hawk app.awk # raw bytes
+```
+
+| Value | Min | Max | Default |
+|---|---|---|---|
+| bytes / K / M | 64K | 64M | 512K |
+
+Values below 64K are clamped to 64K; values above 64M are clamped to 64M. Invalid strings fall back to 512K.
+
+> **Note:** The `zig` backend stores values up to 512 bytes. Longer values are rejected with `error.TooLarge`.
+
 ---
 
 # Environment (env.*)
