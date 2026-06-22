@@ -1,4 +1,4 @@
-🌐 [日本語](api.ja.md) | [← Back to README](../README.md)
+🌐 [日本語](ja/api.ja.md) | [← Back to README](../README.md)
 
 # App API (hawk.app.*)
 

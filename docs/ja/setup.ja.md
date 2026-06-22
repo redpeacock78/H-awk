@@ -1,4 +1,4 @@
-🌐 [English](setup.md) | [← README に戻る](../README.ja.md)
+🌐 [English](../setup.md) | [← README に戻る](../../README.ja.md)
 
 # セットアップ
 

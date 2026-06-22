@@ -1,4 +1,4 @@
-🌐 [日本語](testing.ja.md) | [← Back to README](../README.md)
+🌐 [日本語](ja/testing.ja.md) | [← Back to README](../README.md)
 
 # Testing
 

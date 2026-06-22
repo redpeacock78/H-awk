@@ -1,4 +1,4 @@
-🌐 [English](libs.md) | [← README に戻る](../README.ja.md)
+🌐 [English](../libs.md) | [← README に戻る](../../README.ja.md)
 
 # ネイティブ拡張
 

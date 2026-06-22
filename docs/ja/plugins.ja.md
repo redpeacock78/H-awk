@@ -1,4 +1,4 @@
-🌐 [English](plugins.md) | [← README に戻る](../README.ja.md)
+🌐 [English](../plugins.md) | [← README に戻る](../../README.ja.md)
 
 # プラグイン
 

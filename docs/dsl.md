@@ -1,4 +1,4 @@
-🌐 [日本語](dsl.ja.md) | [← Back to README](../README.md)
+🌐 [日本語](ja/dsl.ja.md) | [← Back to README](../README.md)
 
 # DSL Preprocessing
 

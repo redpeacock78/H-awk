@@ -1,4 +1,4 @@
-🌐 [English](cli.md) | [← README に戻る](../README.ja.md)
+🌐 [English](../cli.md) | [← README に戻る](../../README.ja.md)
 
 # CLI リファレンス
 

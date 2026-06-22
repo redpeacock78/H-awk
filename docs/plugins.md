@@ -1,4 +1,4 @@
-🌐 [日本語](plugins.ja.md) | [← Back to README](../README.md)
+🌐 [日本語](ja/plugins.ja.md) | [← Back to README](../README.md)
 
 # Plugins
 

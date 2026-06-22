@@ -1,4 +1,4 @@
-🌐 [日本語](libs.ja.md) | [← Back to README](../README.md)
+🌐 [日本語](ja/libs.ja.md) | [← Back to README](../README.md)
 
 # Native Extensions (libs)
 

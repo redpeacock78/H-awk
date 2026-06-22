@@ -1,4 +1,4 @@
-🌐 [English](dsl.md) | [← README に戻る](../README.ja.md)
+🌐 [English](../dsl.md) | [← README に戻る](../../README.ja.md)
 
 # DSL プリプロセッシング
 

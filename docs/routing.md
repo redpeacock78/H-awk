@@ -1,4 +1,4 @@
-🌐 [日本語](routing.ja.md) | [← Back to README](../README.md)
+🌐 [日本語](ja/routing.ja.md) | [← Back to README](../README.md)
 
 # Routing
 
