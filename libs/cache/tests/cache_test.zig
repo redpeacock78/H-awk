@@ -51,10 +51,10 @@ test "tombstone: del does not break displaced key" {
     var kb: []const u8 = "";
     outer: for (0..2000) |i| {
         ka = std.fmt.bufPrint(&buf_a, "ck_{d}", .{i}) catch continue;
-        const slot_a = cache.djb2(ka) % cache.SLOT_COUNT;
+        const slot_a = cache.djb2(ka) % @as(u64, cache.slotCount());
         for (i + 1..4000) |j| {
             kb = std.fmt.bufPrint(&buf_b, "ck_{d}", .{j}) catch continue;
-            if (cache.djb2(kb) % cache.SLOT_COUNT == slot_a) break :outer;
+            if (cache.djb2(kb) % @as(u64, cache.slotCount()) == slot_a) break :outer;
         }
     }
     try std.testing.expect(ka.len > 0);
