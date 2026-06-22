@@ -63,7 +63,6 @@ function add_todo() {
   end
 }
 ```
-
 ## Documentation
 
 | | |
