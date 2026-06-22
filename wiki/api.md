@@ -75,7 +75,7 @@ Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` 
 | `ctx.req.header(key)` | `ctx::dispatch("req.header", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.body()` | `ctx::dispatch("req.body")` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | `Result<Untrusted<Str>, ParseError>` |
-| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Map>, ParseError>` |
 
 ## Response (ctx.res.*)
 
@@ -95,7 +95,7 @@ Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` 
 
 > **Breaking change:** `ctx.res.json(data)` now JSON-encodes an AWK array or value. For the previous behavior — passing a pre-encoded JSON string unchanged — use `ctx.res.json_raw(str)`.
 
-`ctx.res.render(path)` reads templates through `HAWK_TEMPLATE_ROOT` when that environment variable is set. In that mode, absolute paths, `..` traversal, unsafe path characters, and paths outside the template root are rejected. If `HAWK_TEMPLATE_ROOT` is unset, the path is used as provided.
+`ctx.res.render(path)` reads templates through `HAWK_TEMPLATE_ROOT` when that environment variable is set. In that mode, empty paths, absolute paths, `..` traversal, unsafe path characters, and paths outside the template root are rejected. If `HAWK_TEMPLATE_ROOT` is unset, the path is used as provided.
 
 ---
 
@@ -114,7 +114,7 @@ function todo_list_html() -> Response {
   return ctx.res.html(safe.html.raw(out))
 }
 
-function todo_add() -> Response {
+function todo_add() -> Void {
   # ... write data ...
   cache.del("todos:html")   # invalidate on write
   cache.del("todos:json")

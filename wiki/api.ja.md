@@ -75,7 +75,7 @@ hawk.app.listen(env.get("PORT") ?? 8080)
 | `ctx.req.header(key)` | `ctx::dispatch("req.header", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.body()` | `ctx::dispatch("req.body")` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | `Result<Untrusted<Str>, ParseError>` |
-| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Map>, ParseError>` |
 
 ## レスポンス (ctx.res.*)
 
@@ -95,7 +95,7 @@ hawk.app.listen(env.get("PORT") ?? 8080)
 
 > **破壊的変更:** `ctx.res.json(data)` は AWK 配列または値を JSON エンコードするようになりました。以前の動作（事前エンコード済み JSON 文字列をそのまま通す）には `ctx.res.json_raw(str)` を使用してください。
 
-`ctx.res.render(path)` は `HAWK_TEMPLATE_ROOT` が設定されている場合、そのパスを通じてテンプレートを読み込みます。このモードでは、絶対パス・`..` トラバーサル・安全でないパス文字・テンプレートルート外のパスは拒否されます。未設定の場合、パスはそのまま使用されます。
+`ctx.res.render(path)` は `HAWK_TEMPLATE_ROOT` が設定されている場合、そのパスを通じてテンプレートを読み込みます。このモードでは、空パス・絶対パス・`..` トラバーサル・安全でないパス文字・テンプレートルート外のパスは拒否されます。未設定の場合、パスはそのまま使用されます。
 
 ---
 
@@ -114,7 +114,7 @@ function todo_list_html() -> Response {
   return ctx.res.html(safe.html.raw(out))
 }
 
-function todo_add() -> Response {
+function todo_add() -> Void {
   # ... write data ...
   cache.del("todos:html")   # invalidate on write
   cache.del("todos:json")
