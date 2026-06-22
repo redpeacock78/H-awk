@@ -4,7 +4,7 @@
 
 **GNU AWK 向け Express スタイル HTTP サーバー**
 
-[![CI](https://github.com/redpeacock78/hawk/actions/workflows/ci.yml/badge.svg)](https://github.com/redpeacock78/hawk/actions/workflows/ci.yml)
+[![CI](https://github.com/redpeacock78/H-awk/actions/workflows/ci.yml/badge.svg)](https://github.com/redpeacock78/H-awk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 AWK だけでバックエンドを書く。Node も Python もコンパイル済みバイナリも不要。
@@ -26,7 +26,7 @@ AWK だけでバックエンドを書く。Node も Python もコンパイル済
 
 ```sh
 cp .env.example .env
-./bin/hawk app.awk        # :8080 でワーカー 4 本起動
+./bin/hawk app.awk        # :8080 で起動（マルチワーカーは libs/net が必要）
 ```
 
 ```sh
@@ -71,7 +71,7 @@ function add_todo() {
 | [セットアップ](wiki/setup.ja.md) | 動作要件、ビルド、バイナリ取得 |
 | [CLI リファレンス](wiki/cli.ja.md) | サブコマンドとフラグ |
 | [ルーティング](wiki/routing.ja.md) | ルート登録、ルーターファイル |
-| [DSL リファレンス](wiki/dsl.ja.md) | `let`、`when...of`、`??`、`\|>`、型、safe HTML |
+| [DSL リファレンス](wiki/dsl.ja.md) | `let`、`when...of`、`??`、`|>`、型、safe HTML |
 | [API リファレンス](wiki/api.ja.md) | Context API、リクエスト/レスポンス、`env::` |
 | [プラグイン](wiki/plugins.ja.md) | プラグインフック、サブモジュール配布 |
 | [ネイティブ拡張](wiki/libs.ja.md) | Zig ライブラリ、キャッシュ API、マルチワーカー |

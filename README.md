@@ -4,7 +4,7 @@
 
 **Express-style HTTP server for GNU AWK**
 
-[![CI](https://github.com/redpeacock78/hawk/actions/workflows/ci.yml/badge.svg)](https://github.com/redpeacock78/hawk/actions/workflows/ci.yml)
+[![CI](https://github.com/redpeacock78/H-awk/actions/workflows/ci.yml/badge.svg)](https://github.com/redpeacock78/H-awk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Write backends in plain AWK. No Node. No Python. No compiled binaries.
@@ -26,7 +26,7 @@ Write backends in plain AWK. No Node. No Python. No compiled binaries.
 
 ```sh
 cp .env.example .env
-./bin/hawk app.awk        # Start on :8080 with 4 workers
+./bin/hawk app.awk        # Start on :8080 (multi-worker requires libs/net)
 ```
 
 ```sh
@@ -71,7 +71,7 @@ function add_todo() {
 | [Setup & Installation](wiki/setup.md) | Requirements, build-libs, fetch-libs |
 | [CLI Reference](wiki/cli.md) | Subcommands and flags |
 | [Routing](wiki/routing.md) | Route registration, router files |
-| [DSL Reference](wiki/dsl.md) | `let`, `when...of`, `??`, `\|>`, types, safe HTML |
+| [DSL Reference](wiki/dsl.md) | `let`, `when...of`, `??`, `|>`, types, safe HTML |
 | [API Reference](wiki/api.md) | Context API, request/response, `env::` |
 | [Plugins](wiki/plugins.md) | Plugin hooks, submodule distribution |
 | [Native Extensions](wiki/libs.md) | Zig libs, cache API, multi-worker |

@@ -20,13 +20,13 @@ cp .env.example .env
 # Optional: build native extensions (binary I/O, TCP transport, etc.)
 make build-libs
 
-# Start the server (default :8080, 4 workers)
+# Start the server (default :8080, single worker without libs/net)
 ./bin/hawk app.awk
 
 # Or with make
-make run                  # 4 workers (default)
-make run WORKERS=8        # 8 workers
-make run WORKERS=1        # single worker (debug)
+make run                  # 4 workers (requires libs/net)
+make run WORKERS=8        # 8 workers (requires libs/net)
+make run WORKERS=1        # single worker (no libs/net needed)
 ```
 
 ```sh
@@ -50,7 +50,7 @@ HAWK_REPO=<owner>/<repo> make fetch-libs
 
 Enabled libs are shown at startup:
 
-```
+```text
 [INFO]  H-awk listening on http://0.0.0.0:8080 [libs: net, binary]
 ```
 

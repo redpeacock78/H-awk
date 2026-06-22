@@ -537,7 +537,7 @@ Unwrap a `Result<T, E>` or `Option<T>` value in one step. On failure the handler
 # DSL — Result<T, E> (returns by error type on ng)
 function create_todo() {
   let body ?= ctx.req.json()
-  # body is now the unwrapped Untrusted<Map> value
+  # body is now the unwrapped Untrusted<Str> value
 }
 
 # Desugared

@@ -20,13 +20,13 @@ cp .env.example .env
 # オプション: ネイティブ拡張をビルド (バイナリ I/O、TCP トランスポート等)
 make build-libs
 
-# サーバー起動 (デフォルト :8080、ワーカー 4 本)
+# サーバー起動 (デフォルト :8080、libs/net なしはシングルワーカー)
 ./bin/hawk app.awk
 
 # make 経由でも可
-make run                  # 4 workers (デフォルト)
-make run WORKERS=8        # 8 workers
-make run WORKERS=1        # 1 worker (デバッグ)
+make run                  # 4 workers (libs/net 必須)
+make run WORKERS=8        # 8 workers (libs/net 必須)
+make run WORKERS=1        # 1 worker (libs/net 不要)
 ```
 
 ```sh
@@ -50,7 +50,7 @@ HAWK_REPO=<owner>/<repo> make fetch-libs
 
 起動時に有効なライブラリが表示されます:
 
-```
+```text
 [INFO]  H-awk listening on http://0.0.0.0:8080 [libs: net, binary]
 ```
 

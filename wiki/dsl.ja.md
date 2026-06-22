@@ -537,7 +537,7 @@ function find_title(id) {
 # DSL — Result<T, E> (returns by error type on ng)
 function create_todo() {
   let body ?= ctx.req.json()
-  # body is now the unwrapped Untrusted<Map> value
+  # body is now the unwrapped Untrusted<Str> value
 }
 
 # Desugared

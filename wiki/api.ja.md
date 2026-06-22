@@ -59,7 +59,7 @@ hawk::all(ps, "handler")
 | `ctx.req.header(key)` | `ctx::dispatch("req.header", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.body()` | `ctx::dispatch("req.body")` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | `Result<Untrusted<Str>, ParseError>` |
-| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Map>, ParseError>` |
+| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | `Response` |
 | `ctx.res.json_raw(str)` | `ctx::dispatch("res.json_raw", str)` | `Response` |
 | `ctx.res.text(data)` | `ctx::dispatch("res.text", data)` | `Response` |
