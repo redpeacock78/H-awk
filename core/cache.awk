@@ -99,8 +99,8 @@ function _detect_backend(    b, rd, test_f, rc) {
   }
 
   if (b == "auto") {
+    if (awk::LIBS_LOADED["cache"] && (!("HAWK_RUN_DIR" in ENVIRON) || ENVIRON["HAWK_RUN_DIR"] != "")) { _BACKEND = "zig"; return _BACKEND }
     rd = ENVIRON["HAWK_RUN_DIR"]
-    if (rd != "" && awk::LIBS_LOADED["cache"]) { _BACKEND = "zig"; return _BACKEND }
     if (rd != "") {
       test_f = rd "/cache/.hawk_write_test_" PROCINFO["pid"]
       rc = system("mkdir -p \"" rd "/cache\" && touch \"" test_f "\" 2>/dev/null && rm -f \"" test_f "\"")
