@@ -77,7 +77,7 @@ hawk::all(ps, "handler")
 
 `ctx.res.render(path)` は環境変数 `HAWK_TEMPLATE_ROOT` が設定されている場合、そのパスを通じてテンプレートを読み込みます。このモードでは、絶対パス、`..` トラバーサル、安全でないパス文字、テンプレートルートの外に解決されたパスは拒否されます。`HAWK_TEMPLATE_ROOT` が設定されていない場合、パスはそのまま使用されます。
 
-# 環境変数 (env::)
+## 環境変数 (env::)
 
 `env::` は [Deno.env](https://deno.land/api?s=Deno.env) スタイルの実行時環境変数読み書き用の名前空間です。
 
@@ -104,4 +104,4 @@ env.has("KEY")
 hawk.app.listen(env.get("PORT") ?? 8080)
 ```
 
-*ルート分割で `@namespace` を使う場合については、[ルーティング](routing.md#ルーターファイル)を参照してください。*
+*ルート分割で `@namespace` を使う場合については、[ルーティング](routing.ja.md#ルーターファイル)を参照してください。*

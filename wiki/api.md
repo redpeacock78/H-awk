@@ -77,7 +77,7 @@ Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` 
 
 `ctx.res.render(path)` reads templates through `HAWK_TEMPLATE_ROOT` when that environment variable is set. In that mode, absolute paths, `..` traversal, unsafe path characters, and resolved paths outside the template root are rejected. If `HAWK_TEMPLATE_ROOT` is unset, the path is used as provided.
 
-# Environment (env::)
+## Environment (env::)
 
 `env::` is a [Deno.env](https://deno.land/api?s=Deno.env)-style namespace for reading and writing environment variables at runtime.
 
