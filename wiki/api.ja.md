@@ -155,6 +155,24 @@ HAWK_CACHE_BACKEND=file ./bin/hawk app.awk
 HAWK_CACHE_BACKEND=off  ./bin/hawk app.awk
 ```
 
+## キャッシュサイズ（zig バックエンド専用）
+
+`zig` バックエンドは固定サイズの共有メモリ領域（file-backed mmap）を確保します。`HAWK_SHARED_CACHE_SIZE` でサイズを指定できます。
+
+```sh
+HAWK_SHARED_CACHE_SIZE=512K ./bin/hawk app.awk   # 512 KiB（デフォルト）
+HAWK_SHARED_CACHE_SIZE=1M   ./bin/hawk app.awk   # 1 MiB
+HAWK_SHARED_CACHE_SIZE=2097152 ./bin/hawk app.awk # バイト数で直接指定
+```
+
+| 値 | 最小 | 最大 | デフォルト |
+|---|---|---|---|
+| バイト数 / K / M | 64K | 64M | 512K |
+
+64K 未満は 64K に、64M 超過は 64M に丸めます。不正値は 512K にフォールバックします。
+
+> **注意:** `zig` バックエンドは最大 512 バイトの値を保存できます。それより長い値は `error.TooLarge` で拒否されます。
+
 ---
 
 # 環境変数 (env.*)
