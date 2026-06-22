@@ -17,16 +17,14 @@ run: ## サーバー起動 (WORKERS=N, STRICT=1)
 	./bin/hawk serve --workers $(WORKERS) $(APP)
 
 bench: ## cache on/off benchmark (hey が必要)
-	@echo "=== cache on (zig backend, 8 workers) ==="
-	HAWK_CACHE_BACKEND=zig $(MAKE) run WORKERS=8 &
-	@BENCH_PID=$$!; \
+	@echo "=== cache on (zig backend, 8 workers) ===" && \
+	HAWK_CACHE_BACKEND=zig ./bin/hawk serve --workers 8 $(APP) & BENCH_PID=$$!; \
 	sleep 2; \
 	hey -n 10000 -c 100 http://127.0.0.1:$(PORT)/todos.json; \
 	kill $$BENCH_PID 2>/dev/null || true
 	@echo ""
-	@echo "=== cache off (8 workers) ==="
-	HAWK_CACHE_BACKEND=off $(MAKE) run WORKERS=8 &
-	@BENCH_PID=$$!; \
+	@echo "=== cache off (8 workers) ===" && \
+	HAWK_CACHE_BACKEND=off ./bin/hawk serve --workers 8 $(APP) & BENCH_PID=$$!; \
 	sleep 2; \
 	hey -n 10000 -c 100 http://127.0.0.1:$(PORT)/todos.json; \
 	kill $$BENCH_PID 2>/dev/null || true
