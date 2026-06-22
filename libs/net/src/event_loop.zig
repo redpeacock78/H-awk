@@ -58,20 +58,20 @@ pub const EventLoop = struct {
 
         // Set SO_REUSEADDR + SO_REUSEPORT (enables multi-worker kernel-level load balancing)
         const reuse: c_int = 1;
-        _ = std.posix.system.setsockopt(
+        if (std.posix.errno(std.posix.system.setsockopt(
             listen_fd,
             std.posix.SOL.SOCKET,
             std.posix.SO.REUSEADDR,
             @ptrCast(&reuse),
             @sizeOf(c_int),
-        );
-        _ = std.posix.system.setsockopt(
+        )) != .SUCCESS) return error.SetSockOptReuseAddr;
+        if (std.posix.errno(std.posix.system.setsockopt(
             listen_fd,
             std.posix.SOL.SOCKET,
             std.c.SO.REUSEPORT,
             @ptrCast(&reuse),
             @sizeOf(c_int),
-        );
+        )) != .SUCCESS) return error.SetSockOptReusePort;
 
         // Set non-blocking
         const flags_rc = std.posix.system.fcntl(listen_fd, std.posix.F.GETFL, @as(usize, 0));
@@ -387,7 +387,11 @@ pub const EventLoop = struct {
                 },
             };
             var events: [0]std.posix.Kevent = .{};
-            _ = std.posix.system.kevent(kq, &changes, changes.len, &events, 0, null);
+            if (std.posix.errno(std.posix.system.kevent(kq, &changes, changes.len, &events, 0, null)) != .SUCCESS) {
+                self.pool.remove(conn_id);
+                _ = std.posix.system.close(client_fd);
+                continue;
+            }
         }
     }
 
@@ -658,14 +662,13 @@ pub const EventLoop = struct {
                 _ = std.posix.system.close(client_fd);
                 continue;
             };
-            _ = conn_id;
 
             var ev = linux.epoll_event{
                 .events = linux.EPOLL.IN,
                 .data = .{ .fd = client_fd },
             };
             std.posix.epoll_ctl(epoll_fd, linux.EPOLL.CTL_ADD, client_fd, &ev) catch {
-                self.pool.remove(client_fd);
+                self.pool.remove(conn_id);
                 _ = std.posix.system.close(client_fd);
             };
         }
