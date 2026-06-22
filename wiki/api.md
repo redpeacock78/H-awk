@@ -1,25 +1,26 @@
 🌐 [日本語](api.ja.md) | [← Back to README](../README.md)
 
-# App API (hawk::)
+# App API (hawk.app.*)
 
-`hawk.app.*` is the primary routing interface in DSL style. Desugars to `hawk::dispatch("app.*", ...)`.
+`hawk.app.*` is the primary routing interface. The DSL dot-notation form desugars to `hawk::dispatch("app.*", ...)`, which routes to the corresponding `hawk::` function. Both forms are equivalent at runtime.
 
-## Routing methods
+| DSL | Namespace form |
+|---|---|
+| `hawk.app.get(path, handler)` | `hawk::get(path, handler)` |
+| `hawk.app.post(path, handler)` | `hawk::post(path, handler)` |
+| `hawk.app.put(path, handler)` | `hawk::put(path, handler)` |
+| `hawk.app.del(path, handler)` | `hawk::del(path, handler)` |
+| `hawk.app.patch(path, handler)` | `hawk::patch(path, handler)` |
+| `hawk.app.head(path, handler)` | `hawk::head(path, handler)` |
+| `hawk.app.on(methods, paths, handler)` | `hawk::on(methods, paths, handler)` |
+| `hawk.app.all(paths, handler)` | `hawk::all(paths, handler)` |
+| `hawk.app.listen(port)` | `hawk::listen(port)` |
 
-```awk
-hawk.app.get(path, handler)
-hawk.app.post(path, handler)
-hawk.app.put(path, handler)
-hawk.app.del(path, handler)
-hawk.app.patch(path, handler)
-hawk.app.head(path, handler)
-hawk.app.on(methods, paths, handler)
-hawk.app.listen(port)
-```
+`handler` is a function name as a string. Routes are matched in registration order.
 
-## `hawk.app.on(methods, paths, handler)`
+## hawk.app.on(methods, paths, handler)
 
-Register routes for multiple methods and/or paths. Pass strings or gawk arrays.
+Register routes for multiple methods and/or paths at once. Pass strings or gawk arrays for either argument.
 
 ```awk
 # single method + path
@@ -37,33 +38,53 @@ hawk.app.on("GET", ps, "list_todos")
 hawk.app.on("PURGE", "/cache", "purge_cache")
 ```
 
-## `hawk::all(paths, handler)`
+## hawk.app.all(paths, handler)
 
-Register all standard methods (GET POST PUT DELETE PATCH HEAD OPTIONS) for one or more paths.
+Register all standard HTTP methods (GET POST PUT DELETE PATCH HEAD OPTIONS) for one or more paths.
 
 ```awk
-hawk::all("/health", "ping")
+hawk.app.all("/health", "ping")
 
 delete ps; ps[1] = "/todos"; ps[2] = "/tasks"
-hawk::all(ps, "handler")
+hawk.app.all(ps, "handler")
 ```
 
-## Context API reference
+## hawk.app.listen(port)
 
-Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` or `?=` to unwrap. Empty values are present values and return `ok("")`; missing keys return `ng(ParseError, "missing ...")`.
+Start the HTTP server on the given port. Call once in `BEGIN`.
 
-| DSL | Desugared | Return type |
+```awk
+hawk.app.listen(8080)
+hawk.app.listen(env.get("PORT") ?? 8080)
+```
+
+---
+
+# Context API (ctx.*)
+
+`ctx.*` dispatches through `ctx::dispatch(...)`, which routes to the corresponding internal handler. Both the DSL form and the `ctx::dispatch(...)` direct call are equivalent at runtime.
+
+## Request (ctx.req.*)
+
+Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` or `?=` to unwrap. Empty values return `ok("")`; missing keys return `ng(ParseError, "missing ...")`.
+
+| DSL | Direct call | Return type |
 |---|---|---|
 | `ctx.req.query(key)` | `ctx::dispatch("req.query", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.param(key)` | `ctx::dispatch("req.param", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.header(key)` | `ctx::dispatch("req.header", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.body()` | `ctx::dispatch("req.body")` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | `Result<Untrusted<Str>, ParseError>` |
-| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Str>, ParseError>` |
+| `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Map>, ParseError>` |
+
+## Response (ctx.res.*)
+
+| DSL | Direct call | Return type |
+|---|---|---|
 | `ctx.res.json(data)` | `ctx::dispatch("res.json", data)` | `Response` |
 | `ctx.res.json_raw(str)` | `ctx::dispatch("res.json_raw", str)` | `Response` |
 | `ctx.res.text(data)` | `ctx::dispatch("res.text", data)` | `Response` |
-| `ctx.res.html(data)` | `ctx::dispatch("res.html", data)` | `Response` (`HtmlEscapedStr\|HtmlFragment` required) |
+| `ctx.res.html(data)` | `ctx::dispatch("res.html", data)` | `Response` (requires `HtmlEscapedStr\|HtmlFragment`) |
 | `ctx.res.render(path)` | `ctx::dispatch("res.render", path)` | `Response` |
 | `ctx.res.status(code)` | `ctx::dispatch("res.status", code)` | `Response` |
 | `ctx.res.header(name, val)` | `ctx::dispatch("res.header", name, val)` | `Response` |
@@ -72,32 +93,82 @@ Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` 
 
 `ctx.res.json(data)` JSON-encodes an AWK array or scalar value and sets the response body with `Content-Type: application/json; charset=utf-8`. Use `ctx.res.json_raw(str)` only when `str` is already encoded JSON and should be sent as-is.
 
-> **Breaking change:** `ctx.res.json(data)` now JSON-encodes an AWK array or value and sets it on the response.
-> For the previous behavior, where a pre-encoded JSON string was passed through unchanged, use `ctx.res.json_raw(str)`.
+> **Breaking change:** `ctx.res.json(data)` now JSON-encodes an AWK array or value. For the previous behavior — passing a pre-encoded JSON string unchanged — use `ctx.res.json_raw(str)`.
 
-`ctx.res.render(path)` reads templates through `HAWK_TEMPLATE_ROOT` when that environment variable is set. In that mode, absolute paths, `..` traversal, unsafe path characters, and resolved paths outside the template root are rejected. If `HAWK_TEMPLATE_ROOT` is unset, the path is used as provided.
+`ctx.res.render(path)` reads templates through `HAWK_TEMPLATE_ROOT` when that environment variable is set. In that mode, empty paths, absolute paths, `..` traversal, unsafe path characters, and paths outside the template root are rejected. If `HAWK_TEMPLATE_ROOT` is unset, the path is used as provided.
 
-## Environment (env::)
+---
 
-`env::` is a [Deno.env](https://deno.land/api?s=Deno.env)-style namespace for reading and writing environment variables at runtime.
+# Cache API (cache.*)
 
-```awk
-env::get("KEY")          # returns ENVIRON["KEY"]; "" if unset
-env::set("KEY", "val")   # ENVIRON["KEY"] = "val" (current process only)
-env::del("KEY")          # delete ENVIRON["KEY"]
-env::has("KEY")          # 1 if set, 0 if not
-```
-
-DSL-style (dot-notation) invocations are also supported:
+Built-in cache facade with automatic backend selection. Use dot-notation in your AWK files.
 
 ```awk
-env.get("KEY")
-env.set("KEY", "val")
-env.del("KEY")
-env.has("KEY")
+function todo_list_html() -> Response {
+  let cached: Str = cache.get("todos:html")
+  if (cache.found()) {
+    return ctx.res.html(safe.html.raw(cached))
+  }
+  # ... build response ...
+  cache.set("todos:html", out, 30)   # TTL: 30 seconds
+  return ctx.res.html(safe.html.raw(out))
+}
+
+function todo_add() -> Void {
+  # ... write data ...
+  cache.del("todos:html")   # invalidate on write
+  cache.del("todos:json")
+}
 ```
 
-Variables set or deleted via `env::set` / `env::del` are visible to subsequent `env::get` calls within the same gawk process, but are **not** propagated to child processes spawned via `system()` or pipes.
+## Methods
+
+| DSL | Namespace form | Return type |
+|---|---|---|
+| `cache.get(key)` | `cache::get(key)` | `Str` |
+| `cache.set(key, value, ttl)` | `cache::set(key, value, ttl)` | `Void` |
+| `cache.del(key)` | `cache::del(key)` | `Void` |
+| `cache.has(key)` | `cache::has(key)` | `Bool` |
+| `cache.found()` | `cache::found()` | `Bool` |
+| `cache.remember(key, ttl, fn)` | `cache::remember(key, ttl, fn)` | `Str` |
+| `cache.backend()` | `cache::backend()` | `Str` |
+| `cache.stats()` | `cache::stats()` | `Str` |
+
+`cache.get(key)` returns `""` on both a cache miss and a cached empty string — use `cache.found()` after `cache.get` to distinguish the two cases.
+
+## Backend selection
+
+Set `HAWK_CACHE_BACKEND` to choose a backend explicitly, or leave unset for automatic selection:
+
+| Value | Description |
+|---|---|
+| `auto` (default) | `zig` → `file` → `memory`, whichever is available first |
+| `zig` | Shared-memory cache via `libs/cache` (requires `make build-libs`). Shared across all workers. |
+| `file` | File-backed cache at `$HAWK_RUN_DIR/cache/cache.tsv`. Shared across workers. No Zig required. |
+| `memory` | Process-local AWK array. Not shared between workers. |
+| `off` | Cache disabled. `cache.get` always misses, `cache.set` is a no-op. |
+
+When `libs/cache` is built, the `zig` backend is selected automatically and all workers share the same cache. Without it, `file` is used if `HAWK_RUN_DIR` is writable, otherwise `memory`.
+
+```sh
+HAWK_CACHE_BACKEND=file ./bin/hawk app.awk
+HAWK_CACHE_BACKEND=off  ./bin/hawk app.awk
+```
+
+---
+
+# Environment (env.*)
+
+`env.*` / `env::` is a [Deno.env](https://deno.land/api?s=Deno.env)-style namespace for reading and writing environment variables at runtime.
+
+| DSL | Namespace form | Return type |
+|---|---|---|
+| `env.get("KEY")` | `env::get("KEY")` | `Str` |
+| `env.set("KEY", val)` | `env::set("KEY", val)` | `Void` |
+| `env.del("KEY")` | `env::del("KEY")` | `Void` |
+| `env.has("KEY")` | `env::has("KEY")` | `Bool` |
+
+Variables set or deleted via `env.set` / `env.del` are visible to subsequent `env.get` calls within the same gawk process, but are **not** propagated to child processes spawned via `system()` or pipes.
 
 ```awk
 # Read port from environment, fall back to 8080

@@ -12,65 +12,9 @@ Optional Zig-compiled gawk extensions unlock capabilities beyond what AWK can do
 | `libs/crypto` | SHA-256 / HMAC-SHA256 |
 | `libs/gzip` | Gzip / deflate compression |
 | `libs/url` | High-performance URL encode/decode |
+| `libs/cache` | Shared-memory cache backend for the [Cache API](api.md#cache-api-cache) |
 
-H-awk runs without any libs. Missing libs degrade gracefully — e.g., the server falls back to gawk's `/inet/tcp/` transport if `libs/net` is absent.
-
-## Cache API
-
-H-awk provides a built-in cache facade with automatic backend selection. Use dot-notation in your AWK files:
-
-```awk
-function todo_list_html() -> Response {
-  let cached: Str = cache.get("todos:html")
-  if (cache.found()) {
-    return ctx.res.html(safe.html.raw(cached))
-  }
-  # ... build response ...
-  cache.set("todos:html", out, 30)   # TTL: 30 seconds
-  return ctx.res.html(safe.html.raw(out))
-}
-
-function todo_add() -> Response {
-  # ... write data ...
-  cache.del("todos:html")   # invalidate on write
-  cache.del("todos:json")
-}
-```
-
-### Cache API reference
-
-| DSL | Return type | Description |
-|---|---|---|
-| `cache.get(key)` | `Str` | Get cached value. Check `cache.found()` to distinguish a cache hit from an empty string. |
-| `cache.set(key, value, ttl)` | `Void` | Store value with TTL in seconds. `ttl=0` means no expiry. |
-| `cache.del(key)` | `Void` | Remove a key. No-op if key does not exist. |
-| `cache.has(key)` | `Bool` | Return 1 if key exists and has not expired. |
-| `cache.found()` | `Bool` | Return 1 if the most recent `cache.get` was a hit. |
-| `cache.remember(key, ttl, fn)` | `Str` | Get or compute: call `fn()` on miss, cache the result, return it. |
-| `cache.backend()` | `Str` | Return the active backend name (`zig`, `file`, `memory`, or `off`). |
-| `cache.stats()` | `Str` | Return hit/miss/set counters as a string. |
-
-### Backend selection
-
-Set `HAWK_CACHE_BACKEND` to choose a backend explicitly, or leave it unset for automatic selection:
-
-| Value | Description |
-|---|---|
-| `auto` (default) | `zig` → `file` → `memory`, whichever is available first |
-| `zig` | Shared-memory cache via `libs/cache` (requires `make build-libs`). Shared across all workers. |
-| `file` | File-backed cache at `$HAWK_RUN_DIR/cache/cache.tsv`. Shared across workers. No Zig required. |
-| `memory` | Process-local AWK array. Not shared between workers. |
-| `off` | Cache disabled. `cache.get` always misses, `cache.set` is a no-op. |
-
-When `libs/cache` is built, the `zig` backend is used automatically and all workers share the same cache. Without it, `file` is used if `HAWK_RUN_DIR` is writable, otherwise `memory`.
-
-```sh
-# Explicit backend
-HAWK_CACHE_BACKEND=file ./bin/hawk app.awk
-
-# Disable cache
-HAWK_CACHE_BACKEND=off ./bin/hawk app.awk
-```
+H-awk runs without any libs. Missing libs degrade gracefully — e.g., the server falls back to gawk's `/inet/tcp/` transport if `libs/net` is absent, and the Cache API falls back to `file` or `memory` if `libs/cache` is absent.
 
 ## Multi-worker & Keep-Alive (`libs/net`)
 
@@ -110,6 +54,6 @@ HAWK_REPO=<owner>/<repo> make fetch-libs
 
 Enabled libs are shown at startup:
 
-```
+```text
 [INFO]  H-awk listening on http://0.0.0.0:8080 [libs: net, binary]
 ```
