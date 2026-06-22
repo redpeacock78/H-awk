@@ -6,6 +6,7 @@ const ffi = @import("gawk_ffi");
 const cache = @import("cache");
 
 var _inited = false;
+var _stats_buf: [256]u8 = undefined;
 
 fn ensureInit() void {
     if (!_inited) { cache.init(); _inited = true; }
@@ -46,8 +47,7 @@ fn cacheHas(args: ffi.Args) ffi.Result {
 }
 
 fn cacheStats(_: ffi.Args) ffi.Result {
-    var buf: [256]u8 = undefined;
-    const s = std.fmt.bufPrint(&buf, "shared={d} size={d} slots={d} key_max={d} val_max={d}", .{
+    const s = std.fmt.bufPrint(&_stats_buf, "shared={d} size={d} slots={d} key_max={d} val_max={d}", .{
         @intFromBool(cache.isShared()),
         cache.getCacheSize(),
         cache.slotCount(),
