@@ -77,5 +77,4 @@ function add_todo() {
 | [Testing](wiki/testing.md) | Test targets and CI |
 
 ---
-
 MIT © redpeacock78 · 🌐 [日本語](README.ja.md)
