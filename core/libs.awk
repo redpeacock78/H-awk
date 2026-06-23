@@ -8,7 +8,7 @@
 # サポート対象 libs:
 #   net      -- Zig TCP transport
 #   binary   -- binary-safe file I/O
-#   multipart, crypto, gzip, url
+#   multipart, crypto, gzip, url, json
 
 BEGIN {
   if (HAWK_LIBS_net)       LIBS_LOADED["net"]       = 1
@@ -17,5 +17,6 @@ BEGIN {
   if (HAWK_LIBS_crypto)    LIBS_LOADED["crypto"]    = 1
   if (HAWK_LIBS_gzip)      LIBS_LOADED["gzip"]      = 1
   if (HAWK_LIBS_url)       LIBS_LOADED["url"]       = 1
+  if (HAWK_LIBS_json)      LIBS_LOADED["json"]      = 1
   if (HAWK_LIBS_cache)     LIBS_LOADED["cache"]     = 1
 }

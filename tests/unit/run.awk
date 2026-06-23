@@ -21,6 +21,8 @@ BEGIN {
   test_json_encode_any_scalar()
   test_json_encode_any_array()
   test_json_encode_any_object()
+  test_json_valid_object()
+  test_json_decode_invalid()
 
   test_tsv_append_and_read()
   test_tsv_find()
@@ -183,6 +185,7 @@ function assert_true(cond, msg) {
 
 @include "tests/unit/test_util.awk"
 @include "tests/unit/test_json.awk"
+@include "tests/unit/test_json_libs.awk"
 @include "tests/unit/test_tsv.awk"
 @include "tests/unit/test_template.awk"
 @include "tests/unit/test_static.awk"
