@@ -9,6 +9,69 @@ const BACKLOG: u31 = 128;
 const MAX_EVENTS = 64;
 const READ_BUF_SIZE = 65536;
 
+fn setNonBlocking(fd: std.posix.socket_t) !void {
+    const flags_rc = std.posix.system.fcntl(fd, std.posix.F.GETFL, @as(usize, 0));
+    if (std.posix.errno(flags_rc) != .SUCCESS) return error.Fcntl;
+    var fl_flags: usize = @intCast(flags_rc);
+    fl_flags |= @as(usize, 1 << @bitOffsetOf(std.posix.O, "NONBLOCK"));
+    if (std.posix.errno(std.posix.system.fcntl(fd, std.posix.F.SETFL, fl_flags)) != .SUCCESS) return error.Fcntl;
+}
+
+fn inheritedListenSocket() !?std.posix.socket_t {
+    const val = std.c.getenv("HAWK_LISTEN_FD") orelse return null;
+    const fd = try std.fmt.parseInt(std.posix.socket_t, std.mem.sliceTo(val, 0), 10);
+    try setNonBlocking(fd);
+    return fd;
+}
+
+fn createListenSocket(port: u16) !std.posix.socket_t {
+    const listen_fd = blk: {
+        const fd_rc = std.posix.system.socket(
+            std.posix.AF.INET,
+            std.posix.SOCK.STREAM,
+            std.posix.IPPROTO.TCP,
+        );
+        if (std.posix.errno(fd_rc) != .SUCCESS) return error.SocketCreate;
+        break :blk @as(std.posix.socket_t, @intCast(fd_rc));
+    };
+    errdefer _ = std.posix.system.close(listen_fd);
+
+    // Set SO_REUSEADDR + SO_REUSEPORT (enables multi-worker kernel-level load balancing)
+    const reuse: c_int = 1;
+    if (std.posix.errno(std.posix.system.setsockopt(
+        listen_fd,
+        std.posix.SOL.SOCKET,
+        std.posix.SO.REUSEADDR,
+        @ptrCast(&reuse),
+        @sizeOf(c_int),
+    )) != .SUCCESS) return error.SetSockOptReuseAddr;
+    if (std.posix.errno(std.posix.system.setsockopt(
+        listen_fd,
+        std.posix.SOL.SOCKET,
+        std.c.SO.REUSEPORT,
+        @ptrCast(&reuse),
+        @sizeOf(c_int),
+    )) != .SUCCESS) return error.SetSockOptReusePort;
+
+    try setNonBlocking(listen_fd);
+
+    const addr = std.posix.sockaddr.in{
+        .port = std.mem.nativeToBig(u16, port),
+        .addr = 0, // INADDR_ANY
+    };
+    const bind_rc = std.posix.system.bind(
+        listen_fd,
+        @ptrCast(&addr),
+        @sizeOf(std.posix.sockaddr.in),
+    );
+    if (std.posix.errno(bind_rc) != .SUCCESS) return error.Bind;
+
+    const listen_rc = std.posix.system.listen(listen_fd, BACKLOG);
+    if (std.posix.errno(listen_rc) != .SUCCESS) return error.Listen;
+
+    return listen_fd;
+}
+
 fn monoNanos() i64 {
     var ts: std.c.timespec = undefined;
     _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
@@ -44,57 +107,8 @@ pub const EventLoop = struct {
     keepalive_timeout_ns: i64,
 
     pub fn init(alloc: std.mem.Allocator, port: u16) !EventLoop {
-        // Create listening socket
-        const listen_fd = blk: {
-            const fd_rc = std.posix.system.socket(
-                std.posix.AF.INET,
-                std.posix.SOCK.STREAM,
-                std.posix.IPPROTO.TCP,
-            );
-            if (std.posix.errno(fd_rc) != .SUCCESS) return error.SocketCreate;
-            break :blk @as(std.posix.socket_t, @intCast(fd_rc));
-        };
+        const listen_fd = try inheritedListenSocket() orelse try createListenSocket(port);
         errdefer _ = std.posix.system.close(listen_fd);
-
-        // Set SO_REUSEADDR + SO_REUSEPORT (enables multi-worker kernel-level load balancing)
-        const reuse: c_int = 1;
-        if (std.posix.errno(std.posix.system.setsockopt(
-            listen_fd,
-            std.posix.SOL.SOCKET,
-            std.posix.SO.REUSEADDR,
-            @ptrCast(&reuse),
-            @sizeOf(c_int),
-        )) != .SUCCESS) return error.SetSockOptReuseAddr;
-        if (std.posix.errno(std.posix.system.setsockopt(
-            listen_fd,
-            std.posix.SOL.SOCKET,
-            std.c.SO.REUSEPORT,
-            @ptrCast(&reuse),
-            @sizeOf(c_int),
-        )) != .SUCCESS) return error.SetSockOptReusePort;
-
-        // Set non-blocking
-        const flags_rc = std.posix.system.fcntl(listen_fd, std.posix.F.GETFL, @as(usize, 0));
-        if (std.posix.errno(flags_rc) != .SUCCESS) return error.Fcntl;
-        var fl_flags: usize = @intCast(flags_rc);
-        fl_flags |= @as(usize, 1 << @bitOffsetOf(std.posix.O, "NONBLOCK"));
-        if (std.posix.errno(std.posix.system.fcntl(listen_fd, std.posix.F.SETFL, fl_flags)) != .SUCCESS) return error.Fcntl;
-
-        // Bind
-        const addr = std.posix.sockaddr.in{
-            .port = std.mem.nativeToBig(u16, port),
-            .addr = 0, // INADDR_ANY
-        };
-        const bind_rc = std.posix.system.bind(
-            listen_fd,
-            @ptrCast(&addr),
-            @sizeOf(std.posix.sockaddr.in),
-        );
-        if (std.posix.errno(bind_rc) != .SUCCESS) return error.Bind;
-
-        // Listen
-        const listen_rc = std.posix.system.listen(listen_fd, BACKLOG);
-        if (std.posix.errno(listen_rc) != .SUCCESS) return error.Listen;
 
         // Create wakeup pipe
         var pipe_fds: [2]std.posix.fd_t = undefined;
