@@ -135,6 +135,13 @@ BEGIN {
   test_cache_empty_string_hit_vs_miss()
   test_cache_zig_found_api()
 
+  test_url_encode()
+  test_url_encode_japanese()
+  test_url_decode_form()
+  test_url_decode_percent()
+  test_url_decode_invalid()
+  test_url_decode_truncated()
+
   test_message_make_cast_decode()
   test_message_make_call_has_reply_to()
   test_message_ref_unique()
@@ -190,6 +197,7 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_env.awk"
 @include "tests/unit/test_adt.awk"
 @include "tests/unit/test_cache.awk"
+@include "tests/unit/test_url.awk"
 @include "tests/unit/test_message.awk"
 @include "tests/unit/test_objectspace.awk"
 @include "tests/unit/test_proc.awk"
