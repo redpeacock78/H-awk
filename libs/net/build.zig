@@ -53,6 +53,20 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
+    if (target.result.os.tag == .macos) {
+        const owner_mod = b.createModule(.{
+            .root_source_file = b.path("src/socket_owner.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        const owner_exe = b.addExecutable(.{
+            .name = "hawk-socket-owner",
+            .root_module = owner_mod,
+        });
+        b.installArtifact(owner_exe);
+    }
+
     // Unit tests (no gawk needed)
     const test_mod = b.createModule(.{
         .root_source_file = b.path("tests/net_test.zig"),

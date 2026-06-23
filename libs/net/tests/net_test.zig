@@ -3,6 +3,16 @@ const std = @import("std");
 const http_parser = @import("http_parser");
 const conn_pool = @import("conn_pool");
 
+extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+extern fn unsetenv(name: [*:0]const u8) c_int;
+
+fn socketPort(fd: std.posix.socket_t) !u16 {
+    var addr: std.posix.sockaddr.in = undefined;
+    var len: std.c.socklen_t = @sizeOf(std.posix.sockaddr.in);
+    if (std.c.getsockname(fd, @ptrCast(&addr), &len) != 0) return error.GetSockName;
+    return std.mem.bigToNative(u16, addr.port);
+}
+
 test "parseFrame waits for full body" {
     const header_only = "POST /echo HTTP/1.1\r\nContent-Length: 7\r\n\r\n";
     const r1 = http_parser.parseFrame(header_only);
@@ -105,7 +115,7 @@ test "formatPollResult" {
 test "add and get conn" {
     var pool = conn_pool.ConnPool.init(std.testing.allocator);
     defer pool.deinit();
-    const id = try pool.add(99);  // fd=99 (dummy, won't be closed in test)
+    const id = try pool.add(99); // fd=99 (dummy, won't be closed in test)
     try std.testing.expectEqual(@as(u64, 1), id);
     {
         pool.mu.lock();
@@ -147,13 +157,35 @@ test "get returns null for unknown id" {
 
 const event_loop = @import("event_loop");
 
+test "event_loop: HAWK_LISTEN_FD uses inherited socket" {
+    var pipe_fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) return error.Pipe;
+    const inherited_fd = pipe_fds[0];
+    errdefer _ = std.posix.system.close(inherited_fd);
+    defer _ = std.posix.system.close(pipe_fds[1]);
+
+    var fd_buf: [32]u8 = undefined;
+    const fd_str = try std.fmt.bufPrintZ(&fd_buf, "{}", .{inherited_fd});
+    if (setenv("HAWK_LISTEN_FD", fd_str.ptr, 1) != 0) return error.SetEnv;
+    defer _ = unsetenv("HAWK_LISTEN_FD");
+
+    var loop = try event_loop.EventLoop.init(std.testing.allocator, 0);
+    defer loop.deinit();
+
+    try std.testing.expectEqual(@as(std.posix.socket_t, inherited_fd), loop.listen_fd);
+}
+
 test "event_loop: listen, send request, dequeue, respond" {
     const alloc = std.testing.allocator;
 
-    const port: u16 = 18765;
+    const port: u16 = 0;
 
-    var loop = try event_loop.EventLoop.init(alloc, port);
+    var loop = event_loop.EventLoop.init(alloc, port) catch |err| switch (err) {
+        error.Bind => return error.SkipZigTest,
+        else => return err,
+    };
     defer loop.deinit();
+    const actual_port = try socketPort(loop.listen_fd);
 
     const thread = try std.Thread.spawn(.{}, event_loop.EventLoop.run, .{&loop});
 
@@ -170,7 +202,7 @@ test "event_loop: listen, send request, dequeue, respond" {
     defer _ = std.posix.system.close(client_fd);
 
     const addr = std.posix.sockaddr.in{
-        .port = std.mem.nativeToBig(u16, port),
+        .port = std.mem.nativeToBig(u16, actual_port),
         .addr = std.mem.nativeToBig(u32, 0x7F000001), // 127.0.0.1
     };
     const conn_rc = std.posix.system.connect(client_fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.in));

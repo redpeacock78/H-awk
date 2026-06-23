@@ -87,6 +87,15 @@ APP_AWK="$("$LIBS" desugar "$APP")"
 
 # --workers N かつ supervisor 利用可能な場合は hawk-supervise に委譲する
 if [[ "$EFFECTIVE_WORKERS" -gt 1 && "$HAS_NET" -eq 1 ]]; then
+  if [[ "$(uname)" == "Darwin" && -x "$HAWK_LIBEXEC/hawk-socket-owner" ]]; then
+    echo "$$" > "$HAWK_PIDFILE"
+    export HAWK_WORKERS="$EFFECTIVE_WORKERS"
+    exec "$HAWK_LIBEXEC/hawk-socket-owner" "${PORT:-8080}" "$HAWK_LIBEXEC/hawk-supervise" "$APP_AWK"
+  elif [[ "$(uname)" == "Darwin" && -x "$HAWK_LIB/libs/net/zig-out/bin/hawk-socket-owner" ]]; then
+    echo "$$" > "$HAWK_PIDFILE"
+    export HAWK_WORKERS="$EFFECTIVE_WORKERS"
+    exec "$HAWK_LIB/libs/net/zig-out/bin/hawk-socket-owner" "${PORT:-8080}" "$HAWK_LIBEXEC/hawk-supervise" "$APP_AWK"
+  fi
   HAWK_WORKERS="$EFFECTIVE_WORKERS" "$HAWK_LIBEXEC/hawk-supervise" "$APP_AWK" &
   WORKER_PIDS+=($!)
   echo $! > "$HAWK_PIDFILE"
