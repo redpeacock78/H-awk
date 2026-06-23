@@ -20,6 +20,7 @@
 @include "core/dispatch.awk"
 @include "core/libs.awk"
 @include "core/json.awk"
+@include "core/url.awk"
 @include "core/tsv.awk"
 @include "core/template.awk"
 @include "core/static.awk"
