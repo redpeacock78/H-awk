@@ -35,7 +35,6 @@ function url_decode_form(s,    out, i, c, hex, n) {
 }
 
 function url_query_parse(s, out,    pairs, n, i, kv) {
-  if (LIBS_LOADED["url"]) return hawk_url_query_parse(s, out)
   delete out; n = split(s, pairs, "&")
   for (i = 1; i <= n; i++) {
     if (split(pairs[i], kv, "=") >= 1) {
@@ -46,7 +45,6 @@ function url_query_parse(s, out,    pairs, n, i, kv) {
 }
 
 function url_query_string(arr,    k, out, sep) {
-  if (LIBS_LOADED["url"]) return hawk_url_query_string(arr)
   out = ""; sep = ""
   for (k in arr) {
     out = out sep url_encode(k) "=" url_encode(arr[k])
