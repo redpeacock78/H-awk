@@ -126,7 +126,7 @@ function expand_alias(t) {
 }
 
 # type::accepts -- returns 1 if expected accepts actual, 0 if not
-function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n, _eg, _ag) {
+function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n, _eg, _ag, _le, _la, _de, _da) {
     if (expected == actual)  return 1
     if (expected == "Any")   return 1
     if (actual   == "Any")   return 1
@@ -135,6 +135,18 @@ function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n,
     # aliases must not be circular (table is hardcoded in sig.awk)
     if (expected in awk::_DS_TYPE_ALIAS) return accepts(awk::_DS_TYPE_ALIAS[expected], actual)
     if (actual   in awk::_DS_TYPE_ALIAS) return accepts(expected, awk::_DS_TYPE_ALIAS[actual])
+
+    if (expected ~ /^List</ && actual ~ /^List</) {
+        if (match(expected, /^List<(.+)>$/, _le) && match(actual, /^List<(.+)>$/, _la))
+            return accepts(_le[1], _la[1])
+        return 0
+    }
+    if (expected ~ /^Dict</ && actual ~ /^Dict</) {
+        if (match(expected, /^Dict<[^,]+,[[:space:]]*(.+)>$/, _de) && \
+            match(actual, /^Dict<[^,]+,[[:space:]]*(.+)>$/, _da))
+            return accepts(_de[1], _da[1])
+        return 0
+    }
 
     # intersection in expected: actual must satisfy ALL members
     ei_n = split_intersection(expected, einter)

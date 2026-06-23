@@ -120,6 +120,53 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
     }
 }
 
+function _ds_check_collection_assign(varname, idx, val_type,    vtype, lineno) {
+    lineno = _DS_current_lineno
+    if (!((_DS_func_name, varname) in _DS_VAR_TYPES)) return
+    vtype = _DS_VAR_TYPES[_DS_func_name, varname]
+    if (vtype ~ /^List</) {
+        if (idx ~ /^"/) {
+            _ds_error(lineno, varname ": List requires numeric index, got string key " idx, \
+                "use Dict<Str, T> for string keys")
+        }
+        return
+    }
+    if (vtype ~ /^Dict<Str,/) {
+        if (idx ~ /^[0-9]+$/) {
+            _ds_error(lineno, varname ": Dict<Str, V> requires string key, got integer " idx, \
+                "use List<T> for numeric indices")
+        }
+        return
+    }
+}
+
+function _ds_check_record_field_assign(varname, field, rhs_type,    vtype, expected, lineno) {
+    lineno = _DS_current_lineno
+    if (!((_DS_func_name, varname) in _DS_VAR_TYPES)) return
+    vtype = _DS_VAR_TYPES[_DS_func_name, varname]
+    if (!(vtype in _DS_RECORD_TYPE)) return
+    if (!((vtype, field) in _DS_RECORD_FIELDS)) {
+        _ds_error(lineno, vtype ": unknown field " field, \
+            "valid fields: " _ds_record_field_list(vtype))
+        return
+    }
+    expected = _DS_RECORD_FIELDS[vtype, field]
+    if (rhs_type != "" && !type::accepts(expected, rhs_type)) {
+        _ds_error(lineno, vtype "." field " expects " expected ", got " rhs_type, "")
+    }
+}
+
+function _ds_record_field_list(typename,    k, out, sep) {
+    out = ""; sep = ""
+    for (k in _DS_RECORD_FIELDS) {
+        if (index(k, typename SUBSEP) == 1) {
+            out = out sep substr(k, length(typename) + 2)
+            sep = ", "
+        }
+    }
+    return out
+}
+
 function _ds_extract_func_name(sig,    m) {
     if (match(sig, /function[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)/, m))
         return m[1]

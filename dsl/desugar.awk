@@ -15,11 +15,24 @@
 
 BEGIN {
   _ds_init()
+  _in_type_rec_block = 0
+  _skip_type_rec_blank = 0
+  _in_let_rec = 0; _let_rec_var = ""; _let_rec_type = ""; _let_rec_buf = ""; _let_rec_indent = ""
   # Pass 1a: collect user function signatures, type aliases, and error types for
   # forward-reference support.
   if (ARGC > 1) {
     _pass1_fname = ""
+    _p1_in_record = 0; _p1_rec_name = ""; _p1_rec_buf = ""
     while ((getline _pass1_line < ARGV[1]) > 0) {
+      if (_p1_in_record) {
+        _p1_rec_buf = _p1_rec_buf "\n" _pass1_line
+        if (_pass1_line ~ /^[[:space:]]*\}[[:space:]]*$/) {
+          _DS_RECORD_TYPE[_p1_rec_name] = 1
+          _ds_parse_record_fields(_p1_rec_name, _p1_rec_buf)
+          _p1_in_record = 0; _p1_rec_name = ""; _p1_rec_buf = ""
+        }
+        continue
+      }
       if (_ds_is_func_def(_pass1_line)) {
         _pass1_fname = _ds_extract_func_name(_pass1_line)
         _pass1_ret   = _ds_extract_return_type(_pass1_line)
@@ -35,6 +48,13 @@ BEGIN {
           _DS_SIG_RET[_pass1_m[1]] = "Result<Any, " _pass1_m[1] ">"
           _DS_SIG_ARITY[_pass1_m[1]] = 1
           _DS_SIG_ARG[_pass1_m[1], 1] = "Str"
+        } else if (_ds_trim(_pass1_m[2]) ~ /^\{[^}]+\}[[:space:]]*$/) {
+          _DS_RECORD_TYPE[_pass1_m[1]] = 1
+          _ds_parse_record_fields(_pass1_m[1], _ds_trim(_pass1_m[2]))
+        } else if (_ds_trim(_pass1_m[2]) ~ /^\{[[:space:]]*$/) {
+          _p1_in_record = 1
+          _p1_rec_name  = _pass1_m[1]
+          _p1_rec_buf   = _ds_trim(_pass1_m[2])
         } else {
           _DS_TYPE_ALIAS[_pass1_m[1]] = type::normalize(_ds_trim(_pass1_m[2]))
         }
@@ -102,8 +122,20 @@ END {
   }
 }
 
-function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m, _ds_type_m, _ds_type_expr) {
+function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m, _ds_type_m, _ds_type_expr, _arr_m, _tc_m, _json_m, _json_collection, _field_m) {
   _DS_current_lineno = lineno
+  if (_in_type_rec_block) {
+    if (line ~ /^[[:space:]]*\}[[:space:]]*$/) {
+      _in_type_rec_block = 0
+      _skip_type_rec_blank = 1
+    }
+    return
+  }
+  if (_skip_type_rec_blank && line ~ /^[[:space:]]*$/) {
+    _skip_type_rec_blank = 0
+    return
+  }
+  _skip_type_rec_blank = 0
   if (!_DS_in_function) {
     if (line ~ /^[[:space:]]*let[[:space:]]/) {
       _ds_error(lineno, "'let' outside function body", \
@@ -116,6 +148,11 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
         _DS_ERROR_TYPES[_ds_type_m[2]] = 1
         print _ds_type_m[1] "function " _ds_type_m[2] "(msg) { return result_ng(\"" _ds_type_m[2] "\", msg) }"
       } else {
+        if (_ds_trim(_ds_type_m[3]) ~ /^\{[[:space:]]*$/) {
+          _in_type_rec_block = 1
+          return
+        }
+        if (_ds_trim(_ds_type_m[3]) ~ /^\{[^}]+\}[[:space:]]*$/) return
         _ds_type_expr = type::normalize(_ds_trim(_ds_type_m[3]))
         if (_ds_type_expr == "") return
         _DS_TYPE_ALIAS[_ds_type_m[2]] = _ds_type_expr
@@ -149,6 +186,17 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
 
   # Inside function body
   _DS_brace_depth += _ds_net_braces(line)
+
+  if (_in_let_rec) {
+    _let_rec_buf = _let_rec_buf "\n" line
+    if (line ~ /^[[:space:]]*\}[[:space:]]*$/) {
+      transformed = _ds_desugar_record_literal(_let_rec_var, _let_rec_type, _let_rec_buf)
+      gsub(/\n/, "\n" _let_rec_indent, transformed)
+      _DS_body_buf[++_DS_body_count] = _let_rec_indent transformed
+      _in_let_rec = 0; _let_rec_var = ""; _let_rec_type = ""; _let_rec_buf = ""; _let_rec_indent = ""
+    }
+    return
+  }
 
   # Strip classify annotation lines — already stored in Pass 1
   if (line ~ /^[[:space:]]*classify:[[:space:]]*(transform|validator|sanitizer|sink)[[:space:]]*$/) {
@@ -216,15 +264,34 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
     line = _ds_expand_interp(line, lineno)
   }
 
+  if (match(line, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\[([^\]]+)\][[:space:]]*=/, _arr_m)) {
+    _ds_check_collection_assign(_arr_m[1], _arr_m[2], "")
+  }
+
   pipe_result = _ds_pipe_transform(line, pipe_pre)
   for (p = 1; p in pipe_pre; p++)
     _DS_body_buf[++_DS_body_count] = _ds_dot_transform(pipe_pre[p])
 
   dot_transformed = _ds_dot_transform(pipe_result)
+  if (match(dot_transformed, /^([[:space:]]*)([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=(.*)$/, _field_m) && \
+      ((_DS_func_name, _field_m[2]) in _DS_VAR_TYPES) && \
+      (_DS_VAR_TYPES[_DS_func_name, _field_m[2]] in _DS_RECORD_TYPE)) {
+    dot_transformed = _field_m[1] _field_m[2] "[\"" _field_m[3] "\"] =" _field_m[4]
+  }
+  if (match(dot_transformed, /^([[:space:]]*)return[[:space:]]+ctx::dispatch\("res\.json",[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\)[[:space:]]*$/, _json_m) && \
+      ((_DS_func_name, _json_m[2]) in _DS_VAR_TYPES) && \
+      (_DS_VAR_TYPES[_DS_func_name, _json_m[2]] ~ /^(List|Dict)</ || (_DS_VAR_TYPES[_DS_func_name, _json_m[2]] in _DS_RECORD_TYPE))) {
+    dot_transformed = _json_m[1] "return json(res, " _json_m[2] ")"
+    _json_collection = 1
+  }
+  if (match(dot_transformed, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\["([^"]+)"\][[:space:]]*=/, _tc_m)) {
+    _ds_check_record_field_assign(_tc_m[1], _tc_m[2], "")
+    if (_DS_had_error) return
+  }
   nc_result = _ds_nc_transform(dot_transformed, nc_pre)
   for (p = 1; p in nc_pre; p++)
     _DS_body_buf[++_DS_body_count] = nc_pre[p]
-  _ds_typecheck_plain_call(nc_result)
+  if (!_json_collection) _ds_typecheck_plain_call(nc_result)
   _ds_check_return(dot_transformed, lineno)
   transformed = _ds_let_transform(nc_result, lineno, line)
   if (transformed != "") _DS_body_buf[++_DS_body_count] = transformed
