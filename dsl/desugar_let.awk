@@ -242,7 +242,7 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
     inferred = _ds_infer_type_with_orig(rhs, orig_rhs)
     _ds_check_type(declared, inferred, lineno)
     if (declared ~ /^(List|Dict)</ || (declared in _DS_RECORD_TYPE)) {
-      transformed = _ds_desugar_let_init(varname, declared, rhs)
+      transformed = _ds_desugar_let_init(varname, declared, rhs, indent)
       if (_in_let_rec) return ""
       gsub(/\n/, "\n" indent, transformed)
       return indent transformed
@@ -341,27 +341,40 @@ function _ds_rewrite_sig(sig,    i, locals_str, lp, rp) {
   }
 }
 
-function _ds_parse_record_fields(name, body,    inner, n, i, parts, kv, k, v) {
+function _ds_parse_record_fields(name, body,    inner, n, i, k, v, colon_pos, line, _prf_lines) {
     inner = body
-    gsub(/^\{[[:space:]]*/, "", inner)
-    gsub(/[[:space:]]*\}$/, "", inner)
-    n = split(inner, parts, /[\n,]+/)
+    gsub(/^\{[[:space:]]*\n?/, "", inner)
+    gsub(/\n?[[:space:]]*\}[[:space:]]*$/, "", inner)
+    n = split(inner, _prf_lines, /\n/)
     for (i = 1; i <= n; i++) {
-        if (split(_ds_trim(parts[i]), kv, /[[:space:]]*:[[:space:]]/) == 2) {
-            k = _ds_trim(kv[1])
-            v = _ds_trim(kv[2])
-            if (k != "" && v != "") _DS_RECORD_FIELDS[name, k] = v
-        }
+        line = _ds_trim(_prf_lines[i])
+        if (line == "") continue
+        colon_pos = index(line, ":")
+        if (colon_pos < 2) continue
+        k = _ds_trim(substr(line, 1, colon_pos - 1))
+        v = _ds_trim(substr(line, colon_pos + 1))
+        if (k != "" && v != "") _DS_RECORD_FIELDS[name, k] = v
     }
 }
 
-function _ds_desugar_let_init(varname, typename, init_expr,    inner_type) {
+function _ds_desugar_let_init(varname, typename, init_expr, indent_str,    inner_type, rhs_clean) {
+    rhs_clean = _ds_trim(init_expr)
     if (typename ~ /^List</) {
         inner_type = gensub(/^List<(.+)>$/, "\\1", 1, typename)
+        if (rhs_clean != "[]" && rhs_clean != "") {
+            _ds_error(_DS_current_lineno, varname ": List initializer must be [] (got: " rhs_clean ")", \
+                "use [] to create an empty List, then assign elements individually")
+            return ""
+        }
         _DS_VAR_TYPES[_DS_func_name, varname] = typename
         return "delete " varname "\n" varname "[\"__json_type\"] = \"array\""
     }
     if (typename ~ /^Dict</) {
+        if (rhs_clean != "{}" && rhs_clean != "") {
+            _ds_error(_DS_current_lineno, varname ": Dict initializer must be {} (got: " rhs_clean ")", \
+                "use {} to create an empty Dict, then assign elements individually")
+            return ""
+        }
         _DS_VAR_TYPES[_DS_func_name, varname] = typename
         return "delete " varname
     }
@@ -375,7 +388,7 @@ function _ds_desugar_let_init(varname, typename, init_expr,    inner_type) {
         _let_rec_var  = varname
         _let_rec_type = typename
         _let_rec_buf  = init_expr
-        _let_rec_indent = indent
+        _let_rec_indent = indent_str
         return ""
     }
     return ""

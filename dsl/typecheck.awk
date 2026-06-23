@@ -120,6 +120,15 @@ function _ds_typecheck_call(path, args_str,    n, i, expected, actual, split_arg
     }
 }
 
+function _ds_infer_literal_type(expr) {
+    if (expr ~ /^"/)                        return "Str"
+    if (expr ~ /^-?[0-9]+$/)                return "Int"
+    if (expr ~ /^-?[0-9]+\.[0-9]+$/)        return "Float"
+    if (expr == "true" || expr == "false")  return "Bool"
+    if (expr == "null")                     return "Null"
+    return ""
+}
+
 function _ds_check_collection_assign(varname, idx, val_type,    vtype, lineno) {
     lineno = _DS_current_lineno
     if (!((_DS_func_name, varname) in _DS_VAR_TYPES)) return

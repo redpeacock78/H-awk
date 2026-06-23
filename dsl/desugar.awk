@@ -122,7 +122,7 @@ END {
   }
 }
 
-function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m, _ds_type_m, _ds_type_expr, _arr_m, _tc_m, _json_m, _json_collection, _field_m) {
+function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, dot_transformed, pipe_pre, pipe_result, match_m, _ds_type_m, _ds_type_expr, _arr_m, _tc_m, _json_m, _json_collection, _field_m, _field_vtype, _field_key, _field_rhs, _field_rhs_clean, _tc_field) {
   _DS_current_lineno = lineno
   if (_in_type_rec_block) {
     if (line ~ /^[[:space:]]*\}[[:space:]]*$/) {
@@ -276,7 +276,19 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
   if (match(dot_transformed, /^([[:space:]]*)([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=(.*)$/, _field_m) && \
       ((_DS_func_name, _field_m[2]) in _DS_VAR_TYPES) && \
       (_DS_VAR_TYPES[_DS_func_name, _field_m[2]] in _DS_RECORD_TYPE)) {
-    dot_transformed = _field_m[1] _field_m[2] "[\"" _field_m[3] "\"] =" _field_m[4]
+    _field_vtype = _DS_VAR_TYPES[_DS_func_name, _field_m[2]]
+    _field_key   = _field_m[3]
+    _field_rhs   = _field_m[4]
+    if ((_field_vtype, _field_key) in _DS_RECORD_FIELDS && \
+        _DS_RECORD_FIELDS[_field_vtype, _field_key] == "Bool") {
+        _field_rhs_clean = _ds_trim(_field_rhs)
+        _ds_check_record_field_assign(_field_m[2], _field_key, _ds_infer_literal_type(_field_rhs_clean))
+        if (_DS_had_error) return
+        dot_transformed = _field_m[1] _field_m[2] "[\"" _field_key ":bool\"] = " \
+            ((_field_rhs_clean == "true" || _field_rhs_clean == "1") ? "1" : "0")
+    } else {
+        dot_transformed = _field_m[1] _field_m[2] "[\"" _field_key "\"] =" _field_rhs
+    }
   }
   if (match(dot_transformed, /^([[:space:]]*)return[[:space:]]+ctx::dispatch\("res\.json",[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\)[[:space:]]*$/, _json_m) && \
       ((_DS_func_name, _json_m[2]) in _DS_VAR_TYPES) && \
@@ -284,8 +296,10 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
     dot_transformed = _json_m[1] "return json(res, " _json_m[2] ")"
     _json_collection = 1
   }
-  if (match(dot_transformed, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\["([^"]+)"\][[:space:]]*=/, _tc_m)) {
-    _ds_check_record_field_assign(_tc_m[1], _tc_m[2], "")
+  if (match(dot_transformed, /^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\["([^"]+)"\][[:space:]]*=(.*)$/, _tc_m)) {
+    _tc_field = _tc_m[2]
+    sub(/:bool$/, "", _tc_field)
+    _ds_check_record_field_assign(_tc_m[1], _tc_field, (_tc_m[2] ~ /:bool$/) ? "" : _ds_infer_literal_type(_ds_trim(_tc_m[3])))
     if (_DS_had_error) return
   }
   nc_result = _ds_nc_transform(dot_transformed, nc_pre)
