@@ -223,6 +223,7 @@ function _zig_http_send(conn_id, res, req, start_ms,    wire, split_pos, head_pa
     headers = substr(head_part, first_crlf + 2) "\r\n"
     hawk_net_respond(conn_id, status_line, headers, content)
   } else {
+    gzip_maybe(res, req)
     wire = response_wire(res)
     split_pos = index(wire, "\r\n\r\n")
     head_part = substr(wire, 1, split_pos - 1)
@@ -292,6 +293,7 @@ function http_send(sock, res, req, start_ms,    wire, content, dur, ts) {
     printf "%s", content |& sock
     fflush(sock)
   } else {
+    gzip_maybe(res, req)
     wire = response_wire(res)
     printf "%s", wire |& sock
     fflush(sock)
