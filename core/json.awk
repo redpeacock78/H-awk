@@ -89,6 +89,11 @@ function json_encode_any(val,    t) {
 # にフラットに対応する。ネスト object / array は MVP では未サポート。
 function json_decode(s, out,    i, n, c, key, val, buf) {
   delete out
+  if (LIBS_LOADED["json"] && !hawk_json_valid(s)) {
+    HAWK_JSON_ERROR = hawk_json_error()
+    return 0
+  }
+  HAWK_JSON_ERROR = ""
   s = trim(s)
   if (substr(s, 1, 1) != "{" || substr(s, length(s), 1) != "}") return 0
   s = substr(s, 2, length(s) - 2)
