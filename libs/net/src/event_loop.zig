@@ -20,6 +20,12 @@ fn setNonBlocking(fd: std.posix.socket_t) !void {
 fn inheritedListenSocket() !?std.posix.socket_t {
     const val = std.c.getenv("HAWK_LISTEN_FD") orelse return null;
     const fd = try std.fmt.parseInt(std.posix.socket_t, std.mem.sliceTo(val, 0), 10);
+    const flags_rc = std.posix.system.fcntl(fd, std.posix.F.GETFD, @as(usize, 0));
+    if (std.posix.errno(flags_rc) != .SUCCESS) return error.Fcntl;
+    const flags: usize = @intCast(flags_rc);
+    if (flags & std.posix.FD_CLOEXEC != 0) {
+        if (std.posix.errno(std.posix.system.fcntl(fd, std.posix.F.SETFD, flags & ~@as(usize, std.posix.FD_CLOEXEC))) != .SUCCESS) return error.Fcntl;
+    }
     try setNonBlocking(fd);
     return fd;
 }
