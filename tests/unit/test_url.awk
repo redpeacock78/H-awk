@@ -7,12 +7,12 @@ function test_url_encode(   out) {
 }
 
 function test_url_encode_japanese(   out) {
-  if (!LIBS_LOADED["url"]) {
-    TESTS_SKIPPED++
-    return
+  out = url_encode("あ")
+  assert_eq(out, "%E3%81%82", "url_encode: japanese (fallback)")
+  if (LIBS_LOADED["url"]) {
+    out = hawk_url_encode("あ")
+    assert_eq(out, "%E3%81%82", "url_encode: japanese (zig)")
   }
-  out = hawk_url_encode("あ")
-  assert_eq(out, "%E3%81%82", "url_encode: japanese")
 }
 
 function test_url_decode_form(   out) {
@@ -21,12 +21,12 @@ function test_url_decode_form(   out) {
 }
 
 function test_url_decode_percent(   out) {
-  if (!LIBS_LOADED["url"]) {
-    TESTS_SKIPPED++
-    return
+  out = url_decode_form("%E3%81%82")
+  assert_eq(out, "あ", "url_decode_form: japanese utf8 (fallback)")
+  if (LIBS_LOADED["url"]) {
+    out = hawk_url_decode_form("%E3%81%82")
+    assert_eq(out, "あ", "url_decode_form: japanese utf8 (zig)")
   }
-  out = hawk_url_decode_form("%E3%81%82")
-  assert_eq(out, "あ", "url_decode_form: japanese utf8")
 }
 
 function test_url_decode_invalid(   out) {

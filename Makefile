@@ -52,7 +52,7 @@ test-unit: ## awk 内 assert
 	  libs_vars="$$libs_vars -v HAWK_LIBS_$$name=1"; \
 	done; \
 	_u_log=$$(mktemp); \
-	HAWK_NO_SERVE=1 gawk -b $(GAWK_OPTS) $$libs_args $$libs_vars -f hawk.awk $(PLUGIN_FILES) -f tests/unit/run.awk 2>"$$_u_log"; \
+	LC_ALL=C HAWK_NO_SERVE=1 gawk -b $(GAWK_OPTS) $$libs_args $$libs_vars -f hawk.awk $(PLUGIN_FILES) -f tests/unit/run.awk 2>"$$_u_log"; \
 	_u_ret=$$?; \
 	grep -v "multipart/form-data received but libs/multipart not loaded" "$$_u_log" >&2; \
 	rm -f "$$_u_log"; \
