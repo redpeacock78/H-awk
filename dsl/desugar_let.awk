@@ -241,6 +241,12 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_
     orig_rhs = _ds_extract_orig_rhs(orig_line)
     inferred = _ds_infer_type_with_orig(rhs, orig_rhs)
     _ds_check_type(declared, inferred, lineno)
+    if (declared ~ /^(List|Dict)</ || (declared in _DS_RECORD_TYPE)) {
+      transformed = _ds_desugar_let_init(varname, declared, rhs, indent)
+      if (_in_let_rec) return ""
+      gsub(/\n/, "\n" indent, transformed)
+      return indent transformed
+    }
     # RHS が関数呼び出しなら引数型チェック
     if (match(rhs, /^([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\((.*)\)[[:space:]]*$/, _let_call)) {
       if (_let_call[1] in _DS_SIG_ARITY)
@@ -333,4 +339,91 @@ function _ds_rewrite_sig(sig,    i, locals_str, lp, rp) {
     # Empty parens "()" — insert locals inside
     return substr(sig, 1, lp) "    " locals_str substr(sig, rp)
   }
+}
+
+function _ds_parse_record_fields(name, body,    inner, n, i, k, v, colon_pos, line, _prf_lines) {
+    inner = body
+    gsub(/^\{[[:space:]]*\n?/, "", inner)
+    gsub(/\n?[[:space:]]*\}[[:space:]]*$/, "", inner)
+    n = split(inner, _prf_lines, /\n/)
+    for (i = 1; i <= n; i++) {
+        line = _ds_trim(_prf_lines[i])
+        if (line == "") continue
+        colon_pos = index(line, ":")
+        if (colon_pos < 2) continue
+        k = _ds_trim(substr(line, 1, colon_pos - 1))
+        v = _ds_trim(substr(line, colon_pos + 1))
+        if (k != "" && v != "") _DS_RECORD_FIELDS[name, k] = v
+    }
+}
+
+function _ds_desugar_let_init(varname, typename, init_expr, indent_str,    inner_type, rhs_clean) {
+    rhs_clean = _ds_trim(init_expr)
+    if (typename ~ /^List</) {
+        inner_type = gensub(/^List<(.+)>$/, "\\1", 1, typename)
+        if (rhs_clean != "[]" && rhs_clean != "") {
+            _ds_error(_DS_current_lineno, varname ": List initializer must be [] (got: " rhs_clean ")", \
+                "use [] to create an empty List, then assign elements individually")
+            return ""
+        }
+        _DS_VAR_TYPES[_DS_func_name, varname] = typename
+        return "delete " varname "\n" varname "[\"__json_type\"] = \"array\""
+    }
+    if (typename ~ /^Dict</) {
+        if (rhs_clean != "{}" && rhs_clean != "") {
+            _ds_error(_DS_current_lineno, varname ": Dict initializer must be {} (got: " rhs_clean ")", \
+                "use {} to create an empty Dict, then assign elements individually")
+            return ""
+        }
+        _DS_VAR_TYPES[_DS_func_name, varname] = typename
+        return "delete " varname
+    }
+    if ((typename in _DS_RECORD_TYPE) && init_expr ~ /^\{.*\}[[:space:]]*$/) {
+        _DS_VAR_TYPES[_DS_func_name, varname] = typename
+        return _ds_desugar_record_literal(varname, typename, init_expr)
+    }
+    if ((typename in _DS_RECORD_TYPE) && init_expr ~ /^\{[[:space:]]*$/) {
+        _DS_VAR_TYPES[_DS_func_name, varname] = typename
+        _in_let_rec  = 1
+        _let_rec_var  = varname
+        _let_rec_type = typename
+        _let_rec_buf  = init_expr
+        _let_rec_indent = indent_str
+        return ""
+    }
+    return ""
+}
+
+function _ds_desugar_record_literal(varname, typename, literal,    inner, parts, n, i, kv, k, v, out, sep, ftype) {
+    inner = literal
+    gsub(/^\{[[:space:]]*\n?/, "", inner)
+    gsub(/\n?[[:space:]]*\}[[:space:]]*$/, "", inner)
+    n = split(inner, parts, /[\n,]+/)
+    out = "delete " varname
+    sep = "\n"
+    for (i = 1; i <= n; i++) {
+        if (split(_ds_trim(parts[i]), kv, /[[:space:]]*:[[:space:]]/) == 2) {
+            k = _ds_trim(kv[1])
+            v = _ds_trim(kv[2])
+            if (k == "" || v == "") continue
+            if ((typename, k) in _DS_RECORD_FIELDS) {
+                ftype = _DS_RECORD_FIELDS[typename, k]
+                if (ftype == "Bool") {
+                    out = out sep varname "[\"" k ":bool\"] = " ((v == "true" || v == "1") ? "1" : "0")
+                } else if (ftype == "Int" || ftype == "Float") {
+                    out = out sep varname "[\"" k "\"] = " v
+                } else {
+                    if (v ~ /^"/) {
+                        out = out sep varname "[\"" k "\"] = " v
+                    } else {
+                        out = out sep varname "[\"" k "\"] = \"" v "\""
+                    }
+                }
+                sep = "\n"
+            } else {
+                _ds_error(_DS_current_lineno, typename ": unknown field " k, "")
+            }
+        }
+    }
+    return out
 }
