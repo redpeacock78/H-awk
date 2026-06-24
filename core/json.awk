@@ -117,91 +117,128 @@ function json_encode_any(val,    t) {
   return "\"" _json_escape_str(val) "\""
 }
 
-# 簡易 JSON decoder: トップレベル object のみ。値は string / number / true / false / null
-# にフラットに対応する。ネスト object / array は MVP では未サポート。
-function json_decode(s, out,    i, n, c, key, val, buf) {
+function _json_unescape(s,   ret, arr, n, i, part, cp, c1, c2, c3, c4) {
+  n = split(s, arr, "\\")
+  ret = arr[1]
+  for (i = 2; i <= n; i++) {
+    part = arr[i]
+    if (part == "") {
+      ret = ret "\\" arr[++i]
+    } else if (match(part, /^[btnfr"\/\\]/)) {
+      ret = ret _jesc2chr[substr(part, 1, 1)] substr(part, 2)
+    } else if (match(part, /^u[Dd][89AaBb][0-9A-Fa-f][0-9A-Fa-f]/)) {
+      cp = (_j_hex2dec(substr(part, 2, 4)) - 55296) * 1024
+      i++; part = arr[i]
+      if (part == "") { part = arr[++i] }
+      if (match(part, /^u[Dd][CcDdEeFf][0-9A-Fa-f][0-9A-Fa-f]/)) {
+        cp += _j_hex2dec(substr(part, 2, 4)) - 56320 + 65536
+        c1 = 240 + int(cp / 262144); c2 = 128 + int(cp / 4096) % 64
+        c3 = 128 + int(cp / 64) % 64; c4 = 128 + cp % 64
+        ret = ret sprintf("%c%c%c%c", c1, c2, c3, c4) substr(part, 6)
+      } else {
+        ret = ret "\\u" substr(arr[i-1], 2, 4) "\\" part
+      }
+    } else if (match(part, /^u[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/)) {
+      cp = _j_hex2dec(substr(part, 2, 4))
+      if (cp <= 127) {
+        ret = ret _jhex2chr[tolower(substr(part, 4, 2))] substr(part, 6)
+      } else if (cp <= 2047) {
+        c1 = 192 + int(cp / 64); c2 = 128 + cp % 64
+        ret = ret sprintf("%c%c", c1, c2) substr(part, 6)
+      } else {
+        c1 = 224 + int(cp / 4096); c2 = 128 + int(cp / 64) % 64; c3 = 128 + cp % 64
+        ret = ret sprintf("%c%c%c", c1, c2, c3) substr(part, 6)
+      }
+    } else {
+      ret = ret "\\" part
+    }
+  }
+  return ret
+}
+
+function _jp_skip(   c) {
+  while (_jp_i <= _jp_n) {
+    c = substr(_jp_s, _jp_i, 1)
+    if (c == " " || c == "\t" || c == "\n" || c == "\r") _jp_i++
+    else break
+  }
+}
+function _jp_path(parent, child) {
+  return (parent == "") ? child : parent "." child
+}
+function _jp_parse_string(   buf, c, nx) {
+  _jp_i++
+  buf = ""
+  while (_jp_i <= _jp_n) {
+    c = substr(_jp_s, _jp_i, 1)
+    if (c == "\\") {
+      nx = substr(_jp_s, _jp_i + 1, 1)
+      buf = buf c nx
+      _jp_i += 2
+    } else if (c == "\"") {
+      _jp_i++; return _json_unescape(buf)
+    } else {
+      buf = buf c; _jp_i++
+    }
+  }
+  return _json_unescape(buf)
+}
+function _jp_parse_literal(out, path,   buf, c) {
+  buf = ""
+  while (_jp_i <= _jp_n) {
+    c = substr(_jp_s, _jp_i, 1)
+    if (c == "," || c == "}" || c == "]" || c == " " || c == "\t" || c == "\n" || c == "\r") break
+    buf = buf c; _jp_i++
+  }
+  out[path] = buf
+}
+function _jp_parse_object(out, path,   c, key, subpath) {
+  _jp_i++; _jp_skip()
+  if (substr(_jp_s, _jp_i, 1) == "}") { _jp_i++; return }
+  while (_jp_i <= _jp_n) {
+    _jp_skip()
+    if (substr(_jp_s, _jp_i, 1) != "\"") break
+    key = _jp_parse_string(); _jp_skip()
+    if (substr(_jp_s, _jp_i, 1) != ":") break
+    _jp_i++; subpath = _jp_path(path, key)
+    _jp_parse_value(out, subpath); _jp_skip()
+    c = substr(_jp_s, _jp_i, 1)
+    if (c == "}") { _jp_i++; return }
+    if (c == ",") { _jp_i++; continue }
+    break
+  }
+}
+function _jp_parse_array(out, path,   c, idx, subpath) {
+  _jp_i++; idx = 0; _jp_skip()
+  if (substr(_jp_s, _jp_i, 1) == "]") { _jp_i++; return }
+  while (_jp_i <= _jp_n) {
+    subpath = _jp_path(path, idx "")
+    _jp_parse_value(out, subpath); _jp_skip()
+    c = substr(_jp_s, _jp_i, 1)
+    if (c == "]") { _jp_i++; return }
+    if (c == ",") { _jp_i++; idx++; continue }
+    break
+  }
+}
+function _jp_parse_value(out, path,   c) {
+  _jp_skip(); c = substr(_jp_s, _jp_i, 1)
+  if      (c == "{")  _jp_parse_object(out, path)
+  else if (c == "[")  _jp_parse_array(out, path)
+  else if (c == "\"") out[path] = _jp_parse_string()
+  else                _jp_parse_literal(out, path)
+}
+function json_decode(s, out,   first) {
   delete out
   if (LIBS_LOADED["json"] && hawk_json_valid(s) + 0 == 0) {
     HAWK_JSON_ERROR = hawk_json_error()
     return 0
   }
   HAWK_JSON_ERROR = ""
-  s = trim(s)
-  if (substr(s, 1, 1) != "{" || substr(s, length(s), 1) != "}") return 0
-  s = substr(s, 2, length(s) - 2)
-
-  i = 1; n = length(s)
-  while (i <= n) {
-    while (i <= n && (c = substr(s, i, 1)) ~ /[ \t\n\r]/) i++
-    if (i > n) break
-    if (substr(s, i, 1) != "\"") return 0
-    i++
-    buf = ""
-    while (i <= n && (c = substr(s, i, 1)) != "\"") {
-      if (c == "\\" && i < n) {
-        buf = buf _json_unescape(substr(s, i + 1, 1))
-        i += 2
-      } else {
-        buf = buf c
-        i++
-      }
-    }
-    if (i > n) return 0
-    key = buf
-    i++
-
-    while (i <= n && (c = substr(s, i, 1)) ~ /[ \t\n\r]/) i++
-    if (substr(s, i, 1) != ":") return 0
-    i++
-    while (i <= n && (c = substr(s, i, 1)) ~ /[ \t\n\r]/) i++
-
-    c = substr(s, i, 1)
-    if (c == "\"") {
-      i++
-      buf = ""
-      while (i <= n && (c = substr(s, i, 1)) != "\"") {
-        if (c == "\\" && i < n) {
-          buf = buf _json_unescape(substr(s, i + 1, 1))
-          i += 2
-        } else {
-          buf = buf c
-          i++
-        }
-      }
-      if (i > n) return 0
-      out[key] = buf
-      i++
-    } else if (c ~ /[-0-9]/) {
-      buf = ""
-      while (i <= n && substr(s, i, 1) ~ /[-0-9.eE+]/) {
-        buf = buf substr(s, i, 1)
-        i++
-      }
-      out[key] = buf
-    } else if (substr(s, i, 4) == "true") {
-      out[key] = "true"; i += 4
-    } else if (substr(s, i, 5) == "false") {
-      out[key] = "false"; i += 5
-    } else if (substr(s, i, 4) == "null") {
-      out[key] = "null"; i += 4
-    } else {
-      return 0
-    }
-
-    while (i <= n && (c = substr(s, i, 1)) ~ /[ \t\n\r]/) i++
-    if (i > n) break
-    if (substr(s, i, 1) != ",") return 0
-    i++
-  }
+  _jp_s = s; _jp_n = length(s); _jp_i = 1
+  _jp_skip()
+  if (_jp_i > _jp_n) return 0
+  first = substr(_jp_s, _jp_i, 1)
+  if (first != "{") return 0
+  _jp_parse_value(out, "")
   return 1
-}
-
-function _json_unescape(c) {
-  if (c == "n") return "\n"
-  if (c == "r") return "\r"
-  if (c == "t") return "\t"
-  if (c == "\"") return "\""
-  if (c == "\\") return "\\"
-  if (c == "/") return "/"
-  return c
 }
