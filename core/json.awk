@@ -1,4 +1,36 @@
 # SPDX-License-Identifier: MIT
+# --- Unicode unescape 用ルックアップテーブル（ko1nksm CC0 ベース）--------------
+
+# BEGIN から呼ぶ。ルックアップテーブルを初期化する。
+function _json_init(   i) {
+  for (i = 0; i <= 127; i++)
+    _jhex2chr[sprintf("%02x", i)] = sprintf("%c", i)
+  _jesc2chr["b"]  = _jhex2chr["08"]
+  _jesc2chr["t"]  = _jhex2chr["09"]
+  _jesc2chr["n"]  = _jhex2chr["0a"]
+  _jesc2chr["f"]  = _jhex2chr["0c"]
+  _jesc2chr["r"]  = _jhex2chr["0d"]
+  _jesc2chr["\""] = _jhex2chr["22"]
+  _jesc2chr["/"]  = _jhex2chr["2f"]
+  _jesc2chr["\\"] = "\\"
+  for (i = 0; i <= 255; i++)
+    _jhex2dec[sprintf("%02x", i)] = i
+}
+
+BEGIN { _json_init() }
+
+END {
+  delete _jhex2chr
+  delete _jesc2chr
+  delete _jhex2dec
+}
+
+# 4桁16進文字列 hex を整数に変換する。
+function _j_hex2dec(hex,   h) {
+  h = tolower(hex)
+  return _jhex2dec[substr(h, 1, 2)] * 256 + _jhex2dec[substr(h, 3, 2)]
+}
+
 # core/json.awk -- 最小 JSON encode / decode
 #
 # json_encode(data) は data[] 連想配列を JSON 文字列に変換する。
@@ -89,7 +121,7 @@ function json_encode_any(val,    t) {
 # にフラットに対応する。ネスト object / array は MVP では未サポート。
 function json_decode(s, out,    i, n, c, key, val, buf) {
   delete out
-  if (LIBS_LOADED["json"] && !hawk_json_valid(s)) {
+  if (LIBS_LOADED["json"] && hawk_json_valid(s) + 0 == 0) {
     HAWK_JSON_ERROR = hawk_json_error()
     return 0
   }
