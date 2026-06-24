@@ -144,6 +144,13 @@ BEGIN {
   test_url_decode_invalid()
   test_url_decode_truncated()
 
+  test_gzip_no_gzip_env()
+  test_gzip_no_accept_encoding()
+  test_gzip_small_body()
+  test_gzip_204()
+  test_gzip_image_ct()
+  test_gzip_compress()
+
   test_message_make_cast_decode()
   test_message_make_call_has_reply_to()
   test_message_ref_unique()
@@ -201,6 +208,7 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_adt.awk"
 @include "tests/unit/test_cache.awk"
 @include "tests/unit/test_url.awk"
+@include "tests/unit/test_gzip.awk"
 @include "tests/unit/test_message.awk"
 @include "tests/unit/test_objectspace.awk"
 @include "tests/unit/test_proc.awk"
