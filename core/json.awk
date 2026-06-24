@@ -227,18 +227,33 @@ function _jp_parse_value(out, path,   c) {
   else if (c == "\"") out[path] = _jp_parse_string()
   else                _jp_parse_literal(out, path)
 }
-function json_decode(s, out,   first) {
+function json_decode(s, out,   raw, n, i, recs, sep, k, v, first) {
   delete out
-  if (LIBS_LOADED["json"] && hawk_json_valid(s) + 0 == 0) {
-    HAWK_JSON_ERROR = hawk_json_error()
-    return 0
-  }
-  HAWK_JSON_ERROR = ""
+  # Zig/AWK 両方で最初に object 判定してトップレベル非 object を確実に弾く
   _jp_s = s; _jp_n = length(s); _jp_i = 1
   _jp_skip()
   if (_jp_i > _jp_n) return 0
   first = substr(_jp_s, _jp_i, 1)
   if (first != "{") return 0
+  if (LIBS_LOADED["json"]) {
+    raw = hawk_json_decode(s)
+    if (raw == "" && hawk_json_error() != "") {
+      HAWK_JSON_ERROR = hawk_json_error()
+      return 0
+    }
+    HAWK_JSON_ERROR = ""
+    n = split(raw, recs, "\x1e")
+    for (i = 1; i <= n; i++) {
+      if (recs[i] == "") continue
+      sep = index(recs[i], "\x1f")
+      if (sep == 0) continue
+      k = substr(recs[i], 1, sep - 1)
+      v = substr(recs[i], sep + 1)
+      out[k] = v
+    }
+    return 1
+  }
+  # AWK フォールバック
   _jp_parse_value(out, "")
   return 1
 }

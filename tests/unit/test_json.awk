@@ -122,3 +122,55 @@ function test_json_decode_invalid_returns_zero(    out, ret) {
   ret = json_decode("not json", out)
   assert_eq(ret, 0, "decode invalid: returns 0")
 }
+function test_json_decode_via_zig_flat(    out, ret) {
+  if (!LIBS_LOADED["json"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  ret = json_decode("{\"x\":1,\"y\":\"hello\"}", out)
+  assert_eq(ret, 1, "zig decode: returns 1")
+  assert_eq(out["x"], "1", "zig decode: integer as string")
+  assert_eq(out["y"], "hello", "zig decode: string value")
+}
+
+function test_json_decode_via_zig_nested(    out, ret) {
+  if (!LIBS_LOADED["json"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  ret = json_decode("{\"a\":{\"b\":\"c\"}}", out)
+  assert_eq(ret, 1, "zig decode nested: returns 1")
+  assert_eq(out["a.b"], "c", "zig decode nested: dot-path key")
+}
+
+function test_json_decode_via_zig_array(    out, ret) {
+  if (!LIBS_LOADED["json"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  ret = json_decode("{\"tags\":[\"a\",\"b\"]}", out)
+  assert_eq(ret, 1, "zig decode array: returns 1")
+  assert_eq(out["tags.0"], "a", "zig decode array: index 0")
+  assert_eq(out["tags.1"], "b", "zig decode array: index 1")
+}
+
+function test_json_decode_via_zig_bool(    out, ret) {
+  if (!LIBS_LOADED["json"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  ret = json_decode("{\"ok\":true,\"ng\":false,\"n\":null}", out)
+  assert_eq(ret, 1, "zig decode bool: returns 1")
+  assert_eq(out["ok"], "true",  "zig decode bool: true")
+  assert_eq(out["ng"], "false", "zig decode bool: false")
+  assert_eq(out["n"],  "null",  "zig decode bool: null")
+}
+
+function test_json_decode_via_zig_invalid(    out, ret) {
+  if (!LIBS_LOADED["json"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  ret = json_decode("not json", out)
+  assert_eq(ret, 0, "zig decode invalid: returns 0")
+}
