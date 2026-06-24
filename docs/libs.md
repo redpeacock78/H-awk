@@ -42,6 +42,41 @@ HAWK_KEEPALIVE_TIMEOUT=30 ./bin/hawk app.awk   # 30s idle timeout (default: 75)
 | `HAWK_WORKERS` | `4` | Number of worker processes (requires `libs/net`) |
 | `HAWK_KEEPALIVE_TIMEOUT` | `75` | Idle keep-alive timeout in seconds |
 
+## URL Helpers (`libs/url`)
+
+Features: URL percent encode/decode and query string parse/build.
+
+Fallback: works through `core/url.awk` when `libs/url` is absent.
+
+Build: included in the `build-libs` target.
+
+Env vars: none.
+
+## JSON Helpers (`libs/json`)
+
+Features: JSON encode/decode and typed decode.
+
+Fallback: `ctx.res.json` falls back to the AWK encoder. `json.decode` requires `libs/json`.
+
+Build: included in the `build-libs` target.
+
+Env vars: none.
+
+## Gzip Compression (`libs/gzip`)
+
+Features: gzip compression of HTTP response bodies.
+
+Fallback: without `libs/gzip`, gzip is disabled as a safe no-op.
+
+Build: included in the `build-libs` target.
+
+Env vars:
+
+| Variable | Default | Description |
+|---|---|---|
+| `HAWK_GZIP` | unset | Set to `1` to enable gzip |
+| `HAWK_GZIP_MIN_SIZE` | `1024` | Minimum body size in bytes to compress |
+
 ## Setup
 
 ```sh

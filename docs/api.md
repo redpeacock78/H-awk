@@ -77,6 +77,19 @@ Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` 
 | `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Map>, ParseError>` |
 
+Future typed JSON request parsing is available as an MVP:
+
+```awk
+when ctx.req.json<Todo>() of
+  ok todo:
+    return ctx.res.status(201).json(todo)
+  ng e: JsonParseError:
+    return ctx.res.status(400).json({ error: "invalid json" })
+  ng e: JsonTypeError:
+    return ctx.res.status(422).json({ error: "invalid payload" })
+end
+```
+
 ## Response (ctx.res.*)
 
 | DSL | Direct call | Return type |
@@ -93,9 +106,45 @@ Request helpers return `Result<Untrusted<Str>, ParseError>` — use `when...of` 
 
 `ctx.res.json(data)` JSON-encodes an AWK array or scalar value and sets the response body with `Content-Type: application/json; charset=utf-8`. Use `ctx.res.json_raw(str)` only when `str` is already encoded JSON and should be sent as-is.
 
+If `data` is `List<T>`, `ctx.res.json(data)` returns a JSON array. If `data` is `Dict<Str, V>` or a Record, it returns a JSON object. Without type information, such as a legacy AWK array, it falls back to the previous behavior.
+
 > **Breaking change:** `ctx.res.json(data)` now JSON-encodes an AWK array or value. For the previous behavior — passing a pre-encoded JSON string unchanged — use `ctx.res.json_raw(str)`.
 
 `ctx.res.render(path)` reads templates through `HAWK_TEMPLATE_ROOT` when that environment variable is set. In that mode, empty paths, absolute paths, `..` traversal, unsafe path characters, and paths outside the template root are rejected. If `HAWK_TEMPLATE_ROOT` is unset, the path is used as provided.
+
+Gzip compression is automatic and has no explicit API. Set `HAWK_GZIP=1` to enable it. Responses are compressed when `Accept-Encoding` contains `gzip` and the body is at least `HAWK_GZIP_MIN_SIZE` bytes (default: 1024). H-awk does not compress 204/304/HEAD responses, responses that already set `Content-Encoding`, image/zip/gzip/pdf content, or small bodies. Compressed responses add `Content-Encoding: gzip`, `Vary: Accept-Encoding`, and `Content-Length: <compressed>`.
+
+---
+
+# JSON API (json.*)
+
+Available when `libs/json` is present.
+
+```awk
+json.encode(value)          # -> Str
+json.decode(str)            # -> Result<Any, JsonError>
+json.decode<T>(str)         # -> Result<T, JsonError>
+json.valid(str)             # -> Bool
+json.error()                # -> Str
+```
+
+Error types: `JsonParseError`, `JsonTypeError`, `JsonTooDeepError`.
+
+---
+
+# URL API (url.*)
+
+Uses `libs/url` when present, otherwise the AWK fallback.
+
+```awk
+url.encode(str)             # -> Str
+url.decode(str)             # -> Result<Str, UrlError>
+url.decode_form(str)        # -> Result<Str, UrlError> (+ treated as space)
+url.query_parse(str)        # -> Dict<Str, Str>
+url.query_string(dict)      # -> Str
+```
+
+Error types: `InvalidPercentEncoding`, `InvalidUtf8`.
 
 ---
 

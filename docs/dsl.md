@@ -95,6 +95,58 @@ The `??` operator infers a union type from its two operands (`Str | Int` from `e
 
 Supported types: `Int`, `Float`, `Str`, `Bool`, `NumericStr`, `Array`, `Map`, `Response`, `Option<T>`, `Result<T, E>`, `Untrusted<T>`, `HtmlEscapedStr`, `HtmlFragment`, `HtmlAttrEscapedStr`, `Void`, `Any`, and any union `A | B`. The `HtmlPart` alias expands to `HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr`. Type inference works for literals and known DSL functions.
 
+**Collection and Record types**
+
+`List<T>` is a typed JSON array:
+
+```awk
+let todos: List<Todo> = []
+todos.push(todo)
+return ctx.res.json(todos)  # -> JSON array
+```
+
+Only numeric indices are allowed. String keys are a type error. Passing `List<T>` to `ctx.res.json` produces a JSON array.
+
+`Dict<K, V>` is a typed JSON object:
+
+```awk
+let users: Dict<Str, User> = {}
+users["alice"] = user
+return ctx.res.json(users)  # -> JSON object
+```
+
+Only `K = Str` is officially supported for now.
+
+Record types define fixed object fields:
+
+```awk
+type Todo = {
+  id: Str
+  title: Str
+  done: Bool
+}
+
+let todo: Todo = {
+  id: "1"
+  title: "buy milk"
+  done: false
+}
+```
+
+Assignment to undefined fields is a type error. Passing a Record to `ctx.res.json` produces a JSON object.
+
+| DSL type | JSON |
+|---|---|
+| Str | string |
+| Int | number |
+| Float | number |
+| Bool | boolean |
+| Null | null |
+| List<T> | array |
+| Dict<Str, V> | object |
+| Record | object |
+| Option<T> | T or null |
+
 **Function type annotations**
 
 ```awk

@@ -20,6 +20,10 @@ AWK だけでバックエンドを書く。Node も Python もコンパイル済
 
 - **Express ライクなルーティング** — `hawk.app.get`、`.post`、`.del` など
 - **型安全 DSL** — `let`、`when...of`、`??`、`|>`、コンパイル時型アノテーション
+- **型付きコレクション** — `List<T>`、`Dict<K, V>`、`Record`（JSON 対応）
+- **URL ヘルパー** — `libs/url` による Zig 製 URL エンコード/デコード（AWK fallback あり）
+- **JSON ヘルパー** — `libs/json` による Zig 製 JSON エンコード/デコード、型付き `ctx.res.json(List<Todo>)`
+- **gzip 圧縮** — `libs/gzip` による HTTP レスポンス圧縮、`HAWK_GZIP=1` で有効化
 - **XSS 安全がデフォルト** — ブランド型により安全でない HTML はデシュガー時エラーになる
 - **マルチワーカー** — `SO_REUSEPORT` + HTTP/1.1 keep-alive（オプションの Zig 拡張）
 

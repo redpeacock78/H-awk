@@ -11,3 +11,5 @@ make test-libs      # Zig ライブラリユニットテスト
 make lint           # gawk --lint 構文チェック
 make ci             # lint + 全テスト
 ```
+
+テストには DSL コレクション型チェック（`List`/`Dict`/`Record` の型違反検出）、`libs/url` ユニットテスト（encode/decode/query）、`libs/json` ユニットテスト（encode/decode/parse error）、`libs/gzip` ユニットテスト（gzip negotiation/headers/fallback）が含まれます。
