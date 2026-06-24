@@ -59,3 +59,66 @@ function test_json_encode_any_object(   obj, out) {
   assert_true(index(out, "\"x\":1") > 0, "json any: object number field")
   assert_true(index(out, "\"y\":\"hello\"") > 0, "json any: object string field")
 }
+
+function test_json_unescape_basic(    res) {
+  _json_init()
+  res = _json_unescape("hello")
+  assert_eq(res, "hello", "unescape: plain string")
+}
+function test_json_unescape_control(    res) {
+  _json_init()
+  res = _json_unescape("a\\nb")
+  assert_eq(res, "a\nb", "unescape: newline")
+}
+function test_json_unescape_quote(    res) {
+  _json_init()
+  res = _json_unescape("say \\\"hi\\\"")
+  assert_eq(res, "say \"hi\"", "unescape: escaped quote")
+}
+function test_json_unescape_backslash(    res) {
+  _json_init()
+  res = _json_unescape("a\\\\b")
+  assert_eq(res, "a\\b", "unescape: backslash")
+}
+function test_json_unescape_unicode_ascii(    res) {
+  _json_init()
+  res = _json_unescape("\\u0041")
+  assert_eq(res, "A", "unescape: \\u0041 -> A")
+}
+function test_json_unescape_unicode_bmp(    res) {
+  _json_init()
+  res = _json_unescape("\\u3042")
+  assert_eq(res, "あ", "unescape: \\u3042 -> あ")
+}
+function test_json_unescape_unicode_surrogate(    res) {
+  _json_init()
+  res = _json_unescape("\\uD83D\\uDE00")
+  assert_eq(res, "😀", "unescape: surrogate pair -> U+1F600")
+}
+function test_json_decode_nested_object(    out) {
+  json_decode("{\"user\":{\"name\":\"Alice\",\"age\":30}}", out)
+  assert_eq(out["user.name"], "Alice", "decode nested: user.name")
+  assert_eq(out["user.age"], "30", "decode nested: user.age")
+}
+function test_json_decode_array(    out) {
+  json_decode("{\"tags\":[\"a\",\"b\",\"c\"]}", out)
+  assert_eq(out["tags.0"], "a", "decode array: tags.0")
+  assert_eq(out["tags.1"], "b", "decode array: tags.1")
+  assert_eq(out["tags.2"], "c", "decode array: tags.2")
+}
+function test_json_decode_deep(    out) {
+  json_decode("{\"a\":{\"b\":{\"c\":\"deep\"}}}", out)
+  assert_eq(out["a.b.c"], "deep", "decode deep: a.b.c")
+}
+function test_json_decode_unicode_in_value(    out) {
+  json_decode("{\"msg\":\"\\u3053\\u3093\\u306B\\u3061\\u306F\"}", out)
+  assert_eq(out["msg"], "こんにちは", "decode unicode in value")
+}
+function test_json_decode_escape_in_value(    out) {
+  json_decode("{\"q\":\"say \\\"hi\\\"\"}", out)
+  assert_eq(out["q"], "say \"hi\"", "decode escape in value")
+}
+function test_json_decode_invalid_returns_zero(    out, ret) {
+  ret = json_decode("not json", out)
+  assert_eq(ret, 0, "decode invalid: returns 0")
+}
