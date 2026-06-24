@@ -49,7 +49,7 @@ function todo_add() -> Response {
         ctx.res.status(400)
         return ctx.res.text("title required")
       }
-      let row = []
+      let row: Dict<Str, Str> = {}
       row["id"] = "#{systime()}_#{int(rand() * 100000)}"
       row["title"] = safe.str.trust(raw)
       append_tsv("data/todos.tsv", row)
@@ -83,7 +83,7 @@ function todo_list_json() -> Response {
   }
   let rows = []
   let n: Int = read_tsv("data/todos.tsv", rows)
-  let item = []
+  let item: Dict<Str, Str> = {}
   let items_json: Str = ""
   let i: Int
   for (i = 1; i <= n; i++) {

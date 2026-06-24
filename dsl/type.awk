@@ -131,6 +131,8 @@ function accepts(expected, actual,    eparts, apart, en, an, i, j, einter, ei_n,
     if (expected == "Any")   return 1
     if (actual   == "Any")   return 1
     if (actual   == "")      return 1
+    # Array is the supertype of all typed collections (Dict/List are AWK arrays at runtime)
+    if (expected == "Array" && (actual ~ /^List</ || actual ~ /^Dict</)) return 1
 
     # aliases must not be circular (table is hardcoded in sig.awk)
     if (expected in awk::_DS_TYPE_ALIAS) return accepts(awk::_DS_TYPE_ALIAS[expected], actual)
