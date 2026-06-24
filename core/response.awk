@@ -49,8 +49,12 @@ function redirect(res, location, code) {
   res["body"] = ""
 }
 
-function json(res, data, code,    body) {
+function json(res, data, code,    body, validated) {
   body = json_encode_any(data)
+  if (LIBS_LOADED["json"]) {
+    validated = hawk_json_encode(body)
+    if (validated != "") body = validated
+  }
   if (code != "" && code != 0) res["status"] = code
   else if (!("status" in res)) res["status"] = 200
   res["header:content-type"] = "application/json; charset=utf-8"

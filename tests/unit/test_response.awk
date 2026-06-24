@@ -63,6 +63,17 @@ function test_response_json_raw() {
   assert_eq(res["body"], "{\"ok\":true}", "res: json_raw body")
 }
 
+function test_response_json_zig_passthrough(    res2) {
+  if (!LIBS_LOADED["json"]) {
+    TESTS_SKIPPED++
+    return
+  }
+  delete res2
+  json(res2, "{\"ok\":true}")
+  assert_eq(res2["status"], 200, "json zig: status 200")
+  assert_true(length(res2["body"]) > 0, "json zig: body non-empty")
+}
+
 function test_response_text() {
   delete res
   text(res, "hello")

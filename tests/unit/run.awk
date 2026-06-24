@@ -73,6 +73,7 @@ BEGIN {
   test_response_redirect()
   test_response_json()
   test_response_json_raw()
+  test_response_json_zig_passthrough()
   test_response_text()
   test_response_html()
   test_response_wire()
