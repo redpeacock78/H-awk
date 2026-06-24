@@ -36,6 +36,11 @@ BEGIN {
   test_json_decode_unicode_in_value()
   test_json_decode_escape_in_value()
   test_json_decode_invalid_returns_zero()
+  test_json_decode_via_zig_flat()
+  test_json_decode_via_zig_nested()
+  test_json_decode_via_zig_array()
+  test_json_decode_via_zig_bool()
+  test_json_decode_via_zig_invalid()
 
   test_tsv_append_and_read()
   test_tsv_find()
