@@ -77,6 +77,19 @@ hawk.app.listen(env.get("PORT") ?? 8080)
 | `ctx.req.form(key)` | `ctx::dispatch("req.form", key)` | `Result<Untrusted<Str>, ParseError>` |
 | `ctx.req.json()` | `ctx::dispatch("req.json")` | `Result<Untrusted<Map>, ParseError>` |
 
+将来の型付き JSON リクエスト解析 API は、現在 MVP として利用できます：
+
+```awk
+when ctx.req.json<Todo>() of
+  ok todo:
+    return ctx.res.status(201).json(todo)
+  ng e: JsonParseError:
+    return ctx.res.status(400).json({ error: "invalid json" })
+  ng e: JsonTypeError:
+    return ctx.res.status(422).json({ error: "invalid payload" })
+end
+```
+
 ## レスポンス (ctx.res.*)
 
 | DSL | 直接呼び出し | 戻り値の型 |
@@ -93,9 +106,45 @@ hawk.app.listen(env.get("PORT") ?? 8080)
 
 `ctx.res.json(data)` は AWK 配列またはスカラー値を JSON エンコードし、`Content-Type: application/json; charset=utf-8` でレスポンスボディを設定します。`str` が既にエンコード済み JSON でそのまま送信する場合は `ctx.res.json_raw(str)` を使用してください。
 
+`data` が `List<T>` の場合、`ctx.res.json(data)` は JSON 配列を返します。`data` が `Dict<Str, V>` または Record の場合は JSON オブジェクトを返します。型情報がない従来の AWK 配列では、以前の挙動にフォールバックします。
+
 > **破壊的変更:** `ctx.res.json(data)` は AWK 配列または値を JSON エンコードするようになりました。以前の動作（事前エンコード済み JSON 文字列をそのまま通す）には `ctx.res.json_raw(str)` を使用してください。
 
 `ctx.res.render(path)` は `HAWK_TEMPLATE_ROOT` が設定されている場合、そのパスを通じてテンプレートを読み込みます。このモードでは、空パス・絶対パス・`..` トラバーサル・安全でないパス文字・テンプレートルート外のパスは拒否されます。未設定の場合、パスはそのまま使用されます。
+
+gzip 圧縮は自動で行われるため、明示的な API はありません。`HAWK_GZIP=1` で有効化します。`Accept-Encoding` に `gzip` が含まれ、本文が `HAWK_GZIP_MIN_SIZE` バイト以上（デフォルト: 1024）の場合に圧縮します。204/304/HEAD レスポンス、既に `Content-Encoding` が設定されたレスポンス、image/zip/gzip/pdf コンテンツ、小さい本文は圧縮しません。圧縮時は `Content-Encoding: gzip`、`Vary: Accept-Encoding`、`Content-Length: <compressed>` を追加します。
+
+---
+
+# JSON API (json.*)
+
+`libs/json` が存在する場合に利用できます。
+
+```awk
+json.encode(value)          # -> Str
+json.decode(str)            # -> Result<Any, JsonError>
+json.decode<T>(str)         # -> Result<T, JsonError>
+json.valid(str)             # -> Bool
+json.error()                # -> Str
+```
+
+エラー型: `JsonParseError`、`JsonTypeError`、`JsonTooDeepError`。
+
+---
+
+# URL API (url.*)
+
+`libs/url` が存在する場合はそれを使用し、ない場合は AWK fallback を使用します。
+
+```awk
+url.encode(str)             # -> Str
+url.decode(str)             # -> Result<Str, UrlError>
+url.decode_form(str)        # -> Result<Str, UrlError> (+ treated as space)
+url.query_parse(str)        # -> Dict<Str, Str>
+url.query_string(dict)      # -> Str
+```
+
+エラー型: `InvalidPercentEncoding`、`InvalidUtf8`。
 
 ---
 

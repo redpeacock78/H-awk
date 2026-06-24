@@ -20,6 +20,10 @@ Write backends in plain AWK. No Node. No Python. No compiled binaries.
 
 - **Express-like routing** — `hawk.app.get`, `.post`, `.del`, and friends
 - **Type-safe DSL** — `let`, `when...of`, `??`, `|>`, and compile-time type annotations
+- **Typed collections** — `List<T>`, `Dict<K, V>`, `Record` (JSON-aware)
+- **URL helpers** — `libs/url` Zig-backed URL encode/decode with AWK fallback
+- **JSON helpers** — `libs/json` Zig-backed JSON encode/decode; typed `ctx.res.json(List<Todo>)`
+- **Gzip compression** — `libs/gzip` HTTP response compression; `HAWK_GZIP=1` to enable
 - **XSS-safe by design** — brand types make unsafe HTML a desugar-time error
 - **Multi-worker** — `SO_REUSEPORT` + HTTP/1.1 keep-alive via optional Zig extensions
 

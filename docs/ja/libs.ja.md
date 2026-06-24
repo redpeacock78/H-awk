@@ -42,6 +42,41 @@ HAWK_KEEPALIVE_TIMEOUT=30 ./bin/hawk app.awk   # 30s アイドルタイムアウ
 | `HAWK_WORKERS` | `4` | ワーカープロセス数（`libs/net` が必要） |
 | `HAWK_KEEPALIVE_TIMEOUT` | `75` | アイドル keep-alive タイムアウト（秒） |
 
+## URL ヘルパー（`libs/url`）
+
+機能: URL percent encode/decode、クエリ文字列の parse/build。
+
+Fallback: `libs/url` がない場合も `core/url.awk` で動作します。
+
+Build: `build-libs` ターゲットに含まれます。
+
+環境変数: なし。
+
+## JSON ヘルパー（`libs/json`）
+
+機能: JSON encode/decode、型付き decode。
+
+Fallback: `ctx.res.json` は AWK encoder にフォールバックします。`json.decode` には `libs/json` が必要です。
+
+Build: `build-libs` ターゲットに含まれます。
+
+環境変数: なし。
+
+## gzip 圧縮（`libs/gzip`）
+
+機能: HTTP レスポンスボディの gzip 圧縮。
+
+Fallback: `libs/gzip` がない場合、gzip は無効化され安全な no-op になります。
+
+Build: `build-libs` ターゲットに含まれます。
+
+環境変数:
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `HAWK_GZIP` | 未設定 | `1` にすると gzip を有効化 |
+| `HAWK_GZIP_MIN_SIZE` | `1024` | 圧縮する最小本文サイズ（バイト） |
+
 ## セットアップ
 
 ```sh

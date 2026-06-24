@@ -95,6 +95,58 @@ let port: Int | Str = true
 
 サポートされる型：`Int`、`Float`、`Str`、`Bool`、`NumericStr`、`Array`、`Map`、`Response`、`Option<T>`、`Result<T, E>`、`Untrusted<T>`、`HtmlEscapedStr`、`HtmlFragment`、`HtmlAttrEscapedStr`、`Void`、`Any`、およびユニオン `A | B`。`HtmlPart` エイリアスは `HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr` に展開されます。リテラルと既知の DSL 関数については型推論が機能します。
 
+**コレクション型と Record 型**
+
+`List<T>` は型付き JSON 配列です：
+
+```awk
+let todos: List<Todo> = []
+todos.push(todo)
+return ctx.res.json(todos)  # -> JSON array
+```
+
+インデックスには数値のみ使用できます。文字列キーは型エラーです。`List<T>` を `ctx.res.json` に渡すと JSON 配列になります。
+
+`Dict<K, V>` は型付き JSON オブジェクトです：
+
+```awk
+let users: Dict<Str, User> = {}
+users["alice"] = user
+return ctx.res.json(users)  # -> JSON object
+```
+
+現時点で正式にサポートされるのは `K = Str` のみです。
+
+Record 型は固定フィールドのオブジェクトを定義します：
+
+```awk
+type Todo = {
+  id: Str
+  title: Str
+  done: Bool
+}
+
+let todo: Todo = {
+  id: "1"
+  title: "buy milk"
+  done: false
+}
+```
+
+未定義フィールドへの代入は型エラーです。Record を `ctx.res.json` に渡すと JSON オブジェクトになります。
+
+| DSL 型 | JSON |
+|---|---|
+| Str | string |
+| Int | number |
+| Float | number |
+| Bool | boolean |
+| Null | null |
+| List<T> | array |
+| Dict<Str, V> | object |
+| Record | object |
+| Option<T> | T or null |
+
 **関数型アノテーション**
 
 ```awk
