@@ -23,12 +23,13 @@ BEGIN {
 }
 
 # Returns 1 if the line starts a when block; captures indent in m[1], expr in m[2]
-function _ds_match_starts(line, m,    d) {
+function _ds_match_starts(line, m, lineno,    d) {
   if (match(line, /^([[:space:]]*)when[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)) {
     d = ++_DS_match_depth
     _DS_in_match = 1
     _DS_match_indent[d] = m[1]
     _DS_match_expr[d] = m[2]
+    _DS_match_lineno[d] = (lineno != "" ? lineno : _DS_current_lineno)
     _DS_match_ok_count[d] = 0
     _DS_match_ng_arms[d] = 0
     _DS_match_cur_ng_arm[d] = 0
@@ -46,7 +47,7 @@ function _ds_match_starts(line, m,    d) {
 # Collect a line while inside a when block. Returns "" always.
 # Branch headers set state; body lines are buffered; "end" triggers emit.
 function _ds_match_collect(line, lineno,    d, m, i, type_t) {
-  if (_ds_match_starts(line, m)) return ""
+  if (_ds_match_starts(line, m, lineno)) return ""
   d = _DS_match_depth
   type_t = _ds_strip_effect(_ds_infer_type(_DS_match_expr[d]))
   # ok name:  (ok, bind)
@@ -221,14 +222,17 @@ function _ds_match_reset(d) {
   delete _DS_match_branch[d]
   delete _DS_match_expr[d]
   delete _DS_match_indent[d]
+  delete _DS_match_lineno[d]
   delete _DS_match_ng_arms[d]
   delete _DS_match_cur_ng_arm[d]
   delete _DS_match_is_option[d]
   delete _ds_saw_catchall[d]
   _ds_match_delete_depth(_DS_match_ok_body, d)
   _ds_match_delete_depth(_DS_match_ok_lineno, d)
+  _ds_match_delete_depth(_DS_match_ok_raw, d)
   _ds_match_delete_depth(_DS_match_ng_body, d)
   _ds_match_delete_depth(_DS_match_ng_lineno, d)
+  _ds_match_delete_depth(_DS_match_ng_raw, d)
   _ds_match_delete_depth(_DS_match_ng_type, d)
   _ds_match_delete_depth(_DS_match_ng_var_name, d)
   _ds_match_delete_depth(_DS_match_ng_is_default, d)
@@ -244,7 +248,7 @@ function _ds_match_delete_depth(a, d,    k, parts) {
 }
 
 # Emit desugared if/else into _DS_body_buf.
-function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered) {
+function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered, emit_base, header_lineno) {
   if (_DS_match_ng_arms[d] == 0) {
     _ds_error(lineno, "when...of missing ng/none/default branch", \
         "add an ng: or default: arm to handle the error case")
@@ -303,14 +307,20 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
     }
   }
 
-  _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] tmpvar " = " _ds_dot_transform(_DS_match_expr[d])
-  _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "if (" check_fn "(" tmpvar ")) {"
+  emit_base = _DS_body_count
+  header_lineno = (_DS_match_lineno[d] != "" ? _DS_match_lineno[d] : lineno)
+  _ds_match_push(_DS_match_indent[d] tmpvar " = " _ds_dot_transform(_DS_match_expr[d]), header_lineno)
+  _ds_match_push(_DS_match_indent[d] "if (" check_fn "(" tmpvar ")) {", header_lineno)
   if (_DS_match_ok_var[d] != "")
-    _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "  " _DS_match_ok_var[d] " = " val_fn "(" tmpvar ")"
+    _ds_match_push(_DS_match_indent[d] "  " _DS_match_ok_var[d] " = " val_fn "(" tmpvar ")", header_lineno)
   if (_DS_in_function && _DS_match_ok_var[d] != "")
     _ds_match_register_arm_bind_type(d, "ok", _DS_func_name, _DS_match_ok_var[d], _ds_inner_type(type_t))
-  for (j = 1; j <= _DS_match_ok_count[d]; j++)
-    _ds_match_process_body(_DS_match_ok_body[d, j], _DS_match_ok_lineno[d, j], d)
+  for (j = 1; j <= _DS_match_ok_count[d]; j++) {
+    if (_DS_match_ok_raw[d, j])
+      _ds_match_push(_DS_match_ok_body[d, j], _DS_match_ok_lineno[d, j])
+    else
+      _ds_match_process_body(_DS_match_ok_body[d, j], _DS_match_ok_lineno[d, j], d)
+  }
   if (_DS_in_function && _DS_match_ok_var[d] != "")
     _ds_match_unregister_arm_bind_types(d, "ok", _DS_func_name)
 
@@ -320,23 +330,60 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
     arm_default = _DS_match_ng_is_default[d, i]
 
     if (arm_type != "" && !arm_default) {
-      _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "} else if (result_err_type(" tmpvar ") == \"" arm_type "\") {"
+      _ds_match_push(_DS_match_indent[d] "} else if (result_err_type(" tmpvar ") == \"" arm_type "\") {", header_lineno)
     } else {
-      _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "} else {"
+      _ds_match_push(_DS_match_indent[d] "} else {", header_lineno)
     }
 
     if (arm_var != "" && err_fn != "")
-      _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "  " arm_var " = " err_fn "(" tmpvar ")"
+      _ds_match_push(_DS_match_indent[d] "  " arm_var " = " err_fn "(" tmpvar ")", header_lineno)
 
     if (_DS_in_function && arm_var != "" && err_fn != "")
       _ds_match_register_arm_bind_type(d, "ng", _DS_func_name, arm_var, (arm_type != "" ? arm_type : _ds_result_err_type(type_t)))
-    for (j = 1; j <= _DS_match_ng_body_count[d, i]; j++)
-      _ds_match_process_body(_DS_match_ng_body[d, i, j], _DS_match_ng_lineno[d, i, j], d)
+    for (j = 1; j <= _DS_match_ng_body_count[d, i]; j++) {
+      if (_DS_match_ng_raw[d, i, j])
+        _ds_match_push(_DS_match_ng_body[d, i, j], _DS_match_ng_lineno[d, i, j])
+      else
+        _ds_match_process_body(_DS_match_ng_body[d, i, j], _DS_match_ng_lineno[d, i, j], d)
+    }
     if (_DS_in_function && arm_var != "" && err_fn != "")
       _ds_match_unregister_arm_bind_types(d, "ng", _DS_func_name)
   }
 
-  _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "}"
+  _ds_match_push(_DS_match_indent[d] "}", header_lineno)
+  if (d >= 2) _ds_match_move_emit_to_parent(d, emit_base)
+}
+
+function _ds_match_push(line, lineno) {
+  _DS_body_buf[++_DS_body_count] = line
+  _DS_body_lineno[_DS_body_count] = lineno
+}
+
+function _ds_match_move_emit_to_parent(d, emit_base,    parent, i, base, cur) {
+  parent = d - 1
+  if (_DS_match_branch[parent] == "ok" || _DS_match_branch[parent] == "some") {
+    base = _DS_match_ok_count[parent]
+    for (i = emit_base + 1; i <= _DS_body_count; i++) {
+      _DS_match_ok_body[parent, base + i - emit_base] = _DS_body_buf[i]
+      _DS_match_ok_lineno[parent, base + i - emit_base] = _DS_body_lineno[i]
+      _DS_match_ok_raw[parent, base + i - emit_base] = 1
+      delete _DS_body_buf[i]
+      delete _DS_body_lineno[i]
+    }
+    _DS_match_ok_count[parent] = base + _DS_body_count - emit_base
+  } else {
+    cur = _DS_match_cur_ng_arm[parent]
+    base = _DS_match_ng_body_count[parent, cur]
+    for (i = emit_base + 1; i <= _DS_body_count; i++) {
+      _DS_match_ng_body[parent, cur, base + i - emit_base] = _DS_body_buf[i]
+      _DS_match_ng_lineno[parent, cur, base + i - emit_base] = _DS_body_lineno[i]
+      _DS_match_ng_raw[parent, cur, base + i - emit_base] = 1
+      delete _DS_body_buf[i]
+      delete _DS_body_lineno[i]
+    }
+    _DS_match_ng_body_count[parent, cur] = base + _DS_body_count - emit_base
+  }
+  _DS_body_count = emit_base
 }
 
 # Process a collected body line through the full pipeline, push to _DS_body_buf.
@@ -355,12 +402,12 @@ function _ds_match_process_body(line, lineno, d,    pipe_pre, nc_pre, p, pipe_r,
     line = _ds_expand_interp(line, lineno)
   }
   pipe_r = _ds_pipe_transform(line, pipe_pre)
-  for (p = 1; p in pipe_pre; p++) _DS_body_buf[++_DS_body_count] = _ds_dot_transform(pipe_pre[p])
+  for (p = 1; p in pipe_pre; p++) _ds_match_push(_ds_dot_transform(pipe_pre[p]), lineno)
   dot_r = _ds_dot_transform(pipe_r)
   nc_r  = _ds_nc_transform(dot_r, nc_pre)
-  for (p = 1; p in nc_pre; p++) _DS_body_buf[++_DS_body_count] = nc_pre[p]
+  for (p = 1; p in nc_pre; p++) _ds_match_push(nc_pre[p], lineno)
   _ds_typecheck_plain_call(nc_r)
   _ds_check_return(dot_r, lineno)
   xf = _ds_let_transform(nc_r, lineno, line)
-  if (xf != "") _DS_body_buf[++_DS_body_count] = xf
+  if (xf != "") _ds_match_push(xf, lineno)
 }
