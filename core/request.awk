@@ -195,3 +195,34 @@ function parse_request_zig(poll_result, req,    RS_CHAR, parts, n, i, j, k, v, c
   if (req["path"] == "") return 0
   return 1
 }
+
+# request_validate_content_type(req, types, res)
+# QUERY ハンドラ呼出前の Content-Type 検証。
+# 戻り値: 1=OK, 0=400(CT欠落), -1=415(型不一致)
+function request_validate_content_type(req, types, res,    ct, ct_base, ct_parts, n, i) {
+  ct = req["header:content-type"]
+  if (ct == "") {
+    status(res, 400)
+    text(res, "Bad Request: Content-Type required for QUERY")
+    return 0
+  }
+
+  # types 空なら存在確認のみで OK
+  n = 0
+  for (i in types) n++
+  if (n == 0) return 1
+
+  # type/subtype を取り出す（";" より前、前後空白除去）
+  split(ct, ct_parts, ";")
+  ct_base = ct_parts[1]
+  gsub(/^[[:space:]]+|[[:space:]]+$/, "", ct_base)
+
+  # 各 types と完全一致チェック
+  for (i in types) {
+    if (ct_base == types[i]) return 1
+  }
+
+  status(res, 415)
+  text(res, "Unsupported Media Type")
+  return -1
+}

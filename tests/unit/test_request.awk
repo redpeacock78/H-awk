@@ -133,3 +133,55 @@ function test_request_parse_multipart_file(    raw, req, ok, body) {
   assert_eq(req["file:avatar_filename"], "photo.jpg", "request: multipart file filename")
   assert_eq(req["file:avatar_type"], "image/jpeg", "request: multipart file content-type")
 }
+
+function test_request_validate_content_type(   req, res, types, ok) {
+  # 1. Content-Type 欠落 → 0 (400)
+  delete req; delete res; delete types
+  req["header:content-type"] = ""
+  ok = request_validate_content_type(req, types, res)
+  assert_eq(ok, 0,   "validate_ct: missing → 0")
+  assert_eq(res["status"], 400, "validate_ct: missing → status 400")
+
+  # 2. types 空 + Content-Type あり → 1 (OK)
+  delete req; delete res; delete types
+  req["header:content-type"] = "application/json"
+  ok = request_validate_content_type(req, types, res)
+  assert_eq(ok, 1, "validate_ct: empty types + ct present → 1")
+
+  # 3. types 指定 + 完全一致 → 1
+  delete req; delete res; delete types
+  req["header:content-type"] = "application/json"
+  types[1] = "application/json"
+  ok = request_validate_content_type(req, types, res)
+  assert_eq(ok, 1, "validate_ct: exact match → 1")
+
+  # 4. types 指定 + 不一致 → -1 (415)
+  delete req; delete res; delete types
+  req["header:content-type"] = "text/plain"
+  types[1] = "application/json"
+  ok = request_validate_content_type(req, types, res)
+  assert_eq(ok, -1, "validate_ct: mismatch → -1")
+  assert_eq(res["status"], 415, "validate_ct: mismatch → status 415")
+
+  # 5. パラメータ付き Content-Type → type/subtype のみ比較
+  delete req; delete res; delete types
+  req["header:content-type"] = "application/json; charset=utf-8"
+  types[1] = "application/json"
+  ok = request_validate_content_type(req, types, res)
+  assert_eq(ok, 1, "validate_ct: params stripped → 1")
+
+  # 6. 前方一致誤認防止: application/jsonp ≠ application/json
+  delete req; delete res; delete types
+  req["header:content-type"] = "application/jsonp"
+  types[1] = "application/json"
+  ok = request_validate_content_type(req, types, res)
+  assert_eq(ok, -1, "validate_ct: jsonp != json → -1")
+
+  # 7. types 複数 + いずれかに一致 → 1
+  delete req; delete res; delete types
+  req["header:content-type"] = "application/sql"
+  types[1] = "application/json"
+  types[2] = "application/sql"
+  ok = request_validate_content_type(req, types, res)
+  assert_eq(ok, 1, "validate_ct: multi-types match → 1")
+}

@@ -66,6 +66,7 @@ BEGIN {
   test_request_parse_multipart_no_lib()
   test_request_parse_multipart_text()
   test_request_parse_multipart_file()
+  test_request_validate_content_type()
 
   test_response_status()
   test_response_header()
