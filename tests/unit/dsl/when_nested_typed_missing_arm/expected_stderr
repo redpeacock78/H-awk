@@ -1,0 +1,6 @@
+error: when...of missing arm for ErrB
+  --> tests/unit/dsl/when_nested_typed_missing_arm/input.awk:18
+   |
+ 18 |       end
+   |
+   = help: add 'ng e: ErrB:' or 'default:'

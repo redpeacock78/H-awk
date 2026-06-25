@@ -46,10 +46,9 @@ function _ds_match_starts(line, m, lineno,    d) {
 
 # Collect a line while inside a when block. Returns "" always.
 # Branch headers set state; body lines are buffered; "end" triggers emit.
-function _ds_match_collect(line, lineno,    d, m, i, type_t) {
+function _ds_match_collect(line, lineno,    d, m, i) {
   if (_ds_match_starts(line, m, lineno)) return ""
   d = _DS_match_depth
-  type_t = _ds_strip_effect(_ds_infer_type(_DS_match_expr[d]))
   # ok name:  (ok, bind)
   if (match(line, /^[[:space:]]*ok[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
@@ -258,6 +257,9 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
   _DS_mc_count++
   tmpvar = "_ds_mc_" _DS_mc_count
 
+  type_t = _ds_infer_type(_DS_match_expr[d])
+  type_t = _ds_strip_effect(type_t)
+
   if (_DS_in_function) {
     _DS_let_locals[++_DS_let_count] = tmpvar
     if (_DS_match_ok_var[d] != "") _DS_let_locals[++_DS_let_count] = _DS_match_ok_var[d]
@@ -271,8 +273,6 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
     }
   }
 
-  type_t = _ds_infer_type(_DS_match_expr[d])
-  type_t = _ds_strip_effect(type_t)
   if (type_t ~ /^Option</ || (type_t == "" && _DS_match_is_option[d])) {
     check_fn = "option_some"; val_fn = "option_val"; err_fn = ""
   } else {
