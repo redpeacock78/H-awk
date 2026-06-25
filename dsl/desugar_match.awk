@@ -43,27 +43,37 @@ function _ds_match_starts(line, m,    d) {
 
 # Collect a line while inside a when block. Returns "" always.
 # Branch headers set state; body lines are buffered; "end" triggers emit.
-function _ds_match_collect(line, lineno,    d, m, i) {
+function _ds_match_collect(line, lineno,    d, m, i, type_t) {
   d = _DS_match_depth
+  type_t = _ds_strip_effect(_ds_infer_type(_DS_match_expr[d]))
   # ok name:  (ok, bind)
   if (match(line, /^[[:space:]]*ok[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
-    _DS_match_ok_var[d] = m[1]; _DS_match_branch[d] = "ok"; return ""
+    _ds_match_unregister_current_arm(d)
+    _DS_match_ok_var[d] = m[1]; _DS_match_branch[d] = "ok"
+    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ok", _DS_func_name, m[1], _ds_inner_type(type_t))
+    return ""
   }
   # ok:  (ok, no bind)
   if (line ~ /^[[:space:]]*ok:[[:space:]]*$/) {
+    _ds_match_unregister_current_arm(d)
     _DS_match_ok_var[d] = ""; _DS_match_branch[d] = "ok"; return ""
   }
   # some name:  (some, bind)
   if (match(line, /^[[:space:]]*some[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
-    _DS_match_ok_var[d] = m[1]; _DS_match_branch[d] = "some"; _DS_match_is_option[d] = 1; return ""
+    _ds_match_unregister_current_arm(d)
+    _DS_match_ok_var[d] = m[1]; _DS_match_branch[d] = "some"; _DS_match_is_option[d] = 1
+    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ok", _DS_func_name, m[1], _ds_inner_type(type_t))
+    return ""
   }
   # some:  (some, no bind)
   if (line ~ /^[[:space:]]*some:[[:space:]]*$/) {
+    _ds_match_unregister_current_arm(d)
     _DS_match_ok_var[d] = ""; _DS_match_branch[d] = "some"; _DS_match_is_option[d] = 1; return ""
   }
   # none:  (none, no bind — treated as default arm for option)
   if (line ~ /^[[:space:]]*none:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+    _ds_match_unregister_current_arm(d)
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = ""
     _ds_saw_catchall[d] = 1
@@ -72,13 +82,17 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   # ng VAR<TypeName>:  (typed ng, bind — check BEFORE plain "ng name:")
   if (match(line, /^[[:space:]]*ng[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+    _ds_match_unregister_current_arm(d)
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = m[2]; _DS_match_ng_var_name[d, i] = m[1]
-    _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"; return ""
+    _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"
+    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ng", _DS_func_name, m[1], m[2])
+    return ""
   }
   # ng <TypeName>:  (typed ng, no bind)
   if (match(line, /^[[:space:]]*ng[[:space:]]*<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+    _ds_match_unregister_current_arm(d)
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = m[1]; _DS_match_ng_var_name[d, i] = ""
     _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"; return ""
@@ -86,14 +100,18 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   # ng name:  (untyped ng, bind)
   if (match(line, /^[[:space:]]*ng[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+    _ds_match_unregister_current_arm(d)
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = m[1]
     _ds_saw_catchall[d] = 1
-    _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"; return ""
+    _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"
+    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ng", _DS_func_name, m[1], _ds_result_err_type(type_t))
+    return ""
   }
   # ng:  (untyped ng, no bind)
   if (line ~ /^[[:space:]]*ng:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+    _ds_match_unregister_current_arm(d)
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = ""
     _ds_saw_catchall[d] = 1
@@ -102,14 +120,18 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   # default name:  (catch-all, bind)
   if (match(line, /^[[:space:]]*default[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+    _ds_match_unregister_current_arm(d)
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = m[1]
     _ds_saw_catchall[d] = 1
-    _DS_match_ng_is_default[d, i] = 1; _DS_match_branch[d] = "ng"; return ""
+    _DS_match_ng_is_default[d, i] = 1; _DS_match_branch[d] = "ng"
+    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ng", _DS_func_name, m[1], _ds_result_err_type(type_t))
+    return ""
   }
   # default:  (catch-all, no bind)
   if (line ~ /^[[:space:]]*default:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+    _ds_match_unregister_current_arm(d)
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = ""
     _ds_saw_catchall[d] = 1
@@ -117,6 +139,7 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   }
   # end
   if (line ~ /^[[:space:]]*end[[:space:]]*$/) {
+    _ds_match_unregister_current_arm(d)
     _ds_match_emit(lineno, d)
     _ds_match_reset(d)
     _DS_match_depth--
@@ -148,8 +171,51 @@ function _ds_match_catchall_order_error() {
   exit 1
 }
 
+function _ds_match_register_arm_bind_type(d, branch_kind, func_name, var_name, type_str,    idx) {
+  if (func_name == "" || var_name == "") return
+  idx = ++_DS_match_arm_var_order_n[d, branch_kind]
+  _DS_match_arm_var_order[d, branch_kind, idx] = var_name
+  if ((func_name SUBSEP var_name) in _DS_VAR_TYPES)
+    _DS_match_arm_var_type[d, branch_kind, func_name, var_name, "_shadowed"] = _DS_VAR_TYPES[func_name, var_name]
+  _DS_match_arm_var_type[d, branch_kind, func_name, var_name] = type_str
+  _DS_VAR_TYPES[func_name, var_name] = type_str
+}
+
+function _ds_match_unregister_current_arm(d) {
+  if (!_DS_in_function) return
+  if (_DS_match_branch[d] == "ok" || _DS_match_branch[d] == "some")
+    _ds_match_unregister_arm_bind_types(d, "ok", _DS_func_name)
+  else if (_DS_match_branch[d] == "ng")
+    _ds_match_unregister_arm_bind_types(d, "ng", _DS_func_name)
+}
+
+function _ds_match_unregister_arm_bind_types(d, branch_kind, func_name) {
+  _ds_match_rollback_arm_bind_types(d, branch_kind, func_name)
+}
+
+function _ds_match_rollback_arm_bind_types(d, branch_kind, func_name,    idx, var_name) {
+  if (func_name == "") return
+  for (idx = _DS_match_arm_var_order_n[d, branch_kind]; idx >= 1; idx--) {
+    var_name = _DS_match_arm_var_order[d, branch_kind, idx]
+    if ((d, branch_kind, func_name, var_name, "_shadowed") in _DS_match_arm_var_type) {
+      _DS_VAR_TYPES[func_name, var_name] = _DS_match_arm_var_type[d, branch_kind, func_name, var_name, "_shadowed"]
+      delete _DS_match_arm_var_type[d, branch_kind, func_name, var_name, "_shadowed"]
+    } else {
+      delete _DS_VAR_TYPES[func_name, var_name]
+    }
+    delete _DS_match_arm_var_type[d, branch_kind, func_name, var_name]
+    delete _DS_match_arm_var_order[d, branch_kind, idx]
+  }
+  delete _DS_match_arm_var_order_n[d, branch_kind]
+}
+
 # Reset one match frame.
 function _ds_match_reset(d) {
+  _ds_match_rollback_arm_bind_types(d, "ng", _DS_func_name)
+  _ds_match_rollback_arm_bind_types(d, "ok", _DS_func_name)
+  _ds_match_delete_depth(_DS_match_arm_var_type, d)
+  _ds_match_delete_depth(_DS_match_arm_var_order, d)
+  _ds_match_delete_depth(_DS_match_arm_var_order_n, d)
   delete _DS_match_ok_count[d]
   delete _DS_match_ok_var[d]
   delete _DS_match_branch[d]
@@ -236,21 +302,16 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
     }
   }
 
-  if (_DS_in_function) {
-    if (_DS_match_ok_var[d] != "")
-      _DS_VAR_TYPES[_DS_func_name, _DS_match_ok_var[d]] = _ds_inner_type(type_t)
-    for (i = 1; i <= _DS_match_ng_arms[d]; i++) {
-      if (_DS_match_ng_var_name[d, i] != "" && type_t ~ /^Result</)
-        _DS_VAR_TYPES[_DS_func_name, _DS_match_ng_var_name[d, i]] = _ds_result_err_type(type_t)
-    }
-  }
-
   _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] tmpvar " = " _ds_dot_transform(_DS_match_expr[d])
   _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "if (" check_fn "(" tmpvar ")) {"
   if (_DS_match_ok_var[d] != "")
     _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "  " _DS_match_ok_var[d] " = " val_fn "(" tmpvar ")"
+  if (_DS_in_function && _DS_match_ok_var[d] != "")
+    _ds_match_register_arm_bind_type(d, "ok", _DS_func_name, _DS_match_ok_var[d], _ds_inner_type(type_t))
   for (j = 1; j <= _DS_match_ok_count[d]; j++)
     _ds_match_process_body(_DS_match_ok_body[d, j], _DS_match_ok_lineno[d, j], d)
+  if (_DS_in_function && _DS_match_ok_var[d] != "")
+    _ds_match_unregister_arm_bind_types(d, "ok", _DS_func_name)
 
   for (i = 1; i <= _DS_match_ng_arms[d]; i++) {
     arm_type    = _DS_match_ng_type[d, i]
@@ -266,8 +327,12 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
     if (arm_var != "" && err_fn != "")
       _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "  " arm_var " = " err_fn "(" tmpvar ")"
 
+    if (_DS_in_function && arm_var != "" && err_fn != "")
+      _ds_match_register_arm_bind_type(d, "ng", _DS_func_name, arm_var, (arm_type != "" ? arm_type : _ds_result_err_type(type_t)))
     for (j = 1; j <= _DS_match_ng_body_count[d, i]; j++)
       _ds_match_process_body(_DS_match_ng_body[d, i, j], _DS_match_ng_lineno[d, i, j], d)
+    if (_DS_in_function && arm_var != "" && err_fn != "")
+      _ds_match_unregister_arm_bind_types(d, "ng", _DS_func_name)
   }
 
   _DS_body_buf[++_DS_body_count] = _DS_match_indent[d] "}"
