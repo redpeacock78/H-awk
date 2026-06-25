@@ -18,20 +18,25 @@ function _ds_init() {
   _DS_pipe_tmp_cnt = 0
   _DS_mc_count       = 0
   _DS_in_match       = 0
-  _DS_match_expr     = ""
-  _DS_match_indent   = ""
-  _DS_match_ok_var     = ""
-  _DS_match_branch     = ""
-  _DS_match_ok_count   = 0
-  _DS_match_ng_arms    = 0
-  _DS_match_cur_ng_arm = 0
+  _DS_match_depth    = 0
   delete _DS_let_locals
   delete _DS_body_buf
   delete _DS_let_type_map
   delete _DS_VAR_TYPES
   delete _DS_VAR_KIND
+  delete _DS_match_expr
+  delete _DS_match_indent
+  delete _DS_match_ok_var
+  delete _DS_match_branch
+  delete _DS_match_ok_count
+  delete _DS_match_ng_arms
+  delete _DS_match_cur_ng_arm
+  delete _DS_match_is_option
+  delete _ds_saw_catchall
   delete _DS_match_ok_body
+  delete _DS_match_ok_lineno
   delete _DS_match_ng_body
+  delete _DS_match_ng_lineno
   delete _DS_match_ng_type
   delete _DS_match_ng_var_name
   delete _DS_match_ng_is_default

@@ -209,9 +209,6 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
     return
   }
   if (_ds_match_starts(line, match_m)) {
-    _DS_match_expr   = match_m[2]
-    _DS_match_indent = match_m[1]
-    _DS_in_match = 1
     return
   }
 
