@@ -166,6 +166,13 @@ BEGIN {
     _DS_SIG_ARG["hawk.app.head", 1]   = "Str"
     _DS_SIG_ARG["hawk.app.head", 2]   = "HandlerName"
 
+    _DS_SIG_RET["hawk.app.query"]      = "Void"
+    _DS_SIG_ARITY["hawk.app.query"]    = 2
+    _DS_SIG_ARITY_MAX["hawk.app.query"] = 3
+    _DS_SIG_ARG["hawk.app.query", 1]   = "Str"
+    _DS_SIG_ARG["hawk.app.query", 2]   = "HandlerName"
+    _DS_SIG_ARG["hawk.app.query", 3]   = "List"
+
     _DS_SIG_RET["hawk.app.on"]        = "Void"
     _DS_SIG_ARITY["hawk.app.on"]      = 3
     _DS_SIG_ARG["hawk.app.on", 1]     = "Str"
