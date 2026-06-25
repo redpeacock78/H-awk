@@ -36,6 +36,8 @@ function _ds_match_starts(line, m,    d) {
     _DS_match_ok_var[d] = ""
     _DS_match_is_option[d] = 0
     _ds_saw_catchall[d] = 0
+    # Task 5 fills this with ancestor bind_seen snapshots.
+    _ds_match_delete_depth(_DS_match_outer_binds, d)
     return 1
   }
   return 0
@@ -44,6 +46,7 @@ function _ds_match_starts(line, m,    d) {
 # Collect a line while inside a when block. Returns "" always.
 # Branch headers set state; body lines are buffered; "end" triggers emit.
 function _ds_match_collect(line, lineno,    d, m, i, type_t) {
+  if (_ds_match_starts(line, m)) return ""
   d = _DS_match_depth
   type_t = _ds_strip_effect(_ds_infer_type(_DS_match_expr[d]))
   # ok name:  (ok, bind)
@@ -230,6 +233,7 @@ function _ds_match_reset(d) {
   _ds_match_delete_depth(_DS_match_ng_var_name, d)
   _ds_match_delete_depth(_DS_match_ng_is_default, d)
   _ds_match_delete_depth(_DS_match_ng_body_count, d)
+  _ds_match_delete_depth(_DS_match_outer_binds, d)
 }
 
 function _ds_match_delete_depth(a, d,    k, parts) {
