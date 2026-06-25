@@ -50,7 +50,6 @@ function _ds_match_collect(line, lineno,    d, m, i, type_t) {
   if (match(line, /^[[:space:]]*ok[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
     _DS_match_ok_var[d] = m[1]; _DS_match_branch[d] = "ok"
-    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ok", _DS_func_name, m[1], _ds_inner_type(type_t))
     return ""
   }
   # ok:  (ok, no bind)
@@ -62,7 +61,6 @@ function _ds_match_collect(line, lineno,    d, m, i, type_t) {
   if (match(line, /^[[:space:]]*some[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
     _DS_match_ok_var[d] = m[1]; _DS_match_branch[d] = "some"; _DS_match_is_option[d] = 1
-    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ok", _DS_func_name, m[1], _ds_inner_type(type_t))
     return ""
   }
   # some:  (some, no bind)
@@ -86,7 +84,6 @@ function _ds_match_collect(line, lineno,    d, m, i, type_t) {
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = m[2]; _DS_match_ng_var_name[d, i] = m[1]
     _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"
-    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ng", _DS_func_name, m[1], m[2])
     return ""
   }
   # ng <TypeName>:  (typed ng, no bind)
@@ -105,7 +102,6 @@ function _ds_match_collect(line, lineno,    d, m, i, type_t) {
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = m[1]
     _ds_saw_catchall[d] = 1
     _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"
-    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ng", _DS_func_name, m[1], _ds_result_err_type(type_t))
     return ""
   }
   # ng:  (untyped ng, no bind)
@@ -125,7 +121,6 @@ function _ds_match_collect(line, lineno,    d, m, i, type_t) {
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = m[1]
     _ds_saw_catchall[d] = 1
     _DS_match_ng_is_default[d, i] = 1; _DS_match_branch[d] = "ng"
-    if (_DS_in_function) _ds_match_register_arm_bind_type(d, "ng", _DS_func_name, m[1], _ds_result_err_type(type_t))
     return ""
   }
   # default:  (catch-all, no bind)
@@ -181,12 +176,14 @@ function _ds_match_register_arm_bind_type(d, branch_kind, func_name, var_name, t
   _DS_VAR_TYPES[func_name, var_name] = type_str
 }
 
-function _ds_match_unregister_current_arm(d) {
+function _ds_match_unregister_current_arm(d,    branch_kind) {
   if (!_DS_in_function) return
   if (_DS_match_branch[d] == "ok" || _DS_match_branch[d] == "some")
-    _ds_match_unregister_arm_bind_types(d, "ok", _DS_func_name)
+    branch_kind = "ok"
   else if (_DS_match_branch[d] == "ng")
-    _ds_match_unregister_arm_bind_types(d, "ng", _DS_func_name)
+    branch_kind = "ng"
+  if (branch_kind != "" && _DS_match_arm_var_order_n[d, branch_kind] > 0)
+    _ds_match_unregister_arm_bind_types(d, branch_kind, _DS_func_name)
 }
 
 function _ds_match_unregister_arm_bind_types(d, branch_kind, func_name) {
