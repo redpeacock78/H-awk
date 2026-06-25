@@ -9,7 +9,7 @@ function need_str(x) {
 function fetch() {
 }
 
-function handler(    _ds_mc_1, x, x) {
+function handler(    _ds_mc_1, x) {
   _ds_mc_1 = fetch()
   if (result_ok(_ds_mc_1)) {
     x = result_val(_ds_mc_1)

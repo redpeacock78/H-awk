@@ -247,7 +247,7 @@ function _ds_match_delete_depth(a, d,    k, parts) {
 }
 
 # Emit desugared if/else into _DS_body_buf.
-function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered, emit_base, header_lineno) {
+function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered, emit_base, header_lineno, _saved_lineno) {
   if (_DS_match_ng_arms[d] == 0) {
     _ds_error(lineno, "when...of missing ng/none/default branch", \
         "add an ng: or default: arm to handle the error case")
@@ -257,17 +257,21 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
   _DS_mc_count++
   tmpvar = "_ds_mc_" _DS_mc_count
 
+  header_lineno = (_DS_match_lineno[d] != "" ? _DS_match_lineno[d] : lineno)
+  _saved_lineno = _DS_current_lineno
+  _DS_current_lineno = header_lineno
   type_t = _ds_infer_type(_DS_match_expr[d])
+  _DS_current_lineno = _saved_lineno
   type_t = _ds_strip_effect(type_t)
 
   if (_DS_in_function) {
-    _DS_let_locals[++_DS_let_count] = tmpvar
-    if (_DS_match_ok_var[d] != "") _DS_let_locals[++_DS_let_count] = _DS_match_ok_var[d]
+    _ds_match_add_local(tmpvar)
+    if (_DS_match_ok_var[d] != "") _ds_match_add_local(_DS_match_ok_var[d])
     # Deduplicate: multiple arms may bind to the same var name
     delete _ds_emit_added_vars
     for (i = 1; i <= _DS_match_ng_arms[d]; i++) {
       if (_DS_match_ng_var_name[d, i] != "" && !(_DS_match_ng_var_name[d, i] in _ds_emit_added_vars)) {
-        _DS_let_locals[++_DS_let_count] = _DS_match_ng_var_name[d, i]
+        _ds_match_add_local(_DS_match_ng_var_name[d, i])
         _ds_emit_added_vars[_DS_match_ng_var_name[d, i]] = 1
       }
     }
@@ -297,9 +301,9 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
           if (_DS_match_ng_type[d, i] != "") _ds_covered[_DS_match_ng_type[d, i]] = 1
         for (i = 1; i <= _ds_n_union; i++) {
           if (!(_ds_union_members[i] in _ds_covered)) {
-            _ds_error(lineno, \
+            _ds_error(header_lineno, \
               "when...of missing arm for " _ds_union_members[i], \
-              "add 'ng e: " _ds_union_members[i] ":' or 'default:'")
+              "add 'ng e<" _ds_union_members[i] ">:' or 'default:'")
           }
         }
         if (_DS_had_error) return
@@ -308,7 +312,6 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
   }
 
   emit_base = _DS_body_count
-  header_lineno = (_DS_match_lineno[d] != "" ? _DS_match_lineno[d] : lineno)
   _ds_match_push(_DS_match_indent[d] tmpvar " = " _ds_dot_transform(_DS_match_expr[d]), header_lineno)
   _ds_match_push(_DS_match_indent[d] "if (" check_fn "(" tmpvar ")) {", header_lineno)
   if (_DS_match_ok_var[d] != "")
@@ -352,6 +355,25 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
 
   _ds_match_push(_DS_match_indent[d] "}", header_lineno)
   if (d >= 2) _ds_match_move_emit_to_parent(d, emit_base)
+}
+
+function _ds_match_add_local(name,    i, lp, rp, params, n, parts, p) {
+  if (name == "") return
+  for (i = 1; i <= _DS_let_count; i++)
+    if (_DS_let_locals[i] == name) return
+
+  lp = index(_DS_func_sig, "(")
+  rp = index(_DS_func_sig, ")")
+  if (lp > 0 && rp > lp + 1) {
+    params = substr(_DS_func_sig, lp + 1, rp - lp - 1)
+    n = split(params, parts, ",")
+    for (i = 1; i <= n; i++) {
+      p = _ds_trim(parts[i])
+      if (p == name) return
+    }
+  }
+
+  _DS_let_locals[++_DS_let_count] = name
 }
 
 function _ds_match_push(line, lineno) {

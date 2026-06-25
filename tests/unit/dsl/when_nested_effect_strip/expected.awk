@@ -6,7 +6,7 @@ function fetch_user(ctx) {
 function save_user(user) {
 }
 
-function handler(ctx, user, saved,    _ds_mc_1, saved, e, _ds_mc_2, user, outer) {
+function handler(ctx, user, saved,    _ds_mc_1, e, _ds_mc_2, outer) {
   _ds_mc_2 = fetch_user(ctx)
   if (result_ok(_ds_mc_2)) {
     user = result_val(_ds_mc_2)
