@@ -67,3 +67,106 @@ function test_router_static_priority(   req, res, ok) {
   ok = router_dispatch(req, res)
   assert_eq(res["body"], "hello", "router: static path priority")
 }
+
+function _router_reset_query() {
+  _router_reset()
+  delete ROUTES_QUERY_TYPES
+}
+
+function _t_query_handler() { ctx::text("query-ok") }
+
+function test_router_query_register_and_match(   req, res, ok) {
+  _router_reset_query()
+  QUERY("/search", "_t_query_handler")
+
+  delete req; delete res
+  req["method"] = "QUERY"
+  req["path"]   = "/search"
+  req["header:content-type"] = "application/json"
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 1,                  "query: dispatch ok")
+  assert_eq(res["body"], "query-ok","query: handler called")
+  assert_eq(res["header:accept-query"], "*/*", "query: Accept-Query: */* when no types")
+}
+
+function test_router_query_missing_content_type(   req, res, ok) {
+  _router_reset_query()
+  QUERY("/search", "_t_query_handler")
+
+  delete req; delete res
+  req["method"] = "QUERY"
+  req["path"]   = "/search"
+  req["header:content-type"] = ""
+  ok = router_dispatch(req, res)
+  assert_eq(ok, -1,                "query: missing CT → dispatch returns -1")
+  assert_eq(res["status"], 400,    "query: missing CT → 400")
+}
+
+function test_router_query_wrong_content_type(   req, res, ok, types) {
+  _router_reset_query()
+  delete types
+  types[1] = "application/json"
+  QUERY("/search", "_t_query_handler", types)
+
+  delete req; delete res
+  req["method"] = "QUERY"
+  req["path"]   = "/search"
+  req["header:content-type"] = "text/plain"
+  ok = router_dispatch(req, res)
+  assert_eq(ok, -1,                        "query: wrong CT → -1")
+  assert_eq(res["status"], 415,            "query: wrong CT → 415")
+  assert_eq(res["header:accept-query"], "application/json", "query: 415 has Accept-Query")
+}
+
+function test_router_query_accept_query_injected(   req, res, ok, types) {
+  _router_reset_query()
+  delete types
+  types[1] = "application/json"
+  types[2] = "application/sql"
+  QUERY("/search", "_t_query_handler", types)
+
+  delete req; delete res
+  req["method"] = "QUERY"
+  req["path"]   = "/search"
+  req["header:content-type"] = "application/json"
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 1, "query: accept-query dispatch ok")
+  assert_true(index(res["header:accept-query"], "application/json") > 0, "query: AQ has json")
+  assert_true(index(res["header:accept-query"], "application/sql")  > 0, "query: AQ has sql")
+}
+
+function test_router_query_405_includes_accept_query(   req, res, ok, types) {
+  _router_reset_query()
+  delete types
+  types[1] = "application/json"
+  GET("/search",   "_t_hello")
+  QUERY("/search", "_t_query_handler", types)
+
+  delete req; delete res
+  req["method"] = "DELETE"
+  req["path"]   = "/search"
+  ok = router_dispatch(req, res)
+  assert_eq(ok, -1,                        "query: 405 returns -1")
+  assert_eq(res["status"], 405,            "query: 405 status")
+  assert_true(index(res["header:allow"], "QUERY") > 0, "query: Allow contains QUERY")
+  assert_eq(res["header:accept-query"], "application/json", "query: 405 has Accept-Query")
+}
+
+function test_router_query_options(   req, res, ok, types) {
+  _router_reset_query()
+  delete types
+  types[1] = "application/json"
+  GET("/search",   "_t_hello")
+  QUERY("/search", "_t_query_handler", types)
+
+  delete req; delete res
+  req["method"] = "OPTIONS"
+  req["path"]   = "/search"
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 1,                         "query: OPTIONS returns 1")
+  assert_eq(res["status"], 204,            "query: OPTIONS 204")
+  assert_true(index(res["header:allow"], "GET")     > 0, "query: OPTIONS Allow GET")
+  assert_true(index(res["header:allow"], "QUERY")   > 0, "query: OPTIONS Allow QUERY")
+  assert_true(index(res["header:allow"], "OPTIONS") > 0, "query: OPTIONS Allow OPTIONS")
+  assert_eq(res["header:accept-query"], "application/json", "query: OPTIONS Accept-Query")
+}

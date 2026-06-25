@@ -88,6 +88,12 @@ BEGIN {
   test_router_404()
   test_router_405()
   test_router_static_priority()
+  test_router_query_register_and_match()
+  test_router_query_missing_content_type()
+  test_router_query_wrong_content_type()
+  test_router_query_accept_query_injected()
+  test_router_query_405_includes_accept_query()
+  test_router_query_options()
 
   test_ctx_load_copies_req()
   test_ctx_save_copies_res_back()

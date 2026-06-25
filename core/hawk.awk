@@ -13,6 +13,7 @@ BEGIN {
     _HAWK_ROUTES["app.del"]    = "hawk::del";    _HAWK_ARITY["app.del"]    = 2
     _HAWK_ROUTES["app.patch"]  = "hawk::patch";  _HAWK_ARITY["app.patch"]  = 2
     _HAWK_ROUTES["app.head"]   = "hawk::head";   _HAWK_ARITY["app.head"]   = 2
+    _HAWK_ROUTES["app.query"] = "hawk::query"; _HAWK_ARITY["app.query"] = 3
     _HAWK_ROUTES["app.on"]     = "hawk::on";     _HAWK_ARITY["app.on"]     = 3
     _HAWK_ROUTES["app.all"]    = "hawk::all";    _HAWK_ARITY["app.all"]    = 2
     _HAWK_ROUTES["app.listen"] = "hawk::listen"; _HAWK_ARITY["app.listen"] = 1
@@ -24,6 +25,7 @@ function put(path, handler)    { awk::_route_add("PUT",    path, handler) }
 function del(path, handler)    { awk::_route_add("DELETE", path, handler) }
 function patch(path, handler)  { awk::_route_add("PATCH",  path, handler) }
 function head(path, handler)   { awk::_route_add("HEAD",   path, handler) }
+function query(path, handler, types) { awk::_route_add_query(path, handler, types) }
 
 function on(methods, paths, handler) {
   # Delegate to awk:: namespace to use isarray() built-in
