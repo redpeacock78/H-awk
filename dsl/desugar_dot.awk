@@ -90,7 +90,8 @@ function _ds_dot_transform_segs(segs, n,    result, i, code_buf, skip_chars) {
 # Subsequent segments start at seg_idx segs[seg_idx..n].
 # Recursively handle remaining segments after the ")" is found.
 function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
-    ns, path, parts, np, j, args, after_close, rem_seg, rem_segs, k, tmp, tparam, tmatch) {
+    ns, path, parts, np, j, args, after_close, rem_seg, rem_segs, k, tmp, tparam, tmatch, \
+    _candidate_chain, _candidate_ns, _candidate_path, _dot) {
   # Build full string from cur_rest + subsequent segments
   tmp = cur_rest
   for (k = next_i; k <= n; k++) tmp = tmp segs[k, "text"]
@@ -100,8 +101,22 @@ function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
 
   tparam = ""
   if (match(m, /<([A-Z][a-zA-Z0-9_]*)>$/, tmatch)) {
+    _candidate_chain = substr(m, 1, RSTART - 1)
+    _candidate_ns    = ""
+    _candidate_path  = ""
+    _dot = index(_candidate_chain, ".")
+    if (_dot > 0) {
+      _candidate_ns   = substr(_candidate_chain, 1, _dot - 1)
+      _candidate_path = substr(_candidate_chain, _dot + 1)
+    }
+    if (_candidate_ns == "" || _candidate_path == "" || \
+        !((_candidate_ns "." _candidate_path "_t") in _DS_SIG_ARITY)) {
+      _ds_error(_DS_current_lineno, \
+                "unknown generic dispatch: " _candidate_ns "." _candidate_path "_t", "")
+      return ""
+    }
     tparam = tmatch[1]
-    m = substr(m, 1, RSTART - 1)
+    m = _candidate_chain
   }
 
   np = split(m, parts, ".")
