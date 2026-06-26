@@ -23,29 +23,40 @@ BEGIN {
 }
 
 # Returns 1 if the line starts a when block; captures indent in m[1], expr in m[2]
-function _ds_match_starts(line, m, lineno,    d, k, name) {
-  if (match(line, /^([[:space:]]*)when[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)) {
-    d = ++_DS_match_depth
-    _DS_in_match = 1
-    _DS_match_indent[d] = m[1]
-    _DS_match_expr[d] = m[2]
-    _DS_match_lineno[d] = (lineno != "" ? lineno : _DS_current_lineno)
-    _DS_match_ok_count[d] = 0
-    _DS_match_ng_arms[d] = 0
-    _DS_match_cur_ng_arm[d] = 0
-    _DS_match_branch[d] = ""
-    _DS_match_ok_var[d] = ""
-    _DS_match_is_option[d] = 0
-    _ds_saw_catchall[d] = 0
-    delete _DS_match_active_bind[d]
-    _ds_match_delete_depth(_DS_match_outer_binds, d)
-    for (k = 1; k < d; k++) {
-      name = _DS_match_active_bind[k]
-      if (name != "") _DS_match_outer_binds[d, name] = 1
+function _ds_match_starts(line, m, lineno,    d, k, name, d_parent) {
+  if (!match(line, /^([[:space:]]*)when[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)) return 0
+
+  if (_DS_match_depth >= 1) {
+    d_parent = _DS_match_depth
+    if (_ds_saw_catchall[d_parent] &&
+        _DS_match_branch[d_parent] == "ng" &&
+        !_DS_match_is_option[d_parent]) {
+      print "desugar: error: nested 'when' inside catchall arm not allowed" > "/dev/stderr"
+      _DS_had_error = 1
+      _ds_match_skip_inner_block()
+      return 1
     }
-    return 1
   }
-  return 0
+
+  d = ++_DS_match_depth
+  _DS_in_match = 1
+  _DS_match_indent[d] = m[1]
+  _DS_match_expr[d] = m[2]
+  _DS_match_lineno[d] = (lineno != "" ? lineno : _DS_current_lineno)
+  _DS_match_ok_count[d] = 0
+  _DS_match_ng_arms[d] = 0
+  _DS_match_cur_ng_arm[d] = 0
+  _DS_match_branch[d] = ""
+  _DS_match_ok_var[d] = ""
+  _DS_match_is_option[d] = 0
+  _ds_saw_catchall[d] = 0
+  delete _DS_match_active_bind[d]
+  _ds_match_delete_depth(_DS_match_outer_binds, d)
+  for (k = 1; k < d; k++) {
+    name = _DS_match_active_bind[k]
+    if (name != "") _DS_match_outer_binds[d, name] = 1
+  }
+  return 1
 }
 
 # Collect a line while inside a when block. Returns "" always.
@@ -273,6 +284,17 @@ function _ds_match_catchall_order_error() {
   print "desugar: error: catch-all arm must be last" > "/dev/stderr"
   _DS_had_error = 1
   exit 1
+}
+
+function _ds_match_skip_inner_block(    skip_depth, skip_line) {
+  skip_depth = 1
+  while (skip_depth > 0 && (getline skip_line) > 0) {
+    if (skip_line ~ /^[[:space:]]*when[[:space:]]+.+[[:space:]]+of[[:space:]]*$/) {
+      skip_depth++
+    } else if (skip_line ~ /^[[:space:]]*end[[:space:]]*$/) {
+      skip_depth--
+    }
+  }
 }
 
 function _ds_match_register_arm_bind_type(d, branch_kind, func_name, var_name, type_str,    idx) {
