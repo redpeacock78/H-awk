@@ -22,6 +22,18 @@ BEGIN {
   _DS_match_depth = 0
 }
 
+_DS_in_function && _DS_match_depth == 0 && $0 ~ /^[[:space:]]*end[[:space:]]*$/ {
+  print "desugar: error: unexpected 'end' outside any when block" > "/dev/stderr"
+  _DS_had_error = 1
+  next
+}
+
+_DS_in_function && _DS_match_depth == 0 && _ds_match_is_arm_header($0) {
+  print "desugar: error: arm header outside when block" > "/dev/stderr"
+  _DS_had_error = 1
+  next
+}
+
 # Returns 1 if the line starts a when block; captures indent in m[1], expr in m[2]
 function _ds_match_starts(line, m, lineno,    d, k, name, d_parent) {
   if (!match(line, /^([[:space:]]*)when[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)) return 0
@@ -62,8 +74,23 @@ function _ds_match_starts(line, m, lineno,    d, k, name, d_parent) {
 # Collect a line while inside a when block. Returns "" always.
 # Branch headers set state; body lines are buffered; "end" triggers emit.
 function _ds_match_collect(line, lineno,    d, m, i, header_line) {
-  if (_ds_match_starts(line, m, lineno)) return ""
   d = _DS_match_depth
+  if (_DS_match_skipping[d]) {
+    if (line ~ /^[[:space:]]*when[[:space:]]+.+[[:space:]]+of[[:space:]]*$/) {
+      _DS_match_skip_inner_depth[d]++
+    } else if (line ~ /^[[:space:]]*end[[:space:]]*$/) {
+      if (_DS_match_skip_inner_depth[d] > 0) {
+        _DS_match_skip_inner_depth[d]--
+      } else {
+        delete _DS_match_skipping[d]
+        delete _DS_match_skip_inner_depth[d]
+        _DS_match_depth--
+        if (_DS_match_depth == 0) _DS_in_match = 0
+      }
+    }
+    return ""
+  }
+  if (_ds_match_starts(line, m, lineno)) return ""
   header_line = line
   sub(/[[:space:]]*#.*$/, "", header_line)
   # ok name:  (ok, bind)
@@ -261,23 +288,12 @@ function _ds_match_check_local_dup(d, branch_kind, name, lineno) {
   return 0
 }
 
-function _ds_match_shadow_recover(d,    skip_line, parent, skip_depth) {
+function _ds_match_shadow_recover(d,    parent) {
+  _DS_match_skipping[d] = 1
+  _DS_match_skip_inner_depth[d] = 0
   _ds_match_reset(d)
-  _DS_match_depth--
-  parent = _DS_match_depth
+  parent = d - 1
   if (parent >= 1) _DS_match_shadow_abort[parent] = 1
-  if (_DS_match_depth == 0) _DS_in_match = 0
-  skip_depth = 0
-  while ((getline skip_line) > 0) {
-    if (skip_line ~ /^[[:space:]]*when[[:space:]].*[[:space:]]of[[:space:]]*$/) {
-      skip_depth++
-      continue
-    }
-    if (skip_line ~ /^[[:space:]]*end[[:space:]]*$/) {
-      if (skip_depth == 0) return
-      skip_depth--
-    }
-  }
 }
 
 function _ds_match_catchall_order_error() {
@@ -374,6 +390,18 @@ function _ds_match_delete_depth(a, d,    k, parts) {
   for (k in a) {
     split(k, parts, SUBSEP)
     if (parts[1] == d) delete a[k]
+  }
+}
+
+function _ds_match_is_arm_header(line) {
+  sub(/[[:space:]]*#.*$/, "", line)
+  return (line ~ /^[[:space:]]*(ok|some|ng|none|default)([[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*|<[^>]+>|[a-zA-Z_][a-zA-Z0-9_]*<[^>]+>))?[[:space:]]*:[[:space:]]*$/)
+}
+
+END {
+  if (_DS_match_depth > 0) {
+    print "desugar: error: unclosed when block" > "/dev/stderr"
+    _DS_had_error = 1
   }
 }
 
