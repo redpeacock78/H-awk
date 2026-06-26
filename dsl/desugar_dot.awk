@@ -61,7 +61,7 @@ function _ds_dot_transform_segs(segs, n,    result, i, code_buf, skip_chars) {
     if (segs[i, "safe"]) {
       # Try to find a dot-call in this code segment
       if (match(segs[i, "safe"] ? segs[i, "text"] : "", \
-                /[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+\(/)) {
+                /[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+(<[A-Z][a-zA-Z0-9_]*>)?\(/)) {
         # Found a dot-call at RSTART..RSTART+RLENGTH-1 in segs[i,"text"]
         result = result substr(segs[i, "text"], 1, RSTART - 1)
 
@@ -90,7 +90,7 @@ function _ds_dot_transform_segs(segs, n,    result, i, code_buf, skip_chars) {
 # Subsequent segments start at seg_idx segs[seg_idx..n].
 # Recursively handle remaining segments after the ")" is found.
 function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
-    ns, path, parts, np, j, args, after_close, rem_seg, rem_segs, k, tmp) {
+    ns, path, parts, np, j, args, after_close, rem_seg, rem_segs, k, tmp, tparam, tmatch) {
   # Build full string from cur_rest + subsequent segments
   tmp = cur_rest
   for (k = next_i; k <= n; k++) tmp = tmp segs[k, "text"]
@@ -98,11 +98,22 @@ function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
   args = _ds_extract_args(tmp)
   after_close = substr(tmp, length(args) + 2)  # skip args + ")"
 
+  tparam = ""
+  if (match(m, /<([A-Z][a-zA-Z0-9_]*)>$/, tmatch)) {
+    tparam = tmatch[1]
+    m = substr(m, 1, RSTART - 1)
+  }
+
   np = split(m, parts, ".")
   ns = parts[1]
   path = ""
   for (j = 2; j <= np; j++)
     path = path (j > 2 ? "." : "") parts[j]
+
+  if (tparam != "") {
+    path = path "_t"
+    args = "\"" tparam "\"" (args != "" ? ", " args : "")
+  }
 
   _ds_typecheck_call(ns "." path, args)
 
