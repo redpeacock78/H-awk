@@ -30,10 +30,10 @@ function _ds_match_starts(line, m, lineno,    d, k, name, d_parent) {
     d_parent = _DS_match_depth
     if (_ds_saw_catchall[d_parent] &&
         _DS_match_branch[d_parent] == "ng" &&
-        _DS_match_ng_var_name[d_parent, _DS_match_cur_ng_arm[d_parent]] == "" &&
         !_DS_match_is_option[d_parent]) {
       print "desugar: error: nested 'when' inside catchall arm not allowed" > "/dev/stderr"
       _DS_had_error = 1
+      _ds_match_skip_inner_block()
       return 1
     }
   }
@@ -284,6 +284,17 @@ function _ds_match_catchall_order_error() {
   print "desugar: error: catch-all arm must be last" > "/dev/stderr"
   _DS_had_error = 1
   exit 1
+}
+
+function _ds_match_skip_inner_block(    skip_depth, skip_line) {
+  skip_depth = 1
+  while (skip_depth > 0 && (getline skip_line) > 0) {
+    if (skip_line ~ /^[[:space:]]*when[[:space:]]+.+[[:space:]]+of[[:space:]]*$/) {
+      skip_depth++
+    } else if (skip_line ~ /^[[:space:]]*end[[:space:]]*$/) {
+      skip_depth--
+    }
+  }
 }
 
 function _ds_match_register_arm_bind_type(d, branch_kind, func_name, var_name, type_str,    idx) {
