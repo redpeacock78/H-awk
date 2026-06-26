@@ -472,6 +472,7 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
 
   emit_base = _DS_body_count
   _ds_match_push(_DS_match_indent[d] tmpvar " = " _ds_dot_transform(_DS_match_expr[d]), header_lineno)
+  _ds_match_push("# line " header_lineno " \"" _DS_src_file "\"", header_lineno)
   _ds_match_push(_DS_match_indent[d] "if (" check_fn "(" tmpvar ")) {", header_lineno)
   if (_DS_match_ok_var[d] != "")
     _ds_match_push(_DS_match_indent[d] "  " _DS_match_ok_var[d] " = " val_fn "(" tmpvar ")", header_lineno)
