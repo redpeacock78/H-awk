@@ -257,3 +257,52 @@ function json_decode(s, out,   raw, n, i, recs, sep, k, v, first) {
   _jp_parse_value(out, "")
   return 1
 }
+
+@namespace "json"
+
+function encode(data) {
+  return awk::json_encode(data)
+}
+
+function decode(s,    out, ok, msg) {
+  delete out
+  ok = awk::json_decode(s, out)
+  if (!ok) {
+    msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
+    return awk::result_ng("JsonError", msg)
+  }
+  return awk::result_ok_make(s)
+}
+
+function decode_t(type, s,    out, ok, msg, k) {
+  delete out
+  ok = awk::json_decode(s, out)
+  if (!ok) {
+    msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
+    return awk::result_ng("JsonError", msg)
+  }
+  for (k in out) {
+    if (!_validate_leaf(type, out[k]))
+      return awk::result_ng("JsonError", "type mismatch: expected " type " at " k)
+  }
+  return awk::result_ok_make(s)
+}
+
+function _validate_leaf(t, v) {
+  if (t == "Int")   return v ~ /^-?[0-9]+$/
+  if (t == "Float") return v ~ /^-?[0-9]+(\.[0-9]+)?$/
+  if (t == "Bool")  return v == "true" || v == "false"
+  if (t == "Str")   return 1
+  if (t == "Any")   return 1
+  return 0
+}
+
+function dispatch(path, a1, a2, a3) {
+  return hawk_dispatch::call("json", _JSON_ROUTES, _JSON_ARITY, path, a1, a2, a3)
+}
+
+BEGIN {
+  _JSON_ROUTES["encode"]   = "json::encode";   _JSON_ARITY["encode"]   = 1
+  _JSON_ROUTES["decode"]   = "json::decode";   _JSON_ARITY["decode"]   = 1
+  _JSON_ROUTES["decode_t"] = "json::decode_t"; _JSON_ARITY["decode_t"] = 2
+}

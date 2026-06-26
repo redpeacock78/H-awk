@@ -174,3 +174,40 @@ function test_json_decode_via_zig_invalid(    out, ret) {
   ret = json_decode("not json", out)
   assert_eq(ret, 0, "zig decode invalid: returns 0")
 }
+
+function test_json_dispatch_encode(   data, out) {
+  delete data
+  data["foo"] = "bar"
+  out = json::dispatch("encode", data)
+  assert_eq(out, "{\"foo\":\"bar\"}", "json::dispatch encode")
+}
+
+function test_json_dispatch_decode_ok(   res) {
+  res = json::dispatch("decode", "{\"k\":\"v\"}")
+  assert_true(awk::result_ok(res), "json::dispatch decode ok")
+  assert_eq(awk::result_val(res), "{\"k\":\"v\"}", "json::dispatch decode payload is input s")
+}
+
+function test_json_dispatch_decode_ng(   res) {
+  res = json::dispatch("decode", "not json")
+  assert_true(!awk::result_ok(res), "json::dispatch decode ng")
+  assert_eq(awk::result_err_type(res), "JsonError", "json::dispatch decode err type")
+}
+
+function test_json_dispatch_decode_t_ok(   res) {
+  res = json::dispatch("decode_t", "Int", "{\"n\":1}")
+  assert_true(awk::result_ok(res), "json::dispatch decode_t Int ok")
+}
+
+function test_json_dispatch_decode_t_mismatch(   res) {
+  res = json::dispatch("decode_t", "Int", "{\"n\":\"abc\"}")
+  assert_true(!awk::result_ok(res), "json::dispatch decode_t type mismatch ng")
+  assert_eq(awk::result_err_type(res), "JsonError", "json::dispatch decode_t err type")
+}
+
+function test_json_dispatch_unknown_path(   res) {
+  # hawk_dispatch::call は未登録 path に対し stderr へ警告を出して空文字列を返す契約。
+  # stderr の文言検査はテストハーネスを複雑化するため行わず、戻り値が空であることのみ確認する。
+  res = json::dispatch("no_such_path", "x")
+  assert_eq(res, "", "json::dispatch unknown_path returns empty")
+}

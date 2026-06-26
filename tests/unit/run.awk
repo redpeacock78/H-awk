@@ -41,6 +41,12 @@ BEGIN {
   test_json_decode_via_zig_array()
   test_json_decode_via_zig_bool()
   test_json_decode_via_zig_invalid()
+  test_json_dispatch_encode()
+  test_json_dispatch_decode_ok()
+  test_json_dispatch_decode_ng()
+  test_json_dispatch_decode_t_ok()
+  test_json_dispatch_decode_t_mismatch()
+  test_json_dispatch_unknown_path()
 
   test_tsv_append_and_read()
   test_tsv_find()
