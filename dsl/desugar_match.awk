@@ -23,7 +23,7 @@ BEGIN {
 }
 
 # Returns 1 if the line starts a when block; captures indent in m[1], expr in m[2]
-function _ds_match_starts(line, m, lineno,    d) {
+function _ds_match_starts(line, m, lineno,    d, k, name) {
   if (match(line, /^([[:space:]]*)when[[:space:]]+(.+)[[:space:]]+of[[:space:]]*$/, m)) {
     d = ++_DS_match_depth
     _DS_in_match = 1
@@ -37,8 +37,12 @@ function _ds_match_starts(line, m, lineno,    d) {
     _DS_match_ok_var[d] = ""
     _DS_match_is_option[d] = 0
     _ds_saw_catchall[d] = 0
-    # Task 5 fills this with ancestor bind_seen snapshots.
+    delete _DS_match_active_bind[d]
     _ds_match_delete_depth(_DS_match_outer_binds, d)
+    for (k = 1; k < d; k++) {
+      name = _DS_match_active_bind[k]
+      if (name != "") _DS_match_outer_binds[d, name] = 1
+    }
     return 1
   }
   return 0
@@ -52,29 +56,44 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   # ok name:  (ok, bind)
   if (match(line, /^[[:space:]]*ok[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
+    if (_ds_match_check_shadow(d, m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    _DS_match_bind_seen[d, "ok", m[1]] = 1
+    _DS_match_active_bind[d] = m[1]
     _DS_match_ok_var[d] = m[1]; _DS_match_branch[d] = "ok"
     return ""
   }
   # ok:  (ok, no bind)
   if (line ~ /^[[:space:]]*ok:[[:space:]]*$/) {
     _ds_match_unregister_current_arm(d)
+    delete _DS_match_active_bind[d]
     _DS_match_ok_var[d] = ""; _DS_match_branch[d] = "ok"; return ""
   }
   # some name:  (some, bind)
   if (match(line, /^[[:space:]]*some[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
+    if (_ds_match_check_shadow(d, m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    _DS_match_bind_seen[d, "some", m[1]] = 1
+    _DS_match_active_bind[d] = m[1]
     _DS_match_ok_var[d] = m[1]; _DS_match_branch[d] = "some"; _DS_match_is_option[d] = 1
     return ""
   }
   # some:  (some, no bind)
   if (line ~ /^[[:space:]]*some:[[:space:]]*$/) {
     _ds_match_unregister_current_arm(d)
+    delete _DS_match_active_bind[d]
     _DS_match_ok_var[d] = ""; _DS_match_branch[d] = "some"; _DS_match_is_option[d] = 1; return ""
   }
   # none:  (none, no bind — treated as default arm for option)
   if (line ~ /^[[:space:]]*none:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
+    delete _DS_match_active_bind[d]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = ""
     _ds_saw_catchall[d] = 1
@@ -84,6 +103,12 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   if (match(line, /^[[:space:]]*ng[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
+    if (_ds_match_check_shadow(d, m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    _DS_match_bind_seen[d, "ng", m[1]] = 1
+    _DS_match_active_bind[d] = m[1]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = m[2]; _DS_match_ng_var_name[d, i] = m[1]
     _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"
@@ -93,6 +118,7 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   if (match(line, /^[[:space:]]*ng[[:space:]]*<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
+    delete _DS_match_active_bind[d]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = m[1]; _DS_match_ng_var_name[d, i] = ""
     _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"; return ""
@@ -101,6 +127,12 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   if (match(line, /^[[:space:]]*ng[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
+    if (_ds_match_check_shadow(d, m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    _DS_match_bind_seen[d, "ng", m[1]] = 1
+    _DS_match_active_bind[d] = m[1]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = m[1]
     _ds_saw_catchall[d] = 1
@@ -111,6 +143,7 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   if (line ~ /^[[:space:]]*ng:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
+    delete _DS_match_active_bind[d]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = ""
     _ds_saw_catchall[d] = 1
@@ -120,6 +153,12 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   if (match(line, /^[[:space:]]*default[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
+    if (_ds_match_check_shadow(d, m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    _DS_match_bind_seen[d, "ng", m[1]] = 1
+    _DS_match_active_bind[d] = m[1]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = m[1]
     _ds_saw_catchall[d] = 1
@@ -130,6 +169,7 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   if (line ~ /^[[:space:]]*default:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
+    delete _DS_match_active_bind[d]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = ""; _DS_match_ng_var_name[d, i] = ""
     _ds_saw_catchall[d] = 1
@@ -138,6 +178,12 @@ function _ds_match_collect(line, lineno,    d, m, i) {
   # end
   if (line ~ /^[[:space:]]*end[[:space:]]*$/) {
     _ds_match_unregister_current_arm(d)
+    if (_DS_match_shadow_abort[d]) {
+      _ds_match_reset(d)
+      _DS_match_depth--
+      if (_DS_match_depth == 0) _DS_in_match = 0
+      return ""
+    }
     _ds_match_emit(lineno, d)
     _ds_match_reset(d)
     _DS_match_depth--
@@ -161,6 +207,35 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     _DS_match_ng_lineno[d, i, _DS_match_ng_body_count[d, i]] = lineno
   }
   return ""
+}
+
+function _ds_match_check_shadow(d, name, lineno) {
+  if ((d, name) in _DS_match_outer_binds) {
+    printf "desugar: error: '%s' shadows outer when arm binding (depth %d)\n", name, d > "/dev/stderr"
+    print "hint: rename the inner binding" > "/dev/stderr"
+    _DS_had_error = 1
+    return 1
+  }
+  return 0
+}
+
+function _ds_match_shadow_recover(d,    skip_line, parent, skip_depth) {
+  _ds_match_reset(d)
+  _DS_match_depth--
+  parent = _DS_match_depth
+  if (parent >= 1) _DS_match_shadow_abort[parent] = 1
+  if (_DS_match_depth == 0) _DS_in_match = 0
+  skip_depth = 0
+  while ((getline skip_line) > 0) {
+    if (skip_line ~ /^[[:space:]]*when[[:space:]].*[[:space:]]of[[:space:]]*$/) {
+      skip_depth++
+      continue
+    }
+    if (skip_line ~ /^[[:space:]]*end[[:space:]]*$/) {
+      if (skip_depth == 0) return
+      skip_depth--
+    }
+  }
 }
 
 function _ds_match_catchall_order_error() {
@@ -237,6 +312,9 @@ function _ds_match_reset(d) {
   _ds_match_delete_depth(_DS_match_ng_is_default, d)
   _ds_match_delete_depth(_DS_match_ng_body_count, d)
   _ds_match_delete_depth(_DS_match_outer_binds, d)
+  _ds_match_delete_depth(_DS_match_bind_seen, d)
+  delete _DS_match_active_bind[d]
+  delete _DS_match_shadow_abort[d]
 }
 
 function _ds_match_delete_depth(a, d,    k, parts) {
