@@ -50,13 +50,19 @@ function _ds_match_starts(line, m, lineno,    d, k, name) {
 
 # Collect a line while inside a when block. Returns "" always.
 # Branch headers set state; body lines are buffered; "end" triggers emit.
-function _ds_match_collect(line, lineno,    d, m, i) {
+function _ds_match_collect(line, lineno,    d, m, i, header_line) {
   if (_ds_match_starts(line, m, lineno)) return ""
   d = _DS_match_depth
+  header_line = line
+  sub(/[[:space:]]*#.*$/, "", header_line)
   # ok name:  (ok, bind)
-  if (match(line, /^[[:space:]]*ok[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+  if (match(header_line, /^[[:space:]]*ok[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
     if (_ds_match_check_shadow(d, m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    if (_ds_match_check_local_dup(d, "ok", m[1], lineno)) {
       _ds_match_shadow_recover(d)
       return ""
     }
@@ -66,15 +72,19 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     return ""
   }
   # ok:  (ok, no bind)
-  if (line ~ /^[[:space:]]*ok:[[:space:]]*$/) {
+  if (header_line ~ /^[[:space:]]*ok:[[:space:]]*$/) {
     _ds_match_unregister_current_arm(d)
     delete _DS_match_active_bind[d]
     _DS_match_ok_var[d] = ""; _DS_match_branch[d] = "ok"; return ""
   }
   # some name:  (some, bind)
-  if (match(line, /^[[:space:]]*some[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
+  if (match(header_line, /^[[:space:]]*some[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
     if (_ds_match_check_shadow(d, m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    if (_ds_match_check_local_dup(d, "some", m[1], lineno)) {
       _ds_match_shadow_recover(d)
       return ""
     }
@@ -84,13 +94,13 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     return ""
   }
   # some:  (some, no bind)
-  if (line ~ /^[[:space:]]*some:[[:space:]]*$/) {
+  if (header_line ~ /^[[:space:]]*some:[[:space:]]*$/) {
     _ds_match_unregister_current_arm(d)
     delete _DS_match_active_bind[d]
     _DS_match_ok_var[d] = ""; _DS_match_branch[d] = "some"; _DS_match_is_option[d] = 1; return ""
   }
   # none:  (none, no bind — treated as default arm for option)
-  if (line ~ /^[[:space:]]*none:[[:space:]]*$/) {
+  if (header_line ~ /^[[:space:]]*none:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
     delete _DS_match_active_bind[d]
@@ -100,14 +110,18 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     _DS_match_ng_is_default[d, i] = 1; _DS_match_branch[d] = "ng"; return ""
   }
   # ng VAR<TypeName>:  (typed ng, bind — check BEFORE plain "ng name:")
-  if (match(line, /^[[:space:]]*ng[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
+  if (match(header_line, /^[[:space:]]*ng[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
     if (_ds_match_check_shadow(d, m[1], lineno)) {
       _ds_match_shadow_recover(d)
       return ""
     }
-    _DS_match_bind_seen[d, "ng", m[1]] = 1
+    if (_ds_match_check_local_dup(d, "ng<" m[2] ">", m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    _DS_match_bind_seen[d, "ng<" m[2] ">", m[1]] = 1
     _DS_match_active_bind[d] = m[1]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
     _DS_match_ng_type[d, i] = m[2]; _DS_match_ng_var_name[d, i] = m[1]
@@ -115,7 +129,7 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     return ""
   }
   # ng <TypeName>:  (typed ng, no bind)
-  if (match(line, /^[[:space:]]*ng[[:space:]]*<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
+  if (match(header_line, /^[[:space:]]*ng[[:space:]]*<([^>]+)>[[:space:]]*:[[:space:]]*$/, m)) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
     delete _DS_match_active_bind[d]
@@ -124,13 +138,17 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"; return ""
   }
   # ng name:  (untyped ng, bind)
-  if (match(line, /^[[:space:]]*ng[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
-    if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+  if (match(header_line, /^[[:space:]]*ng[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
     if (_ds_match_check_shadow(d, m[1], lineno)) {
       _ds_match_shadow_recover(d)
       return ""
     }
+    if (_ds_match_check_local_dup(d, "ng", m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _DS_match_bind_seen[d, "ng", m[1]] = 1
     _DS_match_active_bind[d] = m[1]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
@@ -140,7 +158,7 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     return ""
   }
   # ng:  (untyped ng, no bind)
-  if (line ~ /^[[:space:]]*ng:[[:space:]]*$/) {
+  if (header_line ~ /^[[:space:]]*ng:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
     delete _DS_match_active_bind[d]
@@ -150,13 +168,17 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     _DS_match_ng_is_default[d, i] = 0; _DS_match_branch[d] = "ng"; return ""
   }
   # default name:  (catch-all, bind)
-  if (match(line, /^[[:space:]]*default[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
-    if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
+  if (match(header_line, /^[[:space:]]*default[[:space:]]+([a-z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*$/, m)) {
     _ds_match_unregister_current_arm(d)
     if (_ds_match_check_shadow(d, m[1], lineno)) {
       _ds_match_shadow_recover(d)
       return ""
     }
+    if (_ds_match_check_local_dup(d, "ng", m[1], lineno)) {
+      _ds_match_shadow_recover(d)
+      return ""
+    }
+    if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _DS_match_bind_seen[d, "ng", m[1]] = 1
     _DS_match_active_bind[d] = m[1]
     i = ++_DS_match_ng_arms[d]; _DS_match_cur_ng_arm[d] = i
@@ -166,7 +188,7 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     return ""
   }
   # default:  (catch-all, no bind)
-  if (line ~ /^[[:space:]]*default:[[:space:]]*$/) {
+  if (header_line ~ /^[[:space:]]*default:[[:space:]]*$/) {
     if (_ds_saw_catchall[d]) _ds_match_catchall_order_error()
     _ds_match_unregister_current_arm(d)
     delete _DS_match_active_bind[d]
@@ -176,7 +198,7 @@ function _ds_match_collect(line, lineno,    d, m, i) {
     _DS_match_ng_is_default[d, i] = 1; _DS_match_branch[d] = "ng"; return ""
   }
   # end
-  if (line ~ /^[[:space:]]*end[[:space:]]*$/) {
+  if (header_line ~ /^[[:space:]]*end[[:space:]]*$/) {
     _ds_match_unregister_current_arm(d)
     if (_DS_match_shadow_abort[d]) {
       _ds_match_reset(d)
@@ -213,6 +235,15 @@ function _ds_match_check_shadow(d, name, lineno) {
   if ((d, name) in _DS_match_outer_binds) {
     printf "desugar: error: '%s' shadows outer when arm binding (depth %d)\n", name, d > "/dev/stderr"
     print "hint: rename the inner binding" > "/dev/stderr"
+    _DS_had_error = 1
+    return 1
+  }
+  return 0
+}
+
+function _ds_match_check_local_dup(d, branch_kind, name, lineno) {
+  if ((d, branch_kind, name) in _DS_match_bind_seen) {
+    printf "desugar: error: duplicate binding '%s' in same branch (depth %d)\n", name, d > "/dev/stderr"
     _DS_had_error = 1
     return 1
   }
