@@ -4,7 +4,7 @@ function ParseError(msg) { return result_ng("ParseError", msg) }
 function fetch() {
 }
 
-function handler(    _ds_mc_1, x, x, _ds_mc_2, value, e) {
+function handler(    _ds_mc_1, x, _ds_mc_2, value, e) {
   _ds_mc_1 = fetch()
   if (result_ok(_ds_mc_1)) {
     x = result_val(_ds_mc_1)

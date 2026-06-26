@@ -1,5 +1,5 @@
 @namespace "app"
-function handler(ctx, user, name,    _ds_mc_1, n, _ds_mc_2, user, e) {
+function handler(ctx, user, name,    _ds_mc_1, n, _ds_mc_2, e) {
   _ds_mc_2 = fetch_user(ctx)
   if (result_ok(_ds_mc_2)) {
     user = result_val(_ds_mc_2)
