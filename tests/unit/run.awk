@@ -50,6 +50,7 @@ BEGIN {
   test_json_dispatch_decode_ng()
   test_json_dispatch_decode_t_ok()
   test_json_dispatch_decode_t_mismatch()
+  test_json_dispatch_decode_t_distinguishes_string_from_int()
   test_json_dispatch_unknown_path()
 
   test_tsv_append_and_read()

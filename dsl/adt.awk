@@ -54,6 +54,42 @@ function result_ok(v)           { return substr(v, 1, 3) == "ok\x1F" }
 function result_val(v)          { return _adt_b64_decode(substr(v, 4)) }
 function result_ok_make(val)    { return "ok\x1F" _adt_b64_encode(val) }
 
+function result_ok_from_map(values, types,    k, sep, buf, t) {
+    buf = ""
+    sep = ""
+    for (k in values) {
+        t = ((k in types)) ? types[k] : "string"
+        buf = buf sep _adt_b64_encode(k) "\x1f" _adt_b64_encode(values[k]) "\x1f" t
+        sep = "\x1e"
+    }
+    return result_ok_make(buf)
+}
+
+function result_val_into_map(res, out, out_types,    raw, n, i, recs, rest, sep1, sep2, k, v, t) {
+    delete out
+    delete out_types
+    raw = result_val(res)
+    if (raw == "") return
+    n = split(raw, recs, "\x1e")
+    for (i = 1; i <= n; i++) {
+        if (recs[i] == "") continue
+        sep1 = index(recs[i], "\x1f")
+        if (sep1 == 0) continue
+        k = _adt_b64_decode(substr(recs[i], 1, sep1 - 1))
+        rest = substr(recs[i], sep1 + 1)
+        sep2 = index(rest, "\x1f")
+        if (sep2 == 0) {
+            out[k] = _adt_b64_decode(rest)
+            out_types[k] = "string"
+            continue
+        }
+        v = _adt_b64_decode(substr(rest, 1, sep2 - 1))
+        t = substr(rest, sep2 + 1)
+        out[k] = v
+        out_types[k] = t
+    }
+}
+
 function result_ng(type, msg)   {
     return "ng\x1F" type (msg != "" ? "\x1F" _adt_b64_encode(msg) : "")
 }

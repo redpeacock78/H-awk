@@ -194,6 +194,7 @@ function _jp_parse_literal(out, path, out_type,   buf, c) {
   if (buf == "true" || buf == "false") out_type[path] = "bool"
   else if (buf == "null") out_type[path] = "null"
   else if (buf ~ /^-?[0-9]+$/) out_type[path] = "int"
+  else if (buf ~ /^-?([0-9]+(\.[0-9]+)?|[0-9]*\.[0-9]+)[eE][+-]?[0-9]+$/) out_type[path] = "float"
   else if (buf ~ /^-?[0-9]+(\.[0-9]+)?$/) out_type[path] = "float"
 }
 function _jp_parse_object(out, path, out_type,   c, key, subpath) {
@@ -275,34 +276,32 @@ function encode(data) {
 }
 
 function decode(s,    out, out_type, ok, msg) {
-  delete out
   ok = awk::json_decode(s, out, out_type)
   if (!ok) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
     return awk::result_ng("JsonError", msg)
   }
-  return awk::result_ok_make(s)
+  return awk::result_ok_from_map(out, out_type)
 }
 
 function decode_t(type, s,    out, out_type, ok, msg, k) {
-  delete out
   ok = awk::json_decode(s, out, out_type)
   if (!ok) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
     return awk::result_ng("JsonError", msg)
   }
   for (k in out) {
-    if (!_validate_leaf(type, out[k]))
+    if (!_validate_leaf(type, out[k], out_type[k]))
       return awk::result_ng("JsonError", "type mismatch: expected " type " at " k)
   }
-  return awk::result_ok_make(s)
+  return awk::result_ok_from_map(out, out_type)
 }
 
-function _validate_leaf(t, v) {
-  if (t == "Int")   return v ~ /^-?[0-9]+$/
-  if (t == "Float") return v ~ /^-?[0-9]+(\.[0-9]+)?$/
-  if (t == "Bool")  return v == "true" || v == "false"
-  if (t == "Str")   return 1
+function _validate_leaf(t, v, vtype) {
+  if (t == "Int")   return vtype == "int"
+  if (t == "Float") return vtype == "float" || vtype == "int"
+  if (t == "Bool")  return vtype == "bool"
+  if (t == "Str")   return vtype == "string"
   if (t == "Any")   return 1
   return 0
 }

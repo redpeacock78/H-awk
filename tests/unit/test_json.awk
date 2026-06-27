@@ -219,10 +219,12 @@ function test_json_dispatch_encode(   data, out) {
   assert_eq(out, "{\"foo\":\"bar\"}", "json::dispatch encode")
 }
 
-function test_json_dispatch_decode_ok(   res) {
+function test_json_dispatch_decode_ok(   res, out, out_type) {
   res = json::dispatch("decode", "{\"k\":\"v\"}")
   assert_true(awk::result_ok(res), "json::dispatch decode ok")
-  assert_eq(awk::result_val(res), "{\"k\":\"v\"}", "json::dispatch decode payload is input s")
+  awk::result_val_into_map(res, out, out_type)
+  assert_eq(out["k"], "v", "decode payload restores k=v")
+  assert_eq(out_type["k"], "string", "decode type tag is string")
 }
 
 function test_json_dispatch_decode_ng(   res) {
@@ -231,15 +233,24 @@ function test_json_dispatch_decode_ng(   res) {
   assert_eq(awk::result_err_type(res), "JsonError", "json::dispatch decode err type")
 }
 
-function test_json_dispatch_decode_t_ok(   res) {
+function test_json_dispatch_decode_t_ok(   res, out, out_type) {
   res = json::dispatch("decode_t", "Int", "{\"n\":1}")
   assert_true(awk::result_ok(res), "json::dispatch decode_t Int ok")
+  awk::result_val_into_map(res, out, out_type)
+  assert_eq(out["n"], "1", "decode_t Int payload restores n=1")
+  assert_eq(out_type["n"], "int", "decode_t Int type tag preserved")
 }
 
 function test_json_dispatch_decode_t_mismatch(   res) {
   res = json::dispatch("decode_t", "Int", "{\"n\":\"abc\"}")
   assert_true(!awk::result_ok(res), "json::dispatch decode_t type mismatch ng")
   assert_eq(awk::result_err_type(res), "JsonError", "json::dispatch decode_t err type")
+}
+
+function test_json_dispatch_decode_t_distinguishes_string_from_int(   res) {
+  res = json::dispatch("decode_t", "Int", "{\"n\":\"1\"}")
+  assert_true(!awk::result_ok(res), "decode_t Int rejects JSON string '1'")
+  assert_eq(awk::result_err_type(res), "JsonError", "decode_t err type")
 }
 
 function test_json_dispatch_unknown_path(   res) {
