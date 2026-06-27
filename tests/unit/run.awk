@@ -179,6 +179,12 @@ BEGIN {
   test_cache_dispatch_has()
   test_cache_dispatch_del_semantics()
   test_cache_dispatch_unknown_method()
+  test_cache_dispatch_file_backend_unavailable()
+  test_cache_dispatch_map_error_code()
+  test_cache_facade_clears_stale_error_code()
+  test_cache_dispatch_file_set_mv_failure()
+  test_cache_dispatch_file_del_mv_failure()
+  test_cache_zig_too_large_payload()
 
   test_url_encode()
   test_url_encode_japanese()

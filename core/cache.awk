@@ -60,6 +60,7 @@ function _map_error_code(code, msg) {
 }
 
 function get(key,    b) {
+  _LAST_ERROR_CODE = ""
   _FOUND = 0
   b = _detect_backend()
   if (b == "off")    return ""
@@ -72,6 +73,7 @@ function get(key,    b) {
 }
 
 function set(key, value, ttl_sec,    b) {
+  _LAST_ERROR_CODE = ""
   b = _detect_backend()
   if (b == "off")    return
   if (b == "unavailable") return
@@ -81,6 +83,7 @@ function set(key, value, ttl_sec,    b) {
 }
 
 function del(key,    b) {
+  _LAST_ERROR_CODE = ""
   b = _detect_backend()
   if (b == "off")    return
   if (b == "unavailable") return
@@ -90,6 +93,7 @@ function del(key,    b) {
 }
 
 function has(key,    b) {
+  _LAST_ERROR_CODE = ""
   b = _detect_backend()
   if (b == "unavailable") return 0
   get(key)
@@ -205,7 +209,7 @@ function _get_zig(key,    v) {
 function _set_zig(key, value, ttl_sec) {
   _LAST_ERROR_CODE = ""
   if (length(key) > 128 || length(value) > 512) {
-    _LAST_ERROR = "CacheTooLarge"
+    _LAST_ERROR = "value too large: key=" length(key) " value=" length(value)
     _LAST_ERROR_CODE = "TOO_LARGE"
     return
   }
@@ -309,7 +313,7 @@ function _get_file(key,    fpath, line, parts, n, kh, now, xp) {
   return ""
 }
 
-function _set_file(key, value, ttl_sec,    fpath, lockdir, tmp, kh, ek, ev, xp, now, line, parts, n, out) {
+function _set_file(key, value, ttl_sec,    fpath, lockdir, tmp, kh, ek, ev, xp, now, line, parts, n, out, rc) {
   _LAST_ERROR_CODE = ""
   fpath   = _file_path()
   lockdir = _lock_path()
@@ -333,12 +337,19 @@ function _set_file(key, value, ttl_sec,    fpath, lockdir, tmp, kh, ek, ev, xp, 
   close(fpath)
   out = out kh "\t" xp "\t" ek "\t" ev "\n"
   printf "%s", out > tmp; close(tmp)
-  system("mv \"" tmp "\" \"" fpath "\"")
+  rc = system("mv \"" tmp "\" \"" fpath "\"")
+  if (rc != 0) {
+    _LAST_ERROR = "mv failed: " tmp " -> " fpath
+    _LAST_ERROR_CODE = "BACKEND"
+    _lock_release(lockdir)
+    system("rm -f \"" tmp "\"")
+    return
+  }
   _lock_release(lockdir)
   _STATS_SET++
 }
 
-function _del_file(key,    fpath, lockdir, tmp, kh, now, line, parts, n, out) {
+function _del_file(key,    fpath, lockdir, tmp, kh, now, line, parts, n, out, rc) {
   _LAST_ERROR_CODE = ""
   fpath   = _file_path()
   lockdir = _lock_path()
@@ -358,7 +369,14 @@ function _del_file(key,    fpath, lockdir, tmp, kh, now, line, parts, n, out) {
   }
   close(fpath)
   printf "%s", out > tmp; close(tmp)
-  system("mv \"" tmp "\" \"" fpath "\"")
+  rc = system("mv \"" tmp "\" \"" fpath "\"")
+  if (rc != 0) {
+    _LAST_ERROR = "mv failed: " tmp " -> " fpath
+    _LAST_ERROR_CODE = "BACKEND"
+    _lock_release(lockdir)
+    system("rm -f \"" tmp "\"")
+    return
+  }
   _lock_release(lockdir)
 }
 
