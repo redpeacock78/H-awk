@@ -259,3 +259,11 @@ function test_json_dispatch_unknown_path(   res) {
   res = json::dispatch("no_such_path", "x")
   assert_eq(res, "", "json::dispatch unknown_path returns empty")
 }
+
+function test_json_dispatch_decode_base64_roundtrip(   res, out, out_type) {
+  res = json::dispatch("decode", "{\"k\":\"a\\u001eb\\u001fc\\u001bd\"}")
+  assert_true(awk::result_ok(res), "json::dispatch decode control chars ok")
+  awk::result_val_into_map(res, out, out_type)
+  assert_eq(out["k"], "a\x1eb\x1fc\x1bd", "dispatch base64 roundtrip")
+  assert_eq(out_type["k"], "string", "dispatch base64 type tag")
+}
