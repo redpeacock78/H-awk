@@ -119,9 +119,9 @@ function _extract_boundary(ct,    i, parts, n, kv, val) {
   return ""
 }
 
-function _request_parse_json_body(body, req,    flat, key) {
+function _request_parse_json_body(body, req,    flat, flat_type, key) {
   delete flat
-  if (json_decode(body, flat)) {
+  if (json_decode(body, flat, flat_type)) {
     for (key in flat) {
       req["json:" key] = flat[key]
     }

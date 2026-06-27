@@ -12,9 +12,9 @@ pub fn encode(allocator: std.mem.Allocator, s: []const u8) !?[]u8 {
     return try allocator.dupe(u8, s);
 }
 
-// JSON を parse し key\x1f value\x1e 形式のフラット表現を返す。
+// JSON を parse し base64(key)\x1fbase64(value)\x1ftype\x1e 形式のフラット表現を返す。
 // dot-path キー（"user.name", "tags.0"）で全ネストを平坦化する。
-// 制限: キーや文字列値に \x1e (RS=0x1e) が含まれる場合は未定義動作。
+// key および value は Base64 で encode するため任意のバイト列を安全に運べる。
 pub fn decode(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, s, .{});
     defer parsed.deinit();
@@ -47,45 +47,46 @@ fn flattenValue(allocator: std.mem.Allocator, val: std.json.Value, path: []const
                 try flattenValue(allocator, item, child, out);
             }
         },
-        .string => |str| {
-            try out.appendSlice(allocator, path);
-            try out.append(allocator, '\x1f');
-            try out.appendSlice(allocator, str);
-            try out.append(allocator, '\x1e');
-        },
+        .string => |str| try emitLeaf(allocator, out, path, str, "string"),
         .integer => |n| {
-            try out.appendSlice(allocator, path);
-            try out.append(allocator, '\x1f');
             const ns = try std.fmt.allocPrint(allocator, "{d}", .{n});
             defer allocator.free(ns);
-            try out.appendSlice(allocator, ns);
-            try out.append(allocator, '\x1e');
+            try emitLeaf(allocator, out, path, ns, "int");
         },
         .float => |f| {
-            try out.appendSlice(allocator, path);
-            try out.append(allocator, '\x1f');
             const fs = try std.fmt.allocPrint(allocator, "{d}", .{f});
             defer allocator.free(fs);
-            try out.appendSlice(allocator, fs);
-            try out.append(allocator, '\x1e');
+            try emitLeaf(allocator, out, path, fs, "float");
         },
-        .number_string => |n| {
-            try out.appendSlice(allocator, path);
-            try out.append(allocator, '\x1f');
-            try out.appendSlice(allocator, n);
-            try out.append(allocator, '\x1e');
-        },
-        .bool => |b| {
-            try out.appendSlice(allocator, path);
-            try out.append(allocator, '\x1f');
-            try out.appendSlice(allocator, if (b) "true" else "false");
-            try out.append(allocator, '\x1e');
-        },
-        .null => {
-            try out.appendSlice(allocator, path);
-            try out.append(allocator, '\x1f');
-            try out.appendSlice(allocator, "null");
-            try out.append(allocator, '\x1e');
-        },
+        .number_string => |n| try emitLeaf(allocator, out, path, n, if (isIntLiteral(n)) "int" else "float"),
+        .bool => |b| try emitLeaf(allocator, out, path, if (b) "true" else "false", "bool"),
+        .null => try emitLeaf(allocator, out, path, "", "null"),
     }
+}
+
+fn emitLeaf(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    key: []const u8,
+    value: []const u8,
+    typ: []const u8,
+) !void {
+    try writeBase64(allocator, out, key);
+    try out.append(allocator, '\x1f');
+    try writeBase64(allocator, out, value);
+    try out.append(allocator, '\x1f');
+    try out.appendSlice(allocator, typ);
+    try out.append(allocator, '\x1e');
+}
+
+fn writeBase64(allocator: std.mem.Allocator, out: *std.ArrayList(u8), bytes: []const u8) !void {
+    const size = std.base64.standard.Encoder.calcSize(bytes.len);
+    const buf = try allocator.alloc(u8, size);
+    defer allocator.free(buf);
+    _ = std.base64.standard.Encoder.encode(buf, bytes);
+    try out.appendSlice(allocator, buf);
+}
+
+fn isIntLiteral(s: []const u8) bool {
+    return std.mem.indexOfAny(u8, s, ".eE") == null;
 }

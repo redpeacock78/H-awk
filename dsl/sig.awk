@@ -209,6 +209,20 @@ BEGIN {
     _DS_SIG_ARITY["json_encode"]   = 1
     _DS_SIG_ARG["json_encode", 1]  = "Array"
 
+    _DS_SIG_RET["json.encode"]        = "Str"
+    _DS_SIG_ARG["json.encode", 1]     = "Any"
+    _DS_SIG_ARITY["json.encode"]      = 1
+
+    _DS_SIG_RET["json.decode"]        = "Result<Any, JsonError>"
+    _DS_SIG_ARG["json.decode", 1]     = "Str"
+    _DS_SIG_ARITY["json.decode"]      = 1
+
+    # decode_t: arg 1 は desugar が前置する型名文字列、arg 2 がユーザーの渡す入力文字列
+    _DS_SIG_RET["json.decode_t"]      = "Result<T, JsonError>"
+    _DS_SIG_ARG["json.decode_t", 1]   = "Str"
+    _DS_SIG_ARG["json.decode_t", 2]   = "Str"
+    _DS_SIG_ARITY["json.decode_t"]    = 2
+
     # option constructors
     _DS_SIG_RET["option.some"]    = "Option<Any>"
     _DS_SIG_ARITY["option.some"]  = 1

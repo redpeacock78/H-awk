@@ -36,7 +36,7 @@ function _j_hex2dec(hex,   h) {
 # json_encode(data) は data[] 連想配列を JSON 文字列に変換する。
 # キーに :int / :bool / :null サフィックスがあれば型ヒントとして扱う。
 #
-# json_decode(s, out) は JSON 文字列を フラットな連想配列に展開する。
+# json_decode(s, out, out_type) は JSON 文字列を フラットな連想配列に展開する。
 # トップレベル object のみ。ネスト object / array は v0.1 では未サポート。
 # 戻り値: 1=成功、0=失敗。
 
@@ -183,7 +183,7 @@ function _jp_parse_string(   buf, c, nx) {
   }
   return _json_unescape(buf)
 }
-function _jp_parse_literal(out, path,   buf, c) {
+function _jp_parse_literal(out, path, out_type,   buf, c) {
   buf = ""
   while (_jp_i <= _jp_n) {
     c = substr(_jp_s, _jp_i, 1)
@@ -191,8 +191,13 @@ function _jp_parse_literal(out, path,   buf, c) {
     buf = buf c; _jp_i++
   }
   out[path] = buf
+  if (buf == "true" || buf == "false") out_type[path] = "bool"
+  else if (buf == "null") out_type[path] = "null"
+  else if (buf ~ /^-?[0-9]+$/) out_type[path] = "int"
+  else if (buf ~ /^-?([0-9]+(\.[0-9]+)?|[0-9]*\.[0-9]+)[eE][+-]?[0-9]+$/) out_type[path] = "float"
+  else if (buf ~ /^-?[0-9]+(\.[0-9]+)?$/) out_type[path] = "float"
 }
-function _jp_parse_object(out, path,   c, key, subpath) {
+function _jp_parse_object(out, path, out_type,   c, key, subpath) {
   _jp_i++; _jp_skip()
   if (substr(_jp_s, _jp_i, 1) == "}") { _jp_i++; return }
   while (_jp_i <= _jp_n) {
@@ -201,34 +206,35 @@ function _jp_parse_object(out, path,   c, key, subpath) {
     key = _jp_parse_string(); _jp_skip()
     if (substr(_jp_s, _jp_i, 1) != ":") break
     _jp_i++; subpath = _jp_path(path, key)
-    _jp_parse_value(out, subpath); _jp_skip()
+    _jp_parse_value(out, subpath, out_type); _jp_skip()
     c = substr(_jp_s, _jp_i, 1)
     if (c == "}") { _jp_i++; return }
     if (c == ",") { _jp_i++; continue }
     break
   }
 }
-function _jp_parse_array(out, path,   c, idx, subpath) {
+function _jp_parse_array(out, path, out_type,   c, idx, subpath) {
   _jp_i++; idx = 0; _jp_skip()
   if (substr(_jp_s, _jp_i, 1) == "]") { _jp_i++; return }
   while (_jp_i <= _jp_n) {
     subpath = _jp_path(path, idx "")
-    _jp_parse_value(out, subpath); _jp_skip()
+    _jp_parse_value(out, subpath, out_type); _jp_skip()
     c = substr(_jp_s, _jp_i, 1)
     if (c == "]") { _jp_i++; return }
     if (c == ",") { _jp_i++; idx++; continue }
     break
   }
 }
-function _jp_parse_value(out, path,   c) {
+function _jp_parse_value(out, path, out_type,   c) {
   _jp_skip(); c = substr(_jp_s, _jp_i, 1)
-  if      (c == "{")  _jp_parse_object(out, path)
-  else if (c == "[")  _jp_parse_array(out, path)
-  else if (c == "\"") out[path] = _jp_parse_string()
-  else                _jp_parse_literal(out, path)
+  if      (c == "{")  _jp_parse_object(out, path, out_type)
+  else if (c == "[")  _jp_parse_array(out, path, out_type)
+  else if (c == "\"") { out[path] = _jp_parse_string(); out_type[path] = "string" }
+  else                _jp_parse_literal(out, path, out_type)
 }
-function json_decode(s, out,   raw, n, i, recs, sep, k, v, first) {
+function json_decode(s, out, out_type,   raw, n, i, recs, rest, sep1, sep2, k, v, t, first) {
   delete out
+  delete out_type
   # Zig/AWK 両方で最初に object 判定してトップレベル非 object を確実に弾く
   _jp_s = s; _jp_n = length(s); _jp_i = 1
   _jp_skip()
@@ -245,16 +251,21 @@ function json_decode(s, out,   raw, n, i, recs, sep, k, v, first) {
     n = split(raw, recs, "\x1e")
     for (i = 1; i <= n; i++) {
       if (recs[i] == "") continue
-      sep = index(recs[i], "\x1f")
-      if (sep == 0) continue
-      k = substr(recs[i], 1, sep - 1)
-      v = substr(recs[i], sep + 1)
+      sep1 = index(recs[i], "\x1f")
+      if (sep1 == 0) continue
+      k = awk::_adt_b64_decode(substr(recs[i], 1, sep1 - 1))
+      rest = substr(recs[i], sep1 + 1)
+      sep2 = index(rest, "\x1f")
+      if (sep2 == 0) continue
+      v = awk::_adt_b64_decode(substr(rest, 1, sep2 - 1))
+      t = substr(rest, sep2 + 1)
       out[k] = v
+      out_type[k] = t
     }
     return 1
   }
   # AWK フォールバック
-  _jp_parse_value(out, "")
+  _jp_parse_value(out, "", out_type)
   return 1
 }
 
@@ -264,35 +275,33 @@ function encode(data) {
   return awk::json_encode(data)
 }
 
-function decode(s,    out, ok, msg) {
-  delete out
-  ok = awk::json_decode(s, out)
+function decode(s,    out, out_type, ok, msg) {
+  ok = awk::json_decode(s, out, out_type)
   if (!ok) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
     return awk::result_ng("JsonError", msg)
   }
-  return awk::result_ok_make(s)
+  return awk::result_ok_from_map(out, out_type)
 }
 
-function decode_t(type, s,    out, ok, msg, k) {
-  delete out
-  ok = awk::json_decode(s, out)
+function decode_t(type, s,    out, out_type, ok, msg, k) {
+  ok = awk::json_decode(s, out, out_type)
   if (!ok) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
     return awk::result_ng("JsonError", msg)
   }
   for (k in out) {
-    if (!_validate_leaf(type, out[k]))
+    if (!_validate_leaf(type, out[k], out_type[k]))
       return awk::result_ng("JsonError", "type mismatch: expected " type " at " k)
   }
-  return awk::result_ok_make(s)
+  return awk::result_ok_from_map(out, out_type)
 }
 
-function _validate_leaf(t, v) {
-  if (t == "Int")   return v ~ /^-?[0-9]+$/
-  if (t == "Float") return v ~ /^-?[0-9]+(\.[0-9]+)?$/
-  if (t == "Bool")  return v == "true" || v == "false"
-  if (t == "Str")   return 1
+function _validate_leaf(t, v, vtype) {
+  if (t == "Int")   return vtype == "int"
+  if (t == "Float") return vtype == "float" || vtype == "int"
+  if (t == "Bool")  return vtype == "bool"
+  if (t == "Str")   return vtype == "string"
   if (t == "Any")   return 1
   return 0
 }
