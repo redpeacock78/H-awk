@@ -1,8 +1,23 @@
 # SPDX-License-Identifier: MIT
 # dsl/desugar_let.awk -- let declaration transform + function signature hoisting
 
+function _ds_resolve_t_in_ret(transformed_expr,    _dm, _dispatch_ns, _dispatch_path, _dispatch_t, _sig_key, _ret) {
+    if (!match(transformed_expr, /^([a-zA-Z_][a-zA-Z0-9_]*)::dispatch\("([a-zA-Z_][a-zA-Z0-9_]*)"[[:space:]]*,[[:space:]]*"([A-Z][a-zA-Z0-9_]*)"/, _dm))
+        return ""
+    _dispatch_ns   = _dm[1]
+    _dispatch_path = _dm[2]
+    _dispatch_t    = _dm[3]
+    _sig_key       = _dispatch_ns "." _dispatch_path
+    if (!(_sig_key in _DS_SIG_RET)) return ""
+    _ret = _DS_SIG_RET[_sig_key]
+    gsub(/\<T\>/, _dispatch_t, _ret)
+    return _ret
+}
+
 # _ds_infer_type: 式の静的型を推論する。不明な場合は "" を返す
-function _ds_infer_type(expr,    m, _m, arg_type) {
+function _ds_infer_type(expr,    m, _m, arg_type, _resolved) {
+    _resolved = _ds_resolve_t_in_ret(expr)
+    if (_resolved != "") return _resolved
     # 数字のみの文字列リテラル: "8080" 形式 → NumericStr
     if (expr ~ /^"[0-9]+"$/) return "NumericStr"
     # 文字列リテラル: "..." 形式
@@ -71,7 +86,9 @@ function _ds_infer_type(expr,    m, _m, arg_type) {
 
 # Side-effect-free variant: returns "" instead of calling _ds_error for unknown
 # functions. Used during Pass 1b body scan where error output is not appropriate.
-function _ds_infer_type_safe(expr,    m, _m, m2, key, fname, arg_type) {
+function _ds_infer_type_safe(expr,    m, _m, m2, key, fname, arg_type, _resolved) {
+    _resolved = _ds_resolve_t_in_ret(expr)
+    if (_resolved != "") return _resolved
     if (expr ~ /^"[0-9]+"$/) return "NumericStr"
     if (expr ~ /^".*"$/) return "Str"
     if (expr ~ /^-?[0-9]+$/) return "Int"
@@ -179,7 +196,9 @@ function _ds_extract_orig_rhs(orig_line,    m) {
 }
 
 # Infer type from transformed expr, falling back to orig_expr for ?? detection
-function _ds_infer_type_with_orig(transformed_expr, orig_expr,    m, ltype, rtype) {
+function _ds_infer_type_with_orig(transformed_expr, orig_expr,    m, ltype, rtype, _resolved) {
+    _resolved = _ds_resolve_t_in_ret(transformed_expr)
+    if (_resolved != "") return _resolved
     if (orig_expr != "" && match(orig_expr, /^(.+)\?\?(.+)$/, m)) {
         ltype = _ds_infer_type(_ds_trim(m[1]))
         rtype = _ds_infer_type(_ds_trim(m[2]))
@@ -188,26 +207,34 @@ function _ds_infer_type_with_orig(transformed_expr, orig_expr,    m, ltype, rtyp
     return _ds_infer_type(transformed_expr)
 }
 
-function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, _let_call) {
+function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, rhs_type, var_type, _let_call) {
   if (_DS_strict && _DS_block_depth > 0 && line ~ /^[[:space:]]*let[[:space:]]+/)
     print "let inside control-flow block" > "/dev/stderr"
 
-  # ?= unwrap: let name ?= expr  (requires Option or Result return type)
-  if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
-    rhs = _ds_trim(arr[3])
-    declared = _ds_strip_effect(_ds_infer_type(rhs))
-    if (declared != "" && !_ds_is_nullable(declared) && !_ds_all_nullable(declared)) {
-      _ds_error(lineno, "?= requires Option or Result, got " declared, \
+  # ?= unwrap: let name ?= expr / let name: Type ?= expr  (requires Option or Result return type)
+  if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)([[:space:]]*:[[:space:]]*([^?]+))?[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
+    rhs = _ds_trim(arr[5])
+    rhs_type = _ds_strip_effect(_ds_infer_type(rhs))
+    if (rhs_type == "") {
+      _ds_error(lineno, "cannot infer type for ?= RHS", \
+          "add a signature or annotation so the RHS is known to be Option<T> or Result<T,E>")
+      return ""
+    }
+    if (rhs_type != "" && !_ds_is_nullable(rhs_type) && !_ds_all_nullable(rhs_type)) {
+      _ds_error(lineno, "?= requires Option or Result, got " rhs_type, \
           "use ?= only with Option<T> or Result<T,E> types")
       return ""
     }
+    var_type = (arr[4] != "" ? type::normalize(_ds_trim(arr[4])) : _ds_inner_type(rhs_type))
+    if (arr[4] != "")
+      _ds_check_type(var_type, _ds_inner_type(rhs_type), lineno)
     _DS_tc_count++
     _DS_let_locals[++_DS_let_count] = "_ds_tc_" _DS_tc_count
     _DS_let_locals[++_DS_let_count] = arr[2]
-    _DS_VAR_TYPES[_DS_func_name, arr[2]] = _ds_inner_type(declared)
-    _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(_DS_VAR_TYPES[_DS_func_name, arr[2]])
+    _DS_VAR_TYPES[_DS_func_name, arr[2]] = var_type
+    _DS_VAR_KIND[_DS_func_name, arr[2]]  = _ds_kind_of(var_type)
     _DS_body_buf[++_DS_body_count] = arr[1] "_ds_tc_" _DS_tc_count " = " rhs
-    if (_ds_is_option(declared)) {
+    if (_ds_is_option(rhs_type)) {
       _DS_body_buf[++_DS_body_count] = arr[1] "if (!option_some(_ds_tc_" _DS_tc_count ")) {"
       _DS_body_buf[++_DS_body_count] = arr[1] "  return ctx::dispatch(\"res.status\", 404)"
       _DS_body_buf[++_DS_body_count] = arr[1] "}"
