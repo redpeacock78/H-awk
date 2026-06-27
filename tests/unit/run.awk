@@ -174,6 +174,11 @@ BEGIN {
   test_cache_zig_stats_init()
   test_cache_empty_string_hit_vs_miss()
   test_cache_zig_found_api()
+  test_cache_dispatch_get_miss()
+  test_cache_dispatch_get_hit()
+  test_cache_dispatch_has()
+  test_cache_dispatch_del_semantics()
+  test_cache_dispatch_unknown_method()
 
   test_url_encode()
   test_url_encode_japanese()
@@ -245,6 +250,7 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_env.awk"
 @include "tests/unit/test_adt.awk"
 @include "tests/unit/test_cache.awk"
+@include "tests/unit/test_cache_dispatch.awk"
 @include "tests/unit/test_url.awk"
 @include "tests/unit/test_gzip.awk"
 @include "tests/unit/test_message.awk"

@@ -6,6 +6,7 @@ BEGIN {
   _BACKEND    = ""
   _FOUND      = 0
   _LAST_ERROR = ""
+  _LAST_ERROR_CODE = ""
   _STATS_HIT  = 0
   _STATS_MISS = 0
   _STATS_SET  = 0
@@ -20,14 +21,49 @@ BEGIN {
   _CACHE_ROUTES["found"]    = "cache::found";    _CACHE_ARITY["found"]    = 0
 }
 
-function dispatch(path, a1, a2, a3) {
-  return hawk_dispatch::call("cache", _CACHE_ROUTES, _CACHE_ARITY, path, a1, a2, a3)
+function dispatch(path, a1, a2, a3,    v, existed) {
+  _LAST_ERROR_CODE = ""
+  if (path == "get") {
+    v = get(a1)
+    if (_LAST_ERROR_CODE != "") return _map_error_code(_LAST_ERROR_CODE, _LAST_ERROR)
+    if (_FOUND) return awk::result_ok_make(awk::option_some_make(v))
+    return awk::result_ok_make(awk::option_none_make())
+  }
+  if (path == "set") {
+    set(a1, a2, a3)
+    if (_LAST_ERROR_CODE != "") return _map_error_code(_LAST_ERROR_CODE, _LAST_ERROR)
+    return awk::result_ok_make("")
+  }
+  if (path == "has") {
+    v = has(a1) ? "1" : "0"
+    if (_LAST_ERROR_CODE != "") return _map_error_code(_LAST_ERROR_CODE, _LAST_ERROR)
+    return awk::result_ok_make(v)
+  }
+  if (path == "del") {
+    existed = has(a1) ? "1" : "0"
+    if (_LAST_ERROR_CODE != "") return _map_error_code(_LAST_ERROR_CODE, _LAST_ERROR)
+    del(a1)
+    if (_LAST_ERROR_CODE != "") return _map_error_code(_LAST_ERROR_CODE, _LAST_ERROR)
+    return awk::result_ok_make(existed)
+  }
+  if (path == "found" || path == "stats" || path == "backend" || path == "remember") {
+    return hawk_dispatch::call("cache", _CACHE_ROUTES, _CACHE_ARITY, path, a1, a2, a3)
+  }
+  return awk::result_ng("CacheUnknownMethod", path)
+}
+
+function _map_error_code(code, msg) {
+  if (code == "LOCK_TIMEOUT") return awk::result_ng("CacheLockTimeout", msg)
+  if (code == "TOO_LARGE")    return awk::result_ng("CacheTooLarge",    msg)
+  if (code == "UNAVAILABLE")  return awk::result_ng("CacheUnavailable", msg)
+  return awk::result_ng("CacheBackendError", msg)
 }
 
 function get(key,    b) {
   _FOUND = 0
   b = _detect_backend()
   if (b == "off")    return ""
+  if (b == "unavailable") return ""
   if (b == "zig")    return _get_zig(key)
   if (b == "file")   return _get_file(key)
   if (b == "memory") return _get_memory(key)
@@ -38,6 +74,7 @@ function get(key,    b) {
 function set(key, value, ttl_sec,    b) {
   b = _detect_backend()
   if (b == "off")    return
+  if (b == "unavailable") return
   if (b == "zig")    { _set_zig(key, value, ttl_sec); return }
   if (b == "file")   { _set_file(key, value, ttl_sec); return }
   if (b == "memory") { _set_memory(key, value, ttl_sec); return }
@@ -46,12 +83,18 @@ function set(key, value, ttl_sec,    b) {
 function del(key,    b) {
   b = _detect_backend()
   if (b == "off")    return
+  if (b == "unavailable") return
   if (b == "zig")    { _del_zig(key); return }
   if (b == "file")   { _del_file(key); return }
   if (b == "memory") { _del_memory(key); return }
 }
 
-function has(key) { get(key); return _FOUND }
+function has(key,    b) {
+  b = _detect_backend()
+  if (b == "unavailable") return 0
+  get(key)
+  return _FOUND
+}
 
 function found()      { return _FOUND }
 function last_error() { return _LAST_ERROR }
@@ -76,7 +119,10 @@ function stats(    zig_stats, b) {
 }
 
 function _detect_backend(    b, rd, test_f, rc) {
-  if (_BACKEND != "") return _BACKEND
+  if (_BACKEND != "") {
+    if (_BACKEND == "unavailable") _LAST_ERROR_CODE = "UNAVAILABLE"
+    return _BACKEND
+  }
   b = ENVIRON["HAWK_CACHE_BACKEND"]
   if (b == "") b = "auto"
 
@@ -85,16 +131,19 @@ function _detect_backend(    b, rd, test_f, rc) {
 
   if (b == "zig") {
     if (awk::LIBS_LOADED["cache"]) { _BACKEND = "zig"; return _BACKEND }
+    _LAST_ERROR = "HAWK_CACHE_BACKEND=zig but libhawk_cache not loaded"
+    _LAST_ERROR_CODE = "UNAVAILABLE"
     print "[hawk] cache: HAWK_CACHE_BACKEND=zig but libhawk_cache not loaded" > "/dev/stderr"
-    exit 1
+    _BACKEND = "unavailable"; return _BACKEND
   }
 
   if (b == "file") {
     rd = ENVIRON["HAWK_RUN_DIR"]
     if (rd == "") {
       _LAST_ERROR = "HAWK_RUN_DIR not set"
+      _LAST_ERROR_CODE = "UNAVAILABLE"
       print "[hawk] cache: HAWK_CACHE_BACKEND=file requires HAWK_RUN_DIR" > "/dev/stderr"
-      exit 1
+      _BACKEND = "unavailable"; return _BACKEND
     }
     _BACKEND = "file"; return _BACKEND
   }
@@ -114,6 +163,7 @@ function _detect_backend(    b, rd, test_f, rc) {
 }
 
 function _get_memory(key,    now, expires) {
+  _LAST_ERROR_CODE = ""
   if (!(key in _mem_value)) { _STATS_MISS++; return "" }
   now     = awk::systime()
   expires = _mem_expires[key]
@@ -129,17 +179,20 @@ function _get_memory(key,    now, expires) {
 }
 
 function _set_memory(key, value, ttl_sec) {
+  _LAST_ERROR_CODE = ""
   _mem_value[key]   = value
   _mem_expires[key] = (ttl_sec > 0) ? awk::systime() + ttl_sec : 0
   _STATS_SET++
 }
 
 function _del_memory(key) {
+  _LAST_ERROR_CODE = ""
   delete _mem_value[key]
   delete _mem_expires[key]
 }
 
 function _get_zig(key,    v) {
+  _LAST_ERROR_CODE = ""
   v = awk::hawk_cache_get(key)
   if (awk::hawk_cache_found() != 1) {
     _STATS_MISS++
@@ -150,10 +203,17 @@ function _get_zig(key,    v) {
   return v
 }
 function _set_zig(key, value, ttl_sec) {
+  _LAST_ERROR_CODE = ""
+  if (length(key) > 128 || length(value) > 512) {
+    _LAST_ERROR = "CacheTooLarge"
+    _LAST_ERROR_CODE = "TOO_LARGE"
+    return
+  }
   awk::hawk_cache_set(key, value, ttl_sec * 1000)
   _STATS_SET++
 }
 function _del_zig(key) {
+  _LAST_ERROR_CODE = ""
   awk::hawk_cache_del(key)
 }
 
@@ -228,6 +288,7 @@ function _lock_release(lockdir) {
 }
 
 function _get_file(key,    fpath, line, parts, n, kh, now, xp) {
+  _LAST_ERROR_CODE = ""
   _FOUND = 0
   fpath = _file_path()
   kh    = _key_hash(key)
@@ -249,6 +310,7 @@ function _get_file(key,    fpath, line, parts, n, kh, now, xp) {
 }
 
 function _set_file(key, value, ttl_sec,    fpath, lockdir, tmp, kh, ek, ev, xp, now, line, parts, n, out) {
+  _LAST_ERROR_CODE = ""
   fpath   = _file_path()
   lockdir = _lock_path()
   tmp     = fpath "." PROCINFO["pid"] ".tmp"
@@ -258,7 +320,7 @@ function _set_file(key, value, ttl_sec,    fpath, lockdir, tmp, kh, ek, ev, xp, 
   xp      = (ttl_sec > 0) ? awk::systime() + ttl_sec : 0
   now     = awk::systime()
 
-  if (!_lock_acquire(lockdir)) { _LAST_ERROR = "CacheLockTimeout"; return }
+  if (!_lock_acquire(lockdir)) { _LAST_ERROR = "CacheLockTimeout"; _LAST_ERROR_CODE = "LOCK_TIMEOUT"; return }
 
   out = ""
   while ((getline line < fpath) > 0) {
@@ -277,13 +339,14 @@ function _set_file(key, value, ttl_sec,    fpath, lockdir, tmp, kh, ek, ev, xp, 
 }
 
 function _del_file(key,    fpath, lockdir, tmp, kh, now, line, parts, n, out) {
+  _LAST_ERROR_CODE = ""
   fpath   = _file_path()
   lockdir = _lock_path()
   tmp     = fpath "." PROCINFO["pid"] ".tmp"
   kh      = _key_hash(key)
   now     = awk::systime()
 
-  if (!_lock_acquire(lockdir)) { _LAST_ERROR = "CacheLockTimeout"; return }
+  if (!_lock_acquire(lockdir)) { _LAST_ERROR = "CacheLockTimeout"; _LAST_ERROR_CODE = "LOCK_TIMEOUT"; return }
 
   out = ""
   while ((getline line < fpath) > 0) {
@@ -303,6 +366,7 @@ function _reset(    k) {
   _BACKEND    = ""
   _FOUND      = 0
   _LAST_ERROR = ""
+  _LAST_ERROR_CODE = ""
   _STATS_HIT  = 0
   _STATS_MISS = 0
   _STATS_SET  = 0
