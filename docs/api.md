@@ -116,17 +116,19 @@ Gzip compression is automatic and has no explicit API. Set `HAWK_GZIP=1` to enab
 
 ---
 
-# JSON API (json.*)
+## JSON
 
-Available when `libs/json` is present.
+| DSL                 | dispatch                              | 戻り値の型                          |
+| ------------------- | ------------------------------------- | ----------------------------------- |
+| `json.encode(x)`    | `json::dispatch("encode", x)`         | `Str`                               |
+| `json.decode(s)`    | `json::dispatch("decode", s)`         | `Result<Any, JsonError>`            |
+| `json.decode<T>(s)` | `json::dispatch("decode_t", "T", s)`  | `Result<T, JsonError>`              |
 
-```awk
-json.encode(value)          # -> Str
-json.decode(str)            # -> Result<Any, JsonError>
-json.decode<T>(str)         # -> Result<T, JsonError>
-json.valid(str)             # -> Bool
-json.error()                # -> Str
-```
+`json.decode<T>` は DSL の山括弧内に書かれた型引数 `T` を desugar 時に第 1 引数の文字列リテラルとして dispatch に渡す。
+`let` の宣言型 `Result<T, JsonError>` は、この型引数 `T` を sig 戻り型の `T` に流し込んで `Result<Int, JsonError>` などの具体型に解決する経路で照合される。
+Result の ok payload は decode 済みフラット連想配列を「3-field レコード `base64(key)\x1Fbase64(value)\x1Ftype\x1E` の連結文字列」として保持する。
+key と value は Base64 で encode するため、JSON 値内に区切り文字 `\x1E` / `\x1F` を含む場合でも安全に運べる。
+値と型タグの取り出しは `awk::result_val_into_map(res, out, out_type)` を呼び、`out["key"]` で値、`out_type["key"]` で `int` / `float` / `string` / `bool` / `null` のいずれかを得る。
 
 Error types: `JsonParseError`, `JsonTypeError`, `JsonTooDeepError`.
 
