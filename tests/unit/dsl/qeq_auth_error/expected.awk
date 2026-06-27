@@ -1,3 +1,9 @@
+function AuthError(msg) { return result_ng("AuthError", msg) }
+
+function authenticate(auth) {
+  return AuthError("bad")
+}
+
 function h(    _ds_tc_1, user, _ds_err_type__ds_tc_1) {
   _ds_tc_1 = authenticate(ctx::dispatch("req.get_header", "Authorization"))
   if (!result_ok(_ds_tc_1)) {

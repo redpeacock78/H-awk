@@ -86,7 +86,9 @@ function _ds_infer_type(expr,    m, _m, arg_type, _resolved) {
 
 # Side-effect-free variant: returns "" instead of calling _ds_error for unknown
 # functions. Used during Pass 1b body scan where error output is not appropriate.
-function _ds_infer_type_safe(expr,    m, _m, m2, key, fname, arg_type) {
+function _ds_infer_type_safe(expr,    m, _m, m2, key, fname, arg_type, _resolved) {
+    _resolved = _ds_resolve_t_in_ret(expr)
+    if (_resolved != "") return _resolved
     if (expr ~ /^"[0-9]+"$/) return "NumericStr"
     if (expr ~ /^".*"$/) return "Str"
     if (expr ~ /^-?[0-9]+$/) return "Int"
@@ -213,6 +215,11 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, rhs_t
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)([[:space:]]*:[[:space:]]*([^?]+))?[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
     rhs = _ds_trim(arr[5])
     rhs_type = _ds_strip_effect(_ds_infer_type(rhs))
+    if (rhs_type == "") {
+      _ds_error(lineno, "cannot infer type for ?= RHS", \
+          "add a signature or annotation so the RHS is known to be Option<T> or Result<T,E>")
+      return ""
+    }
     if (rhs_type != "" && !_ds_is_nullable(rhs_type) && !_ds_all_nullable(rhs_type)) {
       _ds_error(lineno, "?= requires Option or Result, got " rhs_type, \
           "use ?= only with Option<T> or Result<T,E> types")
