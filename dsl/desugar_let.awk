@@ -207,6 +207,12 @@ function _ds_infer_type_with_orig(transformed_expr, orig_expr,    m, ltype, rtyp
     return _ds_infer_type(transformed_expr)
 }
 
+function _ds_normalize_inferred(declared, inferred) {
+    if (inferred != "" && !type::accepts(declared, inferred))
+        inferred = _ds_strip_effect(inferred)
+    return inferred
+}
+
 function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, rhs_type, var_type, _let_call) {
   if (_DS_strict && _DS_block_depth > 0 && line ~ /^[[:space:]]*let[[:space:]]+/)
     print "let inside control-flow block" > "/dev/stderr"
@@ -266,7 +272,7 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, rhs_t
     _DS_VAR_TYPES[_DS_func_name, varname] = declared
     _DS_VAR_KIND[_DS_func_name, varname]  = _ds_kind_of(declared)
     orig_rhs = _ds_extract_orig_rhs(orig_line)
-    inferred = _ds_strip_effect(_ds_infer_type_with_orig(rhs, orig_rhs))
+    inferred = _ds_normalize_inferred(declared, _ds_infer_type_with_orig(rhs, orig_rhs))
     _ds_check_type(declared, inferred, lineno)
     if (declared ~ /^(List|Dict)</ || (declared in _DS_RECORD_TYPE)) {
       transformed = _ds_desugar_let_init(varname, declared, rhs, indent)
@@ -329,7 +335,8 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, rhs_t
     if (arr[2] in _DS_let_type_map) {
       rhs      = _ds_trim(arr[3])
       declared = _DS_let_type_map[arr[2]]
-      _ds_check_type(declared, _ds_infer_type(rhs), lineno)
+      inferred = _ds_normalize_inferred(declared, _ds_infer_type(rhs))
+      _ds_check_type(declared, inferred, lineno)
       if (_ds_is_primitive_type(declared))
         return arr[1] arr[2] " = type::coerce(" rhs ", \"" declared "\")"
       return arr[1] arr[2] " = " rhs
