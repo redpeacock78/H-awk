@@ -266,7 +266,7 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, rhs_t
     _DS_VAR_TYPES[_DS_func_name, varname] = declared
     _DS_VAR_KIND[_DS_func_name, varname]  = _ds_kind_of(declared)
     orig_rhs = _ds_extract_orig_rhs(orig_line)
-    inferred = _ds_infer_type_with_orig(rhs, orig_rhs)
+    inferred = _ds_strip_effect(_ds_infer_type_with_orig(rhs, orig_rhs))
     _ds_check_type(declared, inferred, lineno)
     if (declared ~ /^(List|Dict)</ || (declared in _DS_RECORD_TYPE)) {
       transformed = _ds_desugar_let_init(varname, declared, rhs, indent)
