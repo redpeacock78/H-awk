@@ -1,4 +1,4 @@
 function handler() {
-    let v: Result<Bool, CacheError> = cache.del("k")
+    let v: Effect<Result<Bool, CacheError>> = cache.del("k")
     return v
 }

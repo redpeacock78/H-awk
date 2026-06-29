@@ -1,3 +1,3 @@
 function handler() {
-    let r: Result<Void, CacheError> = cache.set("k", "v", 60)
+    let r: Effect<Result<Void, CacheError>> = cache.set("k", "v", 60)
 }
