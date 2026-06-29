@@ -69,13 +69,13 @@ function todo_add() -> Response {
         ok _:
           # noop
         ng _:
-          # noop on cache error
+          return ctx.res.status(500)
       end
       when cache.del("todos:json") of
         ok _:
           # noop
         ng _:
-          # noop on cache error
+          return ctx.res.status(500)
       end
       ctx.res.status(201)
       return ctx.res.html(_todo_tr(row["id"], row["title"]))
@@ -96,13 +96,13 @@ function todo_delete() -> Response {
     ok _:
       # noop
     ng _:
-      # noop on cache error
+      return ctx.res.status(500)
   end
   when cache.del("todos:json") of
     ok _:
       # noop
     ng _:
-      # noop on cache error
+      return ctx.res.status(500)
   end
   ctx.res.status(200)
   return ctx.res.html(safe.html.raw(""))
