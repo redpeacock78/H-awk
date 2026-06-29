@@ -6,19 +6,30 @@ BEGIN {
   GET("/worker",    "cache_worker")
 }
 
-function cache_set() {
-  cache::set("shared-key", "shared-value", 60)
+function cache_set(    r) {
+  r = cache::dispatch("set", "shared-key", "shared-value", 60)
+  if (!result_ok(r)) {
+    ctx::status(500)
+    ctx::text("error")
+    return
+  }
   ctx::text("ok")
 }
 
-function cache_get(    v) {
-  v = cache::get("shared-key")
-  if (!cache::found()) {
+function cache_get(    r, v) {
+  r = cache::dispatch("get", "shared-key")
+  if (!result_ok(r)) {
+    ctx::status(500)
+    ctx::text("error")
+    return
+  }
+  v = result_val(r)
+  if (!option_some(v)) {
     ctx::status(404)
     ctx::text("miss")
     return
   }
-  ctx::text(v)
+  ctx::text(option_val(v))
 }
 
 function cache_worker() {
