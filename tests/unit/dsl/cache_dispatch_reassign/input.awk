@@ -1,4 +1,4 @@
 function handler() {
-    let v: Result<Bool, CacheError>
+    let v: Effect<Result<Bool, CacheError>>
     v = cache.has("k")
 }
