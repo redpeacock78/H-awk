@@ -34,7 +34,7 @@ test "parseFrame rejects Transfer-Encoding" {
 }
 
 test "parseFrame rejects oversized header" {
-    var buf: [8193]u8 = [_]u8{'A'} ** 8193;
+    var buf: [8197]u8 = [_]u8{'A'} ** 8197;
     const result = http_parser.parseFrame(&buf);
     try std.testing.expectEqual(http_parser.ParseFrameResult.Action.error_response, result.action);
     try std.testing.expectEqual(@as(u16, 431), result.status_code);

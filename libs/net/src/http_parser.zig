@@ -34,7 +34,7 @@ pub const Request = struct {
 pub fn parseFrame(buf: []const u8) ParseFrameResult {
     const sep_pos = std.mem.indexOf(u8, buf, "\r\n\r\n");
     if (sep_pos == null) {
-        if (buf.len > MAX_HEADER_SIZE) {
+        if (buf.len > MAX_HEADER_SIZE + 4) {
             return .{
                 .action = .error_response,
                 .consume_len = buf.len,
