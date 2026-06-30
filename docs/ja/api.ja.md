@@ -158,36 +158,62 @@ url.query_string(dict)      # -> Str
 
 ```awk
 function todo_list_html() -> Response {
-  let cached: Str = cache.get("todos:html")
-  if (cache.found()) {
-    return ctx.res.html(safe.html.raw(cached))
-  }
-  # ... build response ...
-  cache.set("todos:html", out, 30)   # TTL: 30 seconds
-  return ctx.res.html(safe.html.raw(out))
+  when cache.get("todos:html") of
+    ok cached:
+      when cached of
+        some html:
+          return ctx.res.html(safe.html.raw(html))
+        none:
+          # ... build response ...
+      end
+    ng e:
+      # ... build response without cache ...
+  end
+
+  when cache.set("todos:html", out, 30) of
+    ok _:
+      return ctx.res.html(safe.html.raw(out))
+    ng e:
+      return ctx.res.html(safe.html.raw(out))
+  end
 }
 
 function todo_add() -> Void {
   # ... write data ...
-  cache.del("todos:html")   # invalidate on write
-  cache.del("todos:json")
+  when cache.has("todos:html") of
+    ok present:
+      if (present) {
+        when cache.del("todos:html") of
+          ok _:
+            # invalidated
+          ng e:
+            # handle CacheError
+        end
+      }
+    ng e:
+      # handle CacheError
+  end
 }
 ```
 
 ## メソッド
 
-| DSL | 名前空間形式 | 戻り値の型 |
+| DSL | dispatch | 戻り値の型 |
 |---|---|---|
-| `cache.get(key)` | `cache::get(key)` | `Str` |
-| `cache.set(key, value, ttl)` | `cache::set(key, value, ttl)` | `Void` |
-| `cache.del(key)` | `cache::del(key)` | `Void` |
-| `cache.has(key)` | `cache::has(key)` | `Bool` |
-| `cache.found()` | `cache::found()` | `Bool` |
-| `cache.remember(key, ttl, fn)` | `cache::remember(key, ttl, fn)` | `Str` |
-| `cache.backend()` | `cache::backend()` | `Str` |
-| `cache.stats()` | `cache::stats()` | `Str` |
+| `cache.get(key)` | `cache::dispatch("get", key)` | `Effect<Result<Option<Str>, CacheError>>` |
+| `cache.set(key, value, ttl)` | `cache::dispatch("set", key, value, ttl)` | `Effect<Result<Void, CacheError>>` |
+| `cache.has(key)` | `cache::dispatch("has", key)` | `Effect<Result<Bool, CacheError>>` |
+| `cache.del(key)` | `cache::dispatch("del", key)` | `Effect<Result<Bool, CacheError>>` |
 
-`cache.get(key)` はキャッシュミスとキャッシュ済みの空文字列のどちらでも `""` を返します。`cache.get` の直後に `cache.found()` で区別してください。
+`cache.get` はヒット時に `ok(some(value))`、ミス時に `ok(none())` を返します。`cache.found()` は不要です。
+
+`cache.del` は削除直前にキーが存在すると観測された場合に `ok(true)`、それ以外の場合に `ok(false)` を返します。存在確認はベストエフォートです。`has` + `del` の二段実装で、間に並行書込が入ると返値とは異なる状態で削除される可能性あり。
+
+`cache.has` と `cache.del` は AWK ランタイム層で Bool ペイロードを Str 値の `"1"` と `"0"` として返します。これは gawk の Bool 規約に一致します。DSL の `Bool` に対する `when` マッチは、これらのペイロードをそのまま受理します。
+
+`HAWK_CACHE_BACKEND=off` は障害ではなく、通常のキャッシュ無効モードです。`get` は `ok(none())`、`set` は `ok("")`、`has` は `ok("0")`、`del` は `ok("0")` を返します。`CacheUnavailable` は、設定済みバックエンドが利用不能な場合にのみ発生します（Zig ライブラリがない、file バックエンドで `HAWK_RUN_DIR` が未設定など）。
+
+エラータグ: `CacheUnknownMethod`, `CacheLockTimeout`, `CacheTooLarge`, `CacheUnavailable`, `CacheBackendError`。
 
 ## バックエンド選択
 
