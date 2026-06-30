@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 # tests/unit/test_cache_dispatch_file.awk
 
-function test_cache_dispatch_file_round_trip(    saved_be, saved_dir, dir, s, g, opt) {
-  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
-  saved_dir = ENVIRON["HAWK_RUN_DIR"]
+function test_cache_dispatch_file_round_trip(    saved_be, saved_dir, had_be, had_dir, dir, s, g, opt) {
+  had_be = ("HAWK_CACHE_BACKEND" in ENVIRON)
+  had_dir = ("HAWK_RUN_DIR" in ENVIRON)
+  if (had_be) saved_be = ENVIRON["HAWK_CACHE_BACKEND"]
+  if (had_dir) saved_dir = ENVIRON["HAWK_RUN_DIR"]
   dir = "/tmp/hawk_cache_dispatch_file_" PROCINFO["pid"]
   system("rm -rf \"" dir "\" && mkdir -p \"" dir "/cache\"")
   ENVIRON["HAWK_CACHE_BACKEND"] = "file"
@@ -21,14 +23,18 @@ function test_cache_dispatch_file_round_trip(    saved_be, saved_dir, dir, s, g,
 
   cache::_reset()
   system("rm -rf \"" dir "\"")
-  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
-  ENVIRON["HAWK_RUN_DIR"] = saved_dir
+  if (had_be) ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  else delete ENVIRON["HAWK_CACHE_BACKEND"]
+  if (had_dir) ENVIRON["HAWK_RUN_DIR"] = saved_dir
+  else delete ENVIRON["HAWK_RUN_DIR"]
   cache::_reset()
 }
 
-function test_cache_dispatch_file_lock_timeout(    saved_be, saved_dir, dir, lockdir, pidfile, pid, r) {
-  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
-  saved_dir = ENVIRON["HAWK_RUN_DIR"]
+function test_cache_dispatch_file_lock_timeout(    saved_be, saved_dir, had_be, had_dir, dir, lockdir, pidfile, pid, r) {
+  had_be = ("HAWK_CACHE_BACKEND" in ENVIRON)
+  had_dir = ("HAWK_RUN_DIR" in ENVIRON)
+  if (had_be) saved_be = ENVIRON["HAWK_CACHE_BACKEND"]
+  if (had_dir) saved_dir = ENVIRON["HAWK_RUN_DIR"]
   dir = "/tmp/hawk_cache_dispatch_file_lock_" PROCINFO["pid"]
   lockdir = dir "/cache/cache.lock.d"
   pidfile = dir "/sleep.pid"
@@ -50,7 +56,9 @@ function test_cache_dispatch_file_lock_timeout(    saved_be, saved_dir, dir, loc
 
   cache::_reset()
   system("rm -rf \"" dir "\"")
-  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
-  ENVIRON["HAWK_RUN_DIR"] = saved_dir
+  if (had_be) ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  else delete ENVIRON["HAWK_CACHE_BACKEND"]
+  if (had_dir) ENVIRON["HAWK_RUN_DIR"] = saved_dir
+  else delete ENVIRON["HAWK_RUN_DIR"]
   cache::_reset()
 }
