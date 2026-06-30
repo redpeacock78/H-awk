@@ -7,18 +7,11 @@ BEGIN {
   _FOUND      = 0
   _LAST_ERROR = ""
   _LAST_ERROR_CODE = ""
-  _STATS_HIT  = 0
-  _STATS_MISS = 0
-  _STATS_SET  = 0
 
   _CACHE_ROUTES["get"]      = "cache::get";      _CACHE_ARITY["get"]      = 1
   _CACHE_ROUTES["set"]      = "cache::set";      _CACHE_ARITY["set"]      = 3
   _CACHE_ROUTES["del"]      = "cache::del";      _CACHE_ARITY["del"]      = 1
   _CACHE_ROUTES["has"]      = "cache::has";      _CACHE_ARITY["has"]      = 1
-  _CACHE_ROUTES["remember"] = "cache::remember"; _CACHE_ARITY["remember"] = 3
-  _CACHE_ROUTES["stats"]    = "cache::stats";    _CACHE_ARITY["stats"]    = 0
-  _CACHE_ROUTES["backend"]  = "cache::backend";  _CACHE_ARITY["backend"]  = 0
-  _CACHE_ROUTES["found"]    = "cache::found";    _CACHE_ARITY["found"]    = 0
 }
 
 function dispatch(path, a1, a2, a3,    v, existed) {
@@ -46,9 +39,6 @@ function dispatch(path, a1, a2, a3,    v, existed) {
     if (_LAST_ERROR_CODE != "") return _map_error_code(_LAST_ERROR_CODE, _LAST_ERROR)
     return awk::result_ok_make(existed)
   }
-  if (path == "found" || path == "stats" || path == "backend" || path == "remember") {
-    return hawk_dispatch::call("cache", _CACHE_ROUTES, _CACHE_ARITY, path, a1, a2, a3)
-  }
   return awk::result_ng("CacheUnknownMethod", path)
 }
 
@@ -68,7 +58,6 @@ function get(key,    b) {
   if (b == "zig")    return _get_zig(key)
   if (b == "file")   return _get_file(key)
   if (b == "memory") return _get_memory(key)
-  _STATS_MISS++
   return ""
 }
 
@@ -100,27 +89,7 @@ function has(key,    b) {
   return _FOUND
 }
 
-function found()      { return _FOUND }
 function last_error() { return _LAST_ERROR }
-
-function backend() { return _detect_backend() }
-
-function remember(key, ttl_sec, fn,    v) {
-  v = get(key)
-  if (_FOUND) return v
-  v = @fn()
-  set(key, v, ttl_sec)
-  return v
-}
-
-function stats(    zig_stats, b) {
-  b = _detect_backend()
-  zig_stats = ""
-  if (b == "zig" && awk::LIBS_LOADED["cache"]) {
-    zig_stats = " " awk::hawk_cache_stats()
-  }
-  return "backend=" b zig_stats " hit=" _STATS_HIT " miss=" _STATS_MISS " set=" _STATS_SET
-}
 
 function _detect_backend(    b, rd, test_f, rc) {
   if (_BACKEND != "") {
@@ -168,17 +137,15 @@ function _detect_backend(    b, rd, test_f, rc) {
 
 function _get_memory(key,    now, expires) {
   _LAST_ERROR_CODE = ""
-  if (!(key in _mem_value)) { _STATS_MISS++; return "" }
+  if (!(key in _mem_value)) { return "" }
   now     = awk::systime()
   expires = _mem_expires[key]
   if (expires > 0 && now >= expires) {
     delete _mem_value[key]
     delete _mem_expires[key]
-    _STATS_MISS++
     return ""
   }
   _FOUND = 1
-  _STATS_HIT++
   return _mem_value[key]
 }
 
@@ -186,7 +153,6 @@ function _set_memory(key, value, ttl_sec) {
   _LAST_ERROR_CODE = ""
   _mem_value[key]   = value
   _mem_expires[key] = (ttl_sec > 0) ? awk::systime() + ttl_sec : 0
-  _STATS_SET++
 }
 
 function _del_memory(key) {
@@ -199,11 +165,9 @@ function _get_zig(key,    v) {
   _LAST_ERROR_CODE = ""
   v = awk::hawk_cache_get(key)
   if (awk::hawk_cache_found() != 1) {
-    _STATS_MISS++
     return ""
   }
   _FOUND = 1
-  _STATS_HIT++
   return v
 }
 function _set_zig(key, value, ttl_sec) {
@@ -214,7 +178,6 @@ function _set_zig(key, value, ttl_sec) {
     return
   }
   awk::hawk_cache_set(key, value, ttl_sec * 1000)
-  _STATS_SET++
 }
 function _del_zig(key) {
   _LAST_ERROR_CODE = ""
@@ -305,11 +268,10 @@ function _get_file(key,    fpath, line, parts, n, kh, now, xp) {
     xp = parts[2] + 0
     if (xp > 0 && now >= xp) continue
     close(fpath)
-    _FOUND = 1; _STATS_HIT++
+    _FOUND = 1
     return _unescape(parts[4])
   }
   close(fpath)
-  _STATS_MISS++
   return ""
 }
 
@@ -346,7 +308,6 @@ function _set_file(key, value, ttl_sec,    fpath, lockdir, tmp, kh, ek, ev, xp, 
     return
   }
   _lock_release(lockdir)
-  _STATS_SET++
 }
 
 function _del_file(key,    fpath, lockdir, tmp, kh, now, line, parts, n, out, rc) {
@@ -385,9 +346,6 @@ function _reset(    k) {
   _FOUND      = 0
   _LAST_ERROR = ""
   _LAST_ERROR_CODE = ""
-  _STATS_HIT  = 0
-  _STATS_MISS = 0
-  _STATS_SET  = 0
   for (k in _mem_value)   delete _mem_value[k]
   for (k in _mem_expires) delete _mem_expires[k]
 }

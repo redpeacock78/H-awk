@@ -249,19 +249,4 @@ BEGIN {
     _DS_SIG_RET["cache.has"]         = "Effect<Result<Bool, CacheError>>"
     _DS_SIG_ARITY["cache.has"]       = 1
     _DS_SIG_ARG["cache.has", 1]      = "Str"
-
-    _DS_SIG_RET["cache.remember"]    = "Str"
-    _DS_SIG_ARITY["cache.remember"]  = 3
-    _DS_SIG_ARG["cache.remember", 1] = "Str"
-    _DS_SIG_ARG["cache.remember", 2] = "Int"
-    _DS_SIG_ARG["cache.remember", 3] = "HandlerName"
-
-    _DS_SIG_RET["cache.stats"]       = "Str"
-    _DS_SIG_ARITY["cache.stats"]     = 0
-
-    _DS_SIG_RET["cache.backend"]     = "Str"
-    _DS_SIG_ARITY["cache.backend"]   = 0
-
-    _DS_SIG_RET["cache.found"]       = "Bool"
-    _DS_SIG_ARITY["cache.found"]     = 0
 }

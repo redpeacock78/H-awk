@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # tests/unit/test_cache_dispatch_unavailable.awk
 
-function test_cache_dispatch_off_backend(    saved_be, s, g) {
+function test_cache_dispatch_off_backend(    saved_be, had_be, s, g) {
+  had_be = ("HAWK_CACHE_BACKEND" in ENVIRON)
   saved_be = ENVIRON["HAWK_CACHE_BACKEND"]
   ENVIRON["HAWK_CACHE_BACKEND"] = "off"
   cache::_reset()
@@ -17,6 +18,7 @@ function test_cache_dispatch_off_backend(    saved_be, s, g) {
   assert_true(result_err_type(s) != "CacheUnavailable", "cache dispatch off: set is not unavailable")
 
   cache::_reset()
-  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  if (had_be) ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
+  else delete ENVIRON["HAWK_CACHE_BACKEND"]
   cache::_reset()
 }
