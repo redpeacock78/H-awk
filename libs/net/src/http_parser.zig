@@ -34,7 +34,7 @@ pub const Request = struct {
 pub fn parseFrame(buf: []const u8) ParseFrameResult {
     const sep_pos = std.mem.indexOf(u8, buf, "\r\n\r\n");
     if (sep_pos == null) {
-        if (buf.len > MAX_HEADER_SIZE) {
+        if (buf.len > MAX_HEADER_SIZE + 4) {
             return .{
                 .action = .error_response,
                 .consume_len = buf.len,
@@ -52,6 +52,15 @@ pub fn parseFrame(buf: []const u8) ParseFrameResult {
         };
     }
     const header_end = sep_pos.?;
+    if (header_end > MAX_HEADER_SIZE) {
+        return .{
+            .action = .error_response,
+            .consume_len = header_end + 4,
+            .status_code = 431,
+            .reason = "Request Header Fields Too Large",
+            .should_close = true,
+        };
+    }
     const headers_section = buf[0..header_end];
     var hdr_it = std.mem.splitSequence(u8, headers_section, "\r\n");
     _ = hdr_it.next();

@@ -6,7 +6,8 @@ const event_loop = @import("event_loop");
 
 var _loop: ?*event_loop.EventLoop = null;
 var _loop_thread: ?std.Thread = null;
-const _loop_alloc = std.heap.c_allocator;
+pub const loop_allocator = std.heap.smp_allocator;
+const _loop_alloc = loop_allocator;
 
 const _ffi_entry = ffi.makeDlLoad(.{
     .name = "hawk_net",

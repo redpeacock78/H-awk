@@ -2,6 +2,7 @@
 const std = @import("std");
 const http_parser = @import("http_parser");
 const conn_pool = @import("conn_pool");
+const net_root = @import("net_root");
 
 extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 extern fn unsetenv(name: [*:0]const u8) c_int;
@@ -33,10 +34,21 @@ test "parseFrame rejects Transfer-Encoding" {
 }
 
 test "parseFrame rejects oversized header" {
-    var buf: [8193]u8 = [_]u8{'A'} ** 8193;
+    var buf: [8197]u8 = [_]u8{'A'} ** 8197;
     const result = http_parser.parseFrame(&buf);
     try std.testing.expectEqual(http_parser.ParseFrameResult.Action.error_response, result.action);
     try std.testing.expectEqual(@as(u16, 431), result.status_code);
+}
+
+test "parseFrame rejects complete oversized header" {
+    const req = "GET / HTTP/1.1\r\nX-Big: " ++ ("a" ** 8192) ++ "\r\n\r\n";
+    const result = http_parser.parseFrame(req);
+    try std.testing.expectEqual(http_parser.ParseFrameResult.Action.error_response, result.action);
+    try std.testing.expectEqual(@as(u16, 431), result.status_code);
+}
+
+test "net root keeps event loop allocations off libc malloc" {
+    try std.testing.expectEqual(std.heap.smp_allocator.vtable, net_root.loop_allocator.vtable);
 }
 
 test "parseFrame rejects negative Content-Length string" {

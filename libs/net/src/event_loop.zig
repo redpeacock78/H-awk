@@ -710,12 +710,14 @@ pub const EventLoop = struct {
                 const item = self.req_queue.orderedRemove(0);
                 self.req_mu.unlock();
                 // Re-allocate using gawk_alloc (caller may use a different allocator)
-                const owned = gawk_alloc.dupe(u8, item) catch {
+                const owned_buf = gawk_alloc.alloc(u8, item.len + 1) catch {
                     self.alloc.free(item);
                     return null;
                 };
+                @memcpy(owned_buf[0..item.len], item);
+                owned_buf[item.len] = 0;
                 self.alloc.free(item);
-                return owned;
+                return owned_buf[0..item.len];
             }
             self.req_mu.unlock();
             const ts = std.c.timespec{ .sec = 0, .nsec = 1 * std.time.ns_per_ms };
@@ -749,3 +751,69 @@ pub const EventLoop = struct {
         return true;
     }
 };
+
+const TestAlloc = struct {
+    expected_len: usize,
+    used: bool = false,
+    buf: [256]u8 align(16) = undefined,
+
+    const vtable = std.mem.Allocator.VTable{
+        .alloc = alloc,
+        .resize = resize,
+        .remap = remap,
+        .free = free,
+    };
+
+    fn allocator(self: *TestAlloc) std.mem.Allocator {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    fn alloc(ctx: *anyopaque, n: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
+        const self: *TestAlloc = @ptrCast(@alignCast(ctx));
+        if (self.used or n != self.expected_len or n > self.buf.len) return null;
+        self.used = true;
+        return @ptrCast(&self.buf);
+    }
+
+    fn resize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
+        return false;
+    }
+
+    fn remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+        return null;
+    }
+
+    fn free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
+};
+
+test "dequeue reserves trailing byte for gawk string" {
+    const alloc = std.testing.allocator;
+    var loop = EventLoop{
+        .alloc = alloc,
+        .listen_fd = -1,
+        .pool = conn_pool.ConnPool.init(alloc),
+        .req_queue = try std.ArrayList([]const u8).initCapacity(alloc, 0),
+        .req_mu = .{},
+        .resp_queue = try std.ArrayList(PendingResponse).initCapacity(alloc, 0),
+        .resp_mu = .{},
+        .wakeup_read_fd = -1,
+        .wakeup_write_fd = -1,
+        .running = std.atomic.Value(bool).init(true),
+        .keepalive_timeout_ns = 0,
+    };
+    defer {
+        loop.req_queue.deinit(alloc);
+        loop.resp_queue.deinit(alloc);
+        loop.pool.deinit();
+    }
+
+    const item = try alloc.dupe(u8, "1\x1eGET");
+    try loop.req_queue.append(alloc, item);
+
+    var gawk_alloc = TestAlloc{ .expected_len = item.len + 1 };
+    const out = loop.dequeue(gawk_alloc.allocator()) orelse return error.ExpectedGawkOwnedString;
+
+    try std.testing.expect(gawk_alloc.used);
+    try std.testing.expectEqualStrings("1\x1eGET", out);
+    try std.testing.expectEqual(@as(u8, 0), gawk_alloc.buf[out.len]);
+}

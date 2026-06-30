@@ -77,6 +77,7 @@ pub fn build(b: *std.Build) void {
     test_mod.addImport("http_parser", parser_mod);
     test_mod.addImport("conn_pool", pool_mod);
     test_mod.addImport("event_loop", loop_mod);
+    test_mod.addImport("net_root", root_mod);
 
     const unit_tests = b.addTest(.{ .root_module = test_mod });
     const run_tests = b.addRunArtifact(unit_tests);
