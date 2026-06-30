@@ -65,30 +65,6 @@ function test_cache_off(    v, r, opt) {
   assert_true(option_none(opt), "cache off: dispatch get none")
 }
 
-function _skip_test_cache_backend_memory() {
-  cache::_reset()
-  ENVIRON["HAWK_CACHE_BACKEND"] = "memory"
-  assert_eq(cache::backend(), "memory", "cache backend: memory")
-}
-
-function _skip_test_cache_backend_off() {
-  cache::_reset()
-  ENVIRON["HAWK_CACHE_BACKEND"] = "off"
-  assert_eq(cache::backend(), "off", "cache backend: off")
-}
-
-function _skip_test_cache_stats(    s) {
-  cache::_reset()
-  ENVIRON["HAWK_CACHE_BACKEND"] = "memory"
-  cache::set("s1", "v1", 60)
-  cache::get("s1")
-  cache::get("nx")
-  s = cache::stats()
-  assert_true(index(s, "hit=1") > 0,  "cache stats: hit=1")
-  assert_true(index(s, "miss=1") > 0, "cache stats: miss=1")
-  assert_true(index(s, "set=1") > 0,  "cache stats: set=1")
-}
-
 function test_cache_file_set_get(    saved_be, saved_dir, dir, r, opt) {
   if (ENVIRON["CI"] == "1") { TESTS_SKIPPED++; return }
   saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
@@ -155,33 +131,6 @@ function test_cache_file_escape_unescape() {
   assert_eq(cache::_unescape("a\\\\b"), "a\\b",  "cache: unescape backslash")
 }
 
-function _skip_test_cache_auto_no_zig_no_dir(    saved_be, saved_dir) {
-  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
-  saved_dir = ENVIRON["HAWK_RUN_DIR"]
-  ENVIRON["HAWK_CACHE_BACKEND"] = "auto"
-  ENVIRON["HAWK_RUN_DIR"] = ""
-  cache::_reset()
-  assert_eq(cache::backend(), "memory", "cache: auto falls back to memory")
-  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
-  ENVIRON["HAWK_RUN_DIR"] = saved_dir
-}
-
-function _skip_test_cache_auto_with_dir(    saved_be, saved_dir, dir, b) {
-  if (ENVIRON["CI"] == "1") { TESTS_SKIPPED++; return }
-  saved_be  = ENVIRON["HAWK_CACHE_BACKEND"]
-  saved_dir = ENVIRON["HAWK_RUN_DIR"]
-  dir = "/tmp/hawk_cache_auto_" PROCINFO["pid"]
-  system("mkdir -p " dir "/cache")
-  ENVIRON["HAWK_CACHE_BACKEND"] = "auto"
-  ENVIRON["HAWK_RUN_DIR"] = dir
-  cache::_reset()
-  b = cache::backend()
-  assert_true((b == "file" || b == "zig"), "cache: auto selects file or zig when dir available")
-  system("rm -rf " dir)
-  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
-  ENVIRON["HAWK_RUN_DIR"] = saved_dir
-}
-
 function test_cache_empty_string_hit_vs_miss(    v, r, opt) {
   cache::_reset()
   ENVIRON["HAWK_CACHE_BACKEND"] = "memory"
@@ -229,31 +178,6 @@ function test_cache_zig_found_api(    saved_be, v, r, opt) {
   assert_true(result_ok(r), "cache zig found: empty dispatch ok")
   opt = result_val(r)
   assert_true(option_some(opt) && option_val(opt) == "", "cache zig found: empty dispatch some")
-
-  ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
-}
-
-function _skip_test_cache_stats_init_before_other_calls(    s) {
-  cache::_reset()
-  ENVIRON["HAWK_CACHE_BACKEND"] = "memory"
-  s = cache::stats()
-  assert_true(index(s, "backend=memory") > 0, "cache stats: backend present before any get/set")
-  assert_true(index(s, "hit=0") > 0,  "cache stats: hit=0 on fresh stats")
-  assert_true(index(s, "miss=0") > 0, "cache stats: miss=0 on fresh stats")
-  assert_true(index(s, "set=0") > 0,  "cache stats: set=0 on fresh stats")
-}
-
-function _skip_test_cache_zig_stats_init(    saved_be, s) {
-  if (!LIBS_LOADED["cache"]) { TESTS_SKIPPED++; return }
-  saved_be = ENVIRON["HAWK_CACHE_BACKEND"]
-  ENVIRON["HAWK_CACHE_BACKEND"] = "zig"
-  cache::_reset()
-
-  s = cache::stats()
-  assert_true(index(s, "backend=zig") > 0,  "cache zig stats: backend=zig present")
-  assert_true(index(s, "shared=") > 0,       "cache zig stats: shared= present")
-  assert_true(index(s, "size=0") == 0,       "cache zig stats: size != 0")
-  assert_true(index(s, "slots=0") == 0,      "cache zig stats: slots != 0")
 
   ENVIRON["HAWK_CACHE_BACKEND"] = saved_be
 }

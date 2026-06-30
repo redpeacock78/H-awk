@@ -68,6 +68,7 @@ lint: ## awk 構文チェック
 	@HAWK_NO_SERVE=1 gawk --lint -f hawk.awk -e 'BEGIN{exit 0}' >/dev/null 2>&1 \
 	  || (echo "lint FAIL"; exit 1)
 	@echo "lint OK"
+	@./tests/lint/no_legacy_cache_callers.sh
 
 ci: lint test ## lint + 全テスト (libs を除く、CI 想定)
 
