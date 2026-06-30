@@ -178,6 +178,10 @@ BEGIN {
   test_cache_dispatch_file_set_mv_failure()
   test_cache_dispatch_file_del_mv_failure()
   test_cache_zig_too_large_payload()
+  test_cache_dispatch_file_round_trip()
+  test_cache_dispatch_file_lock_timeout()
+  test_cache_dispatch_zig_too_large()
+  test_cache_dispatch_off_backend()
 
   test_url_encode()
   test_url_encode_japanese()
@@ -250,6 +254,9 @@ function assert_true(cond, msg) {
 @include "tests/unit/test_adt.awk"
 @include "tests/unit/test_cache.awk"
 @include "tests/unit/test_cache_dispatch.awk"
+@include "tests/unit/test_cache_dispatch_file.awk"
+@include "tests/unit/test_cache_dispatch_zig.awk"
+@include "tests/unit/test_cache_dispatch_unavailable.awk"
 @include "tests/unit/test_url.awk"
 @include "tests/unit/test_gzip.awk"
 @include "tests/unit/test_message.awk"
