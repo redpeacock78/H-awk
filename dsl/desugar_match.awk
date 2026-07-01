@@ -406,7 +406,7 @@ END {
 }
 
 # Emit desugared if/else into _DS_body_buf.
-function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered, emit_base, header_lineno, _saved_lineno) {
+function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered, emit_base, header_lineno, _saved_lineno, resolved, map_var, map_type_var, json_result_bind) {
   if (_DS_match_ng_arms[d] == 0) {
     _ds_error(lineno, "when...of missing ng/none/default branch", \
         "add an ng: or default: arm to handle the error case")
@@ -441,6 +441,22 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
   } else {
     check_fn = "result_ok"; val_fn = "result_val"; err_fn = "result_err"
   }
+  json_result_bind = (val_fn == "result_val" && _DS_match_ok_var[d] != "" && _ds_is_json_decode_rhs(_DS_match_expr[d]))
+  if (json_result_bind) {
+    resolved = _ds_strip_untrusted(_ds_inner_type(type_t))
+    if (!_ds_is_json_container_type(resolved)) {
+      map_var = "_ds_mcm_" _DS_mc_count
+      map_type_var = "_ds_mcmt_" _DS_mc_count
+    }
+    if (_DS_in_function) {
+      if (_ds_is_json_container_type(resolved))
+        _ds_match_add_local(_DS_match_ok_var[d] "_types")
+      else {
+        _ds_match_add_local(map_var)
+        _ds_match_add_local(map_type_var)
+      }
+    }
+  }
 
   # Exhaustiveness check: Result<T, E1|E2|...> with typed arms must cover every member
   # OR have a catch-all (default:/ng:) arm.
@@ -474,8 +490,18 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
   _ds_match_push(_DS_match_indent[d] tmpvar " = " _ds_dot_transform(_DS_match_expr[d]), header_lineno)
   _ds_match_push("# line " header_lineno " \"" _DS_src_file "\"", header_lineno)
   _ds_match_push(_DS_match_indent[d] "if (" check_fn "(" tmpvar ")) {", header_lineno)
-  if (_DS_match_ok_var[d] != "")
-    _ds_match_push(_DS_match_indent[d] "  " _DS_match_ok_var[d] " = " val_fn "(" tmpvar ")", header_lineno)
+  if (_DS_match_ok_var[d] != "") {
+    if (json_result_bind) {
+      if (_ds_is_json_container_type(resolved))
+        _ds_match_push(_DS_match_indent[d] "  result_val_into_map(" tmpvar ", " _DS_match_ok_var[d] ", " _DS_match_ok_var[d] "_types)", header_lineno)
+      else {
+        _ds_match_push(_DS_match_indent[d] "  result_val_into_map(" tmpvar ", " map_var ", " map_type_var ")", header_lineno)
+        _ds_match_push(_DS_match_indent[d] "  " _DS_match_ok_var[d] " = " map_var "[\"\"]", header_lineno)
+      }
+    } else {
+      _ds_match_push(_DS_match_indent[d] "  " _DS_match_ok_var[d] " = " val_fn "(" tmpvar ")", header_lineno)
+    }
+  }
   if (_DS_in_function && _DS_match_ok_var[d] != "")
     _ds_match_register_arm_bind_type(d, "ok", _DS_func_name, _DS_match_ok_var[d], _ds_inner_type(type_t))
   for (j = 1; j <= _DS_match_ok_count[d]; j++) {

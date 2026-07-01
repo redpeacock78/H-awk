@@ -155,6 +155,19 @@ function _ds_kind_of(t) {
     return "scalar"
 }
 
+function _ds_is_json_decode_rhs(rhs) {
+    return (rhs ~ /^(json\.decode(_object|_t)?|ctx\.req\.json(_object|_t)?)[[:space:]]*[(<]/)
+}
+
+function _ds_is_json_container_type(t) {
+    return (t == "JsonValue" || t == "JsonObject" || t == "Array" || t == "Map" || t == "JsonScalar")
+}
+
+function _ds_strip_untrusted(t,    m) {
+    if (match(t, /^Untrusted<(.+)>$/, m)) return m[1]
+    return t
+}
+
 function _ds_is_primitive_type(t) {
     return (t == "Int" || t == "Float" || t == "Str" || t == "Bool")
 }
@@ -207,13 +220,15 @@ function _ds_infer_type_with_orig(transformed_expr, orig_expr,    m, ltype, rtyp
     return _ds_infer_type(transformed_expr)
 }
 
-function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, rhs_type, var_type, _let_call) {
+function _ds_let_transform(line, lineno, orig_line,    arr, rhs, surface_rhs, declared, rhs_type, var_type, _let_call, resolved, map_var, map_type_var) {
   if (_DS_strict && _DS_block_depth > 0 && line ~ /^[[:space:]]*let[[:space:]]+/)
     print "let inside control-flow block" > "/dev/stderr"
 
   # ?= unwrap: let name ?= expr / let name: Type ?= expr  (requires Option or Result return type)
   if (match(line, /^([[:space:]]*)let[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)([[:space:]]*:[[:space:]]*([^?]+))?[[:space:]]*\?=[[:space:]]*(.+)$/, arr)) {
     rhs = _ds_trim(arr[5])
+    surface_rhs = _ds_extract_orig_rhs(orig_line)
+    if (surface_rhs == "") surface_rhs = rhs
     rhs_type = _ds_strip_effect(_ds_infer_type(rhs))
     if (rhs_type == "") {
       _ds_error(lineno, "cannot infer type for ?= RHS", \
@@ -240,11 +255,31 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, declared, rhs_t
       _DS_body_buf[++_DS_body_count] = arr[1] "}"
       _DS_body_buf[++_DS_body_count] = arr[1] arr[2] " = option_val(_ds_tc_" _DS_tc_count ")"
     } else {
+      if (_ds_is_json_decode_rhs(surface_rhs)) {
+        resolved = _ds_strip_untrusted(_ds_inner_type(rhs_type))
+        if (_ds_is_json_container_type(resolved)) {
+          _DS_let_locals[++_DS_let_count] = arr[2] "_types"
+        } else {
+          map_var = "_ds_tcm_" _DS_tc_count
+          map_type_var = "_ds_tcmt_" _DS_tc_count
+          _DS_let_locals[++_DS_let_count] = map_var
+          _DS_let_locals[++_DS_let_count] = map_type_var
+        }
+      }
       _DS_let_locals[++_DS_let_count] = "_ds_err_type__ds_tc_" _DS_tc_count
       _DS_body_buf[++_DS_body_count] = arr[1] "if (!result_ok(_ds_tc_" _DS_tc_count ")) {"
       _DS_body_buf[++_DS_body_count] = _ds_result_ng_return("_ds_tc_" _DS_tc_count)
       _DS_body_buf[++_DS_body_count] = arr[1] "}"
-      _DS_body_buf[++_DS_body_count] = arr[1] arr[2] " = result_val(_ds_tc_" _DS_tc_count ")"
+      if (_ds_is_json_decode_rhs(surface_rhs)) {
+        if (_ds_is_json_container_type(resolved)) {
+          _DS_body_buf[++_DS_body_count] = arr[1] "result_val_into_map(_ds_tc_" _DS_tc_count ", " arr[2] ", " arr[2] "_types)"
+        } else {
+          _DS_body_buf[++_DS_body_count] = arr[1] "result_val_into_map(_ds_tc_" _DS_tc_count ", " map_var ", " map_type_var ")"
+          _DS_body_buf[++_DS_body_count] = arr[1] arr[2] " = " map_var "[\"\"]"
+        }
+      } else {
+        _DS_body_buf[++_DS_body_count] = arr[1] arr[2] " = result_val(_ds_tc_" _DS_tc_count ")"
+      }
     }
     return ""
   }
