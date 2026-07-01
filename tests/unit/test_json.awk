@@ -230,7 +230,7 @@ function test_json_dispatch_decode_ok(   res, out, out_type) {
 function test_json_dispatch_decode_ng(   res) {
   res = json::dispatch("decode", "not json")
   assert_true(!awk::result_ok(res), "json::dispatch decode ng")
-  assert_eq(awk::result_err_type(res), "JsonError", "json::dispatch decode err type")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "json::dispatch decode err type")
 }
 
 function test_json_dispatch_decode_t_ok(   res, out, out_type) {
@@ -244,13 +244,13 @@ function test_json_dispatch_decode_t_ok(   res, out, out_type) {
 function test_json_dispatch_decode_t_mismatch(   res) {
   res = json::dispatch("decode_t", "Int", "{\"n\":\"abc\"}")
   assert_true(!awk::result_ok(res), "json::dispatch decode_t type mismatch ng")
-  assert_eq(awk::result_err_type(res), "JsonError", "json::dispatch decode_t err type")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "json::dispatch decode_t err type")
 }
 
 function test_json_dispatch_decode_t_distinguishes_string_from_int(   res) {
   res = json::dispatch("decode_t", "Int", "{\"n\":\"1\"}")
   assert_true(!awk::result_ok(res), "decode_t Int rejects JSON string '1'")
-  assert_eq(awk::result_err_type(res), "JsonError", "decode_t err type")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t err type")
 }
 
 function test_json_dispatch_unknown_path(   res) {
@@ -266,4 +266,200 @@ function test_json_dispatch_decode_base64_roundtrip(   res, out, out_type) {
   awk::result_val_into_map(res, out, out_type)
   assert_eq(out["k"], "a\x1eb\x1fc\x1bd", "dispatch base64 roundtrip")
   assert_eq(out_type["k"], "string", "dispatch base64 type tag")
+}
+
+function test_json_decode_value_scalar(    res, out, out_type) {
+  res = json::dispatch("decode", "42")
+  assert_true(awk::result_ok(res), "json::dispatch decode top-level scalar ok")
+  awk::result_val_into_map(res, out, out_type)
+  assert_eq(out[""], "42", "decode top-level scalar value")
+  assert_eq(out_type[""], "int", "decode top-level scalar type")
+}
+
+function test_json_decode_value_array(    res, out, out_type) {
+  res = json::dispatch("decode", "[1,2,3]")
+  assert_true(awk::result_ok(res), "json::dispatch decode top-level array ok")
+  awk::result_val_into_map(res, out, out_type)
+  assert_eq(out["0"], "1", "decode top-level array index 0")
+  assert_eq(out["2"], "3", "decode top-level array index 2")
+}
+
+function test_json_decode_value_invalid_scalar(    res) {
+  res = json::dispatch("decode", "not json")
+  assert_true(!awk::result_ok(res), "json::dispatch decode invalid top-level scalar is ng")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "invalid top-level scalar err type")
+}
+
+function test_json_decode_value_nested_invalid_object_literal(    out, out_type, ret) {
+  ret = json_decode_value("{\"a\":tru}", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: nested invalid object literal returns 0")
+}
+
+function test_json_decode_value_nested_invalid_array_literal(    out, out_type, ret) {
+  ret = json_decode_value("[nul]", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: nested invalid array literal returns 0")
+}
+
+function test_json_decode_value_truncated_object(    out, out_type, ret) {
+  ret = json_decode_value("{\"a\":1,", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: truncated object returns 0")
+}
+
+function test_json_decode_value_truncated_array(    out, out_type, ret) {
+  ret = json_decode_value("[1", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: truncated array returns 0")
+}
+
+function test_json_decode_object_dispatch_ok(    res, out, out_type) {
+  res = json::dispatch("decode_object", "{\"k\":\"v\"}")
+  assert_true(awk::result_ok(res), "json::dispatch decode_object ok")
+  awk::result_val_into_map(res, out, out_type)
+  assert_eq(out["k"], "v", "decode_object payload restores k=v")
+}
+
+function test_json_decode_object_dispatch_ng(    res) {
+  res = json::dispatch("decode_object", "not json")
+  assert_true(!awk::result_ok(res), "json::dispatch decode_object ng")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode_object err type")
+}
+
+function test_json_decode_object_invalid_nested_literal(    res) {
+  res = json::dispatch("decode_object", "{\"a\":tru}")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode_object rejects invalid nested literal")
+}
+
+function test_json_decode_too_deep(    res, s, i) {
+  s = "1"
+  for (i = 0; i < 40; i++) s = "[" s "]"
+  res = json::dispatch("decode", s)
+  assert_true(!awk::result_ok(res), "json::dispatch decode too-deep is ng")
+  assert_eq(awk::result_err_type(res), "JsonTooDeepError", "decode too-deep err type")
+}
+
+function test_json_decode_t_too_deep(    res, s, i) {
+  s = "1"
+  for (i = 0; i < 40; i++) s = "[" s "]"
+  res = json::dispatch("decode_t", "Any", s)
+  assert_true(!awk::result_ok(res), "json::dispatch decode_t too-deep is ng")
+  assert_eq(awk::result_err_type(res), "JsonTooDeepError", "decode_t too-deep err type")
+}
+
+function test_json_decode_within_max_depth_ok(    res, s, i) {
+  s = "1"
+  for (i = 0; i < 30; i++) s = "[" s "]"
+  res = json::dispatch("decode", s)
+  assert_true(awk::result_ok(res), "json::dispatch decode within max depth ok")
+}
+
+function test_json_decode_object_too_deep(    res, s, i, body) {
+  body = "\"a\":1"
+  for (i = 0; i < 40; i++) body = "\"a\":{" body "}"
+  s = "{" body "}"
+  res = json::dispatch("decode_object", s)
+  assert_true(!awk::result_ok(res), "json::dispatch decode_object too-deep is ng")
+  assert_eq(awk::result_err_type(res), "JsonTooDeepError", "decode_object too-deep err type")
+}
+
+function test_json_decode_value_scalar_trailing_garbage(    res) {
+  res = json::dispatch("decode", "42 true")
+  assert_true(!awk::result_ok(res), "json::dispatch decode scalar trailing garbage is ng")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "scalar trailing garbage err type")
+}
+
+function test_json_decode_value_array_trailing_garbage(    res) {
+  res = json::dispatch("decode", "[1] trailing")
+  assert_true(!awk::result_ok(res), "json::dispatch decode array trailing garbage is ng")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "array trailing garbage err type")
+}
+
+function test_json_decode_value_object_trailing_garbage(    res) {
+  res = json::dispatch("decode", "{\"a\":1} junk")
+  assert_true(!awk::result_ok(res), "json::dispatch decode object trailing garbage is ng")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "object trailing garbage err type")
+}
+
+function test_json_decode_object_trailing_garbage(    res) {
+  res = json::dispatch("decode_object", "{\"a\":1} junk")
+  assert_true(!awk::result_ok(res), "json::dispatch decode_object trailing garbage is ng")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode_object trailing garbage err type")
+}
+
+function test_json_decode_value_unterminated_array_string(    out, out_type, ret) {
+  ret = json_decode_value("[\"unterminated]", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: unterminated array string returns 0")
+}
+
+function test_json_decode_value_unterminated_object_string(    out, out_type, ret) {
+  ret = json_decode_value("{\"a\":\"unterminated}", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: unterminated object string returns 0")
+}
+
+function test_json_decode_t_unterminated_array_string(    res) {
+  res = json::dispatch("decode_t", "Str", "[\"unterminated]")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode_t unterminated array string err type")
+}
+
+function test_json_decode_t_unterminated_object_string(    res) {
+  res = json::dispatch("decode_t", "Str", "{\"a\":\"unterminated}")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode_t unterminated object string err type")
+}
+
+function test_json_decode_t_int_rejects_empty_array(    res) {
+  res = json::dispatch("decode_t", "Int", "[]")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t Int rejects empty array")
+}
+
+function test_json_decode_t_int_rejects_empty_object(    res) {
+  res = json::dispatch("decode_t", "Int", "{}")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t Int rejects empty object")
+}
+
+function test_json_decode_t_jsonvalue_accepts_scalar(    res) {
+  res = json::dispatch("decode_t", "JsonValue", "42")
+  assert_true(awk::result_ok(res), "decode_t JsonValue accepts scalar")
+}
+
+function test_json_decode_t_array_accepts_array(    res) {
+  res = json::dispatch("decode_t", "Array", "[1,2,3]")
+  assert_true(awk::result_ok(res), "decode_t Array accepts array")
+}
+
+function test_json_decode_t_array_rejects_scalar_root(    res) {
+  res = json::dispatch("decode_t", "Array", "42")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t Array rejects scalar root")
+}
+
+function test_json_decode_t_jsonobject_rejects_array_root(    res) {
+  res = json::dispatch("decode_t", "JsonObject", "[1]")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t JsonObject rejects array root")
+}
+
+function test_json_decode_t_jsonscalar_rejects_array_root(    res) {
+  res = json::dispatch("decode_t", "JsonScalar", "[1]")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t JsonScalar rejects array root")
+}
+
+function test_json_decode_rejects_invalid_escape(    res) {
+  res = json::dispatch("decode", "\"\\q\"")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects invalid escape")
+}
+
+function test_json_decode_rejects_invalid_unicode_escape(    res) {
+  res = json::dispatch("decode", "[\"\\u12xx\"]")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects invalid unicode escape")
+}
+
+function test_json_decode_rejects_missing_colon_inside_nested_object(    res) {
+  res = json::dispatch("decode", "[{\"b\"]")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects missing colon inside nested object")
+}
+
+function test_json_decode_rejects_array_closed_by_parent_brace(    res) {
+  res = json::dispatch("decode", "{\"a\":[1}")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects array closed by parent brace")
+}
+
+function test_json_decode_value_rejects_leading_zero(    out, out_type, ret) {
+  ret = json_decode_value("01", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: leading zero number rejected")
 }

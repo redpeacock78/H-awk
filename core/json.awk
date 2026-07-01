@@ -17,7 +17,11 @@ function _json_init(   i) {
     _jhex2dec[sprintf("%02x", i)] = i
 }
 
-BEGIN { _json_init() }
+BEGIN {
+  # ponytail: 32段ネストで打ち切り。要件が出たら設定化する。
+  _JP_MAX_DEPTH = 32
+  _json_init()
+}
 
 END {
   delete _jhex2chr
@@ -37,8 +41,10 @@ function _j_hex2dec(hex,   h) {
 # キーに :int / :bool / :null サフィックスがあれば型ヒントとして扱う。
 #
 # json_decode(s, out, out_type) は JSON 文字列を フラットな連想配列に展開する。
-# トップレベル object のみ。ネスト object / array は v0.1 では未サポート。
-# 戻り値: 1=成功、0=失敗。
+# トップレベル object のみ許可（配列・スカラーは 0 を返す）。ネストした object / array は解析できる。
+# 戻り値: 1=成功、0=失敗、-1=最大ネスト深度(_JP_MAX_DEPTH)超過。
+# json_decode_value(s, out, out_type) は上記の制限を外し、トップレベルが配列・スカラーでも解析する。
+# AWK フォールバック専用。戻り値: 1=成功、0=失敗、-1=最大ネスト深度(_JP_MAX_DEPTH)超過。
 
 function json_encode(data,    keys, n, i, out, pieces, type_pos, key, name, type, val) {
   out = "{"
@@ -166,13 +172,26 @@ function _jp_skip(   c) {
 function _jp_path(parent, child) {
   return (parent == "") ? child : parent "." child
 }
-function _jp_parse_string(   buf, c, nx) {
+function _jp_parse_string(   buf, c, nx, hex) {
   _jp_i++
   buf = ""
   while (_jp_i <= _jp_n) {
     c = substr(_jp_s, _jp_i, 1)
     if (c == "\\") {
       nx = substr(_jp_s, _jp_i + 1, 1)
+      if (nx !~ /^[\\\/"bfnrtu]$/) {
+        _jp_parse_error = 1
+        HAWK_JSON_ERROR = "invalid escape sequence"
+        return ""
+      }
+      if (nx == "u") {
+        hex = substr(_jp_s, _jp_i + 2, 4)
+        if (length(hex) != 4 || hex !~ /^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$/) {
+          _jp_parse_error = 1
+          HAWK_JSON_ERROR = "invalid escape sequence"
+          return ""
+        }
+      }
       buf = buf c nx
       _jp_i += 2
     } else if (c == "\"") {
@@ -181,7 +200,9 @@ function _jp_parse_string(   buf, c, nx) {
       buf = buf c; _jp_i++
     }
   }
-  return _json_unescape(buf)
+  _jp_parse_error = 1
+  HAWK_JSON_ERROR = "unterminated string"
+  return ""
 }
 function _jp_parse_literal(out, path, out_type,   buf, c) {
   buf = ""
@@ -193,11 +214,12 @@ function _jp_parse_literal(out, path, out_type,   buf, c) {
   out[path] = buf
   if (buf == "true" || buf == "false") out_type[path] = "bool"
   else if (buf == "null") out_type[path] = "null"
-  else if (buf ~ /^-?[0-9]+$/) out_type[path] = "int"
-  else if (buf ~ /^-?([0-9]+(\.[0-9]+)?|[0-9]*\.[0-9]+)[eE][+-]?[0-9]+$/) out_type[path] = "float"
-  else if (buf ~ /^-?[0-9]+(\.[0-9]+)?$/) out_type[path] = "float"
+  else if (buf ~ /^-?(0|[1-9][0-9]*)$/) out_type[path] = "int"
+  else if (buf ~ /^-?(0|[1-9][0-9]*)(\.[0-9]+)?[eE][+-]?[0-9]+$/) out_type[path] = "float"
+  else if (buf ~ /^-?(0|[1-9][0-9]*)\.[0-9]+$/) out_type[path] = "float"
 }
-function _jp_parse_object(out, path, out_type,   c, key, subpath) {
+function _jp_parse_object(out, path, out_type, depth,   c, key, subpath) {
+  if (depth > _JP_MAX_DEPTH) { _jp_too_deep = 1; return }
   _jp_i++; _jp_skip()
   if (substr(_jp_s, _jp_i, 1) == "}") { _jp_i++; return }
   while (_jp_i <= _jp_n) {
@@ -206,42 +228,70 @@ function _jp_parse_object(out, path, out_type,   c, key, subpath) {
     key = _jp_parse_string(); _jp_skip()
     if (substr(_jp_s, _jp_i, 1) != ":") break
     _jp_i++; subpath = _jp_path(path, key)
-    _jp_parse_value(out, subpath, out_type); _jp_skip()
+    _jp_parse_value(out, subpath, out_type, depth + 1); _jp_skip()
+    if (_jp_too_deep) return
     c = substr(_jp_s, _jp_i, 1)
     if (c == "}") { _jp_i++; return }
     if (c == ",") { _jp_i++; continue }
     break
   }
+  if (!_jp_parse_error) {
+    _jp_parse_error = 1
+    HAWK_JSON_ERROR = "unexpected end of input"
+  }
 }
-function _jp_parse_array(out, path, out_type,   c, idx, subpath) {
+function _jp_parse_array(out, path, out_type, depth,   c, idx, subpath) {
+  if (depth > _JP_MAX_DEPTH) { _jp_too_deep = 1; return }
   _jp_i++; idx = 0; _jp_skip()
   if (substr(_jp_s, _jp_i, 1) == "]") { _jp_i++; return }
   while (_jp_i <= _jp_n) {
     subpath = _jp_path(path, idx "")
-    _jp_parse_value(out, subpath, out_type); _jp_skip()
+    _jp_parse_value(out, subpath, out_type, depth + 1); _jp_skip()
+    if (_jp_too_deep) return
     c = substr(_jp_s, _jp_i, 1)
     if (c == "]") { _jp_i++; return }
     if (c == ",") { _jp_i++; idx++; continue }
     break
   }
+  if (!_jp_parse_error) {
+    _jp_parse_error = 1
+    HAWK_JSON_ERROR = "unexpected end of input"
+  }
 }
-function _jp_parse_value(out, path, out_type,   c) {
+function _jp_parse_value(out, path, out_type, depth,   c) {
+  if (depth > _JP_MAX_DEPTH) { _jp_too_deep = 1; return }
   _jp_skip(); c = substr(_jp_s, _jp_i, 1)
-  if      (c == "{")  _jp_parse_object(out, path, out_type)
-  else if (c == "[")  _jp_parse_array(out, path, out_type)
+  if      (c == "{")  _jp_parse_object(out, path, out_type, depth)
+  else if (c == "[")  _jp_parse_array(out, path, out_type, depth)
   else if (c == "\"") { out[path] = _jp_parse_string(); out_type[path] = "string" }
   else                _jp_parse_literal(out, path, out_type)
 }
 function json_decode(s, out, out_type,   raw, n, i, recs, rest, sep1, sep2, k, v, t, first) {
   delete out
   delete out_type
+  HAWK_JSON_ERROR = ""
   # Zig/AWK 両方で最初に object 判定してトップレベル非 object を確実に弾く
   _jp_s = s; _jp_n = length(s); _jp_i = 1
   _jp_skip()
   if (_jp_i > _jp_n) return 0
   first = substr(_jp_s, _jp_i, 1)
   if (first != "{") return 0
+  _jp_too_deep = 0
+  _jp_parse_error = 0
+  _jp_parse_object(out, "", out_type, 1)
+  if (_jp_too_deep) return -1
+  if (_jp_parse_error) return 0
+  _jp_skip()
+  if (_jp_i <= _jp_n) {
+    HAWK_JSON_ERROR = "invalid JSON"
+    return 0
+  }
+  for (k in out) {
+    if (!(k in out_type)) return 0
+  }
   if (LIBS_LOADED["json"]) {
+    delete out
+    delete out_type
     raw = hawk_json_decode(s)
     if (raw == "" && hawk_json_error() != "") {
       HAWK_JSON_ERROR = hawk_json_error()
@@ -264,8 +314,26 @@ function json_decode(s, out, out_type,   raw, n, i, recs, rest, sep1, sep2, k, v
     }
     return 1
   }
-  # AWK フォールバック
-  _jp_parse_value(out, "", out_type)
+  return 1
+}
+
+function json_decode_value(s, out, out_type,   k, first) {
+  delete out
+  delete out_type
+  HAWK_JSON_ERROR = ""
+  _jp_s = s; _jp_n = length(s); _jp_i = 1; _jp_too_deep = 0; _jp_parse_error = 0
+  _jp_skip()
+  if (_jp_i > _jp_n) return 0
+  first = substr(_jp_s, _jp_i, 1)
+  _jp_root_kind = (first == "{") ? "object" : ((first == "[") ? "array" : "scalar")
+  _jp_parse_value(out, "", out_type, 1)
+  if (_jp_too_deep) return -1
+  if (_jp_parse_error) return 0
+  _jp_skip()
+  if (_jp_i <= _jp_n) return 0
+  for (k in out) {
+    if (!(k in out_type)) return 0
+  }
   return 1
 }
 
@@ -275,25 +343,50 @@ function encode(data) {
   return awk::json_encode(data)
 }
 
-function decode(s,    out, out_type, ok, msg) {
-  ok = awk::json_decode(s, out, out_type)
-  if (!ok) {
+function decode(s,    ok, out, out_type, msg) {
+  ok = awk::json_decode_value(s, out, out_type)
+  if (ok == -1) return awk::result_ng("JsonTooDeepError", "max nesting depth exceeded")
+  if (ok == 0) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
-    return awk::result_ng("JsonError", msg)
+    return awk::result_ng("JsonParseError", msg)
   }
   return awk::result_ok_from_map(out, out_type)
 }
 
-function decode_t(type, s,    out, out_type, ok, msg, k) {
+function decode_object(s,    ok, out, out_type, msg) {
   ok = awk::json_decode(s, out, out_type)
+  if (ok == -1) return awk::result_ng("JsonTooDeepError", "max nesting depth exceeded")
   if (!ok) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
-    return awk::result_ng("JsonError", msg)
+    return awk::result_ng("JsonParseError", msg)
   }
+  return awk::result_ok_from_map(out, out_type)
+}
+
+function decode_t(type, s,    ok, out, out_type, msg, k, has_leaf) {
+  ok = awk::json_decode_value(s, out, out_type)
+  if (ok == -1) return awk::result_ng("JsonTooDeepError", "max nesting depth exceeded")
+  if (ok == 0) {
+    msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
+    return awk::result_ng("JsonParseError", msg)
+  }
+  if (_is_container_type(type)) {
+    if (type == "Array" && awk::_jp_root_kind != "array")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected Array but got non-array root")
+    if ((type == "JsonObject" || type == "Map") && awk::_jp_root_kind != "object")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-object root")
+    if (type == "JsonScalar" && awk::_jp_root_kind != "scalar")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected JsonScalar but got non-scalar root")
+    return awk::result_ok_from_map(out, out_type)
+  }
+  has_leaf = 0
   for (k in out) {
+    has_leaf = 1
     if (!_validate_leaf(type, out[k], out_type[k]))
-      return awk::result_ng("JsonError", "type mismatch: expected " type " at " k)
+      return awk::result_ng("JsonTypeError", "type mismatch: expected " type " at " k)
   }
+  if (!has_leaf && type != "Any")
+    return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got empty container")
   return awk::result_ok_from_map(out, out_type)
 }
 
@@ -302,8 +395,13 @@ function _validate_leaf(t, v, vtype) {
   if (t == "Float") return vtype == "float" || vtype == "int"
   if (t == "Bool")  return vtype == "bool"
   if (t == "Str")   return vtype == "string"
+  if (t == "Null")  return vtype == "null"
   if (t == "Any")   return 1
   return 0
+}
+
+function _is_container_type(t) {
+  return t == "JsonValue" || t == "JsonObject" || t == "Array" || t == "Map" || t == "JsonScalar"
 }
 
 function dispatch(path, a1, a2, a3) {
@@ -311,7 +409,8 @@ function dispatch(path, a1, a2, a3) {
 }
 
 BEGIN {
-  _JSON_ROUTES["encode"]   = "json::encode";   _JSON_ARITY["encode"]   = 1
-  _JSON_ROUTES["decode"]   = "json::decode";   _JSON_ARITY["decode"]   = 1
-  _JSON_ROUTES["decode_t"] = "json::decode_t"; _JSON_ARITY["decode_t"] = 2
+  _JSON_ROUTES["encode"]        = "json::encode";        _JSON_ARITY["encode"]        = 1
+  _JSON_ROUTES["decode"]        = "json::decode";        _JSON_ARITY["decode"]        = 1
+  _JSON_ROUTES["decode_object"] = "json::decode_object"; _JSON_ARITY["decode_object"] = 1
+  _JSON_ROUTES["decode_t"]      = "json::decode_t";      _JSON_ARITY["decode_t"]      = 2
 }
