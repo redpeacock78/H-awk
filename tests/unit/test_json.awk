@@ -368,3 +368,43 @@ function test_json_decode_object_trailing_garbage(    res) {
   assert_true(!awk::result_ok(res), "json::dispatch decode_object trailing garbage is ng")
   assert_eq(awk::result_err_type(res), "JsonParseError", "decode_object trailing garbage err type")
 }
+
+function test_json_decode_value_unterminated_array_string(    out, out_type, ret) {
+  ret = json_decode_value("[\"unterminated]", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: unterminated array string returns 0")
+}
+
+function test_json_decode_value_unterminated_object_string(    out, out_type, ret) {
+  ret = json_decode_value("{\"a\":\"unterminated}", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: unterminated object string returns 0")
+}
+
+function test_json_decode_t_unterminated_array_string(    res) {
+  res = json::dispatch("decode_t", "Str", "[\"unterminated]")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode_t unterminated array string err type")
+}
+
+function test_json_decode_t_unterminated_object_string(    res) {
+  res = json::dispatch("decode_t", "Str", "{\"a\":\"unterminated}")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode_t unterminated object string err type")
+}
+
+function test_json_decode_t_int_rejects_empty_array(    res) {
+  res = json::dispatch("decode_t", "Int", "[]")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t Int rejects empty array")
+}
+
+function test_json_decode_t_int_rejects_empty_object(    res) {
+  res = json::dispatch("decode_t", "Int", "{}")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t Int rejects empty object")
+}
+
+function test_json_decode_t_jsonvalue_accepts_scalar(    res) {
+  res = json::dispatch("decode_t", "JsonValue", "42")
+  assert_true(awk::result_ok(res), "decode_t JsonValue accepts scalar")
+}
+
+function test_json_decode_t_array_accepts_array(    res) {
+  res = json::dispatch("decode_t", "Array", "[1,2,3]")
+  assert_true(awk::result_ok(res), "decode_t Array accepts array")
+}

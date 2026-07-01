@@ -187,7 +187,9 @@ function _jp_parse_string(   buf, c, nx) {
       buf = buf c; _jp_i++
     }
   }
-  return _json_unescape(buf)
+  _jp_parse_error = 1
+  HAWK_JSON_ERROR = "unterminated string"
+  return ""
 }
 function _jp_parse_literal(out, path, out_type,   buf, c) {
   buf = ""
@@ -254,8 +256,10 @@ function json_decode(s, out, out_type,   raw, n, i, recs, rest, sep1, sep2, k, v
   first = substr(_jp_s, _jp_i, 1)
   if (first != "{") return 0
   _jp_too_deep = 0
+  _jp_parse_error = 0
   _jp_parse_object(out, "", out_type, 1)
   if (_jp_too_deep) return -1
+  if (_jp_parse_error) return 0
   _jp_skip()
   if (_jp_i <= _jp_n) {
     HAWK_JSON_ERROR = "invalid JSON"
@@ -293,11 +297,12 @@ function json_decode_value(s, out, out_type,   k) {
   delete out
   delete out_type
   HAWK_JSON_ERROR = ""
-  _jp_s = s; _jp_n = length(s); _jp_i = 1; _jp_too_deep = 0
+  _jp_s = s; _jp_n = length(s); _jp_i = 1; _jp_too_deep = 0; _jp_parse_error = 0
   _jp_skip()
   if (_jp_i > _jp_n) return 0
   _jp_parse_value(out, "", out_type, 1)
   if (_jp_too_deep) return -1
+  if (_jp_parse_error) return 0
   _jp_skip()
   if (_jp_i <= _jp_n) return 0
   for (k in out) {
@@ -332,17 +337,23 @@ function decode_object(s,    ok, out, out_type, msg) {
   return awk::result_ok_from_map(out, out_type)
 }
 
-function decode_t(type, s,    ok, out, out_type, msg, k) {
+function decode_t(type, s,    ok, out, out_type, msg, k, has_leaf) {
   ok = awk::json_decode_value(s, out, out_type)
   if (ok == -1) return awk::result_ng("JsonTooDeepError", "max nesting depth exceeded")
   if (ok == 0) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
     return awk::result_ng("JsonParseError", msg)
   }
+  if (_is_container_type(type))
+    return awk::result_ok_from_map(out, out_type)
+  has_leaf = 0
   for (k in out) {
+    has_leaf = 1
     if (!_validate_leaf(type, out[k], out_type[k]))
       return awk::result_ng("JsonTypeError", "type mismatch: expected " type " at " k)
   }
+  if (!has_leaf && type != "Any")
+    return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got empty container")
   return awk::result_ok_from_map(out, out_type)
 }
 
@@ -351,8 +362,13 @@ function _validate_leaf(t, v, vtype) {
   if (t == "Float") return vtype == "float" || vtype == "int"
   if (t == "Bool")  return vtype == "bool"
   if (t == "Str")   return vtype == "string"
+  if (t == "Null")  return vtype == "null"
   if (t == "Any")   return 1
   return 0
+}
+
+function _is_container_type(t) {
+  return t == "JsonValue" || t == "JsonObject" || t == "Array" || t == "Map" || t == "JsonScalar"
 }
 
 function dispatch(path, a1, a2, a3) {
