@@ -158,6 +158,7 @@ BEGIN {
   test_ctx_req_json_value()
   test_ctx_req_json_object()
   test_ctx_req_json_t()
+  test_ctx_req_json_t_container_root_shape()
   test_ctx_req_json_too_deep()
   test_ctx_req_json_object_too_deep()
   test_ctx_req_json_object_trailing_garbage()

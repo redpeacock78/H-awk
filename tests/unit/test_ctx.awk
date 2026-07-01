@@ -198,6 +198,31 @@ function test_ctx_req_json_t(    req, res, r, out, out_type) {
   assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t type mismatch error type")
 }
 
+function test_ctx_req_json_t_container_root_shape(    req, res, r) {
+  delete req
+  delete res
+  req["body"] = "[1]"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Array")
+  assert_true(result_ok(r), "ctx::req_json_t Array accepts array root")
+
+  delete req
+  delete res
+  req["body"] = "{}"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Array")
+  assert_true(!result_ok(r), "ctx::req_json_t Array rejects object root")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t Array object root error type")
+
+  delete req
+  delete res
+  req["body"] = "[]"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Int")
+  assert_true(!result_ok(r), "ctx::req_json_t Int rejects empty array root")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t Int empty array error type")
+}
+
 function test_ctx_req_json_too_deep(    req, res, r, s, i) {
   s = "1"
   for (i = 0; i < 40; i++) s = "[" s "]"
