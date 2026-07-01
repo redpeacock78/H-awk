@@ -22,6 +22,9 @@ BEGIN {
 
     # HtmlPart alias: union of all HTML-related brand types
     _DS_TYPE_ALIAS["HtmlPart"] = "HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr"
+    _DS_TYPE_ALIAS["JsonScalar"] = "Str|Int|Float|Bool|Null"
+    _DS_TYPE_ALIAS["JsonValue"]  = "JsonScalar|Array|JsonObject"
+    _DS_TYPE_ALIAS["JsonObject"] = "Map"
 
     # env.*
     _DS_SIG_RET["env.get"]        = "Str"
@@ -61,8 +64,15 @@ BEGIN {
     _DS_SIG_RET["ctx.req.body"]      = "Result<Untrusted<Str>, ParseError>"
     _DS_SIG_ARITY["ctx.req.body"]    = 0
 
-    _DS_SIG_RET["ctx.req.json"]      = "Result<Untrusted<Map>, ParseError>"
+    _DS_SIG_RET["ctx.req.json"]      = "Result<Untrusted<JsonValue>, JsonParseError|JsonTooDeepError>"
     _DS_SIG_ARITY["ctx.req.json"]    = 0
+
+    _DS_SIG_RET["ctx.req.json_object"]   = "Result<Untrusted<JsonObject>, JsonParseError|JsonTooDeepError>"
+    _DS_SIG_ARITY["ctx.req.json_object"] = 0
+
+    _DS_SIG_RET["ctx.req.json_t"]        = "Result<T, JsonParseError|JsonTypeError|JsonTooDeepError>"
+    _DS_SIG_ARG["ctx.req.json_t", 1]     = "Str"
+    _DS_SIG_ARITY["ctx.req.json_t"]      = 1
 
     # ctx.res.*
     _DS_SIG_RET["ctx.res.json"]      = "Response"
@@ -213,12 +223,16 @@ BEGIN {
     _DS_SIG_ARG["json.encode", 1]     = "Any"
     _DS_SIG_ARITY["json.encode"]      = 1
 
-    _DS_SIG_RET["json.decode"]        = "Result<Any, JsonError>"
+    _DS_SIG_RET["json.decode"]        = "Result<JsonValue, JsonParseError|JsonTooDeepError>"
     _DS_SIG_ARG["json.decode", 1]     = "Str"
     _DS_SIG_ARITY["json.decode"]      = 1
 
+    _DS_SIG_RET["json.decode_object"]     = "Result<JsonObject, JsonParseError|JsonTooDeepError>"
+    _DS_SIG_ARG["json.decode_object", 1]  = "Str"
+    _DS_SIG_ARITY["json.decode_object"]   = 1
+
     # decode_t: arg 1 は desugar が前置する型名文字列、arg 2 がユーザーの渡す入力文字列
-    _DS_SIG_RET["json.decode_t"]      = "Result<T, JsonError>"
+    _DS_SIG_RET["json.decode_t"]      = "Result<T, JsonParseError|JsonTypeError|JsonTooDeepError>"
     _DS_SIG_ARG["json.decode_t", 1]   = "Str"
     _DS_SIG_ARG["json.decode_t", 2]   = "Str"
     _DS_SIG_ARITY["json.decode_t"]    = 2
