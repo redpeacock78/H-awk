@@ -277,8 +277,3 @@ function update_tsv(path, key, val, update, update_val,    line, header, ncols, 
   _tsv_unlock(path)
   return count
 }
-
-function _shellquote(s) {
-  gsub(/'/, "'\\''", s)
-  return "'" s "'"
-}

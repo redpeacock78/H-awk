@@ -21,3 +21,36 @@ function test_util_log_warn() {
   log_warn("test warn message")
   assert_true(1, "log_warn: smoke test (output on stderr above)")
 }
+
+function test_util_shellquote_plain() {
+  assert_eq(_shellquote("hello"),      "'hello'",      "util: shellquote plain")
+  assert_eq(_shellquote(""),           "''",           "util: shellquote empty")
+  assert_eq(_shellquote("with space"), "'with space'", "util: shellquote space")
+}
+
+function test_util_shellquote_single_quote() {
+  assert_eq(_shellquote("a'b"),   "'a'\\''b'",   "util: shellquote single quote")
+  assert_eq(_shellquote("'"),     "''\\'''",     "util: shellquote only quote")
+  assert_eq(_shellquote("a''b"),  "'a'\\'''\\''b'", "util: shellquote consecutive quotes")
+}
+
+function test_util_shellquote_shell_meta() {
+  assert_eq(_shellquote("$(rm -rf /)"), "'$(rm -rf /)'", "util: shellquote command substitution")
+  assert_eq(_shellquote("a;b|c&d"),     "'a;b|c&d'",     "util: shellquote metachars")
+  assert_eq(_shellquote("a`b`c"),       "'a`b`c'",       "util: shellquote backtick")
+  assert_eq(_shellquote("$HOME"),       "'$HOME'",       "util: shellquote variable")
+}
+
+function test_util_shellquote_whitespace_and_backslash() {
+  assert_eq(_shellquote("a\nb"), "'a\nb'", "util: shellquote newline")
+  assert_eq(_shellquote("a\tb"), "'a\tb'", "util: shellquote tab")
+  assert_eq(_shellquote("a\\b"), "'a\\b'", "util: shellquote backslash")
+}
+
+function test_util_shellquote_glob_and_expansion() {
+  assert_eq(_shellquote("*.txt"),   "'*.txt'",   "util: shellquote glob star")
+  assert_eq(_shellquote("a?b"),     "'a?b'",     "util: shellquote glob question")
+  assert_eq(_shellquote("[abc]"),   "'[abc]'",   "util: shellquote glob bracket")
+  assert_eq(_shellquote("~/x"),     "'~/x'",     "util: shellquote tilde")
+  assert_eq(_shellquote("{a,b}"),   "'{a,b}'",   "util: shellquote brace")
+}
