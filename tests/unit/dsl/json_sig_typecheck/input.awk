@@ -1,3 +1,3 @@
 function handler() {
-  let r: Result<Int, JsonError> = json.decode<Str>(s)
+  let r: Result<Int, JsonParseError> = json.decode<Str>(s)
 }
