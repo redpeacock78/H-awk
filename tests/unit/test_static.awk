@@ -26,11 +26,13 @@ function test_static_read(   tmpdir, content) {
   system("rm -rf " tmpdir)
 }
 
-function test_static_serve_shell_metachars(   pubdir, fname, fpath, marker, req, res, ok) {
+function test_static_serve_shell_metachars(   pubdir, fname, fpath, marker, req, res, ok, _orig_tmpdir, _tmpdir_was_set) {
   pubdir = "public"
   system("mkdir -p " pubdir)
 
   # 副作用検出用マーカー。事前に消しておく。
+  _orig_tmpdir = ENVIRON["TMPDIR"]
+  _tmpdir_was_set = ("TMPDIR" in ENVIRON)
   ENVIRON["TMPDIR"] = "/tmp/"
   marker = ENVIRON["TMPDIR"] "hawk_pwn_marker_" PROCINFO["pid"]
   system("rm -f " marker)
@@ -61,4 +63,9 @@ function test_static_serve_shell_metachars(   pubdir, fname, fpath, marker, req,
   system("rm -f " marker)
   # ファイル削除もシェルを介さない安全な経路を通す（本体 _shellquote 経由）。
   system("rm -f -- " _shellquote(fpath))
+
+  if (_tmpdir_was_set)
+    ENVIRON["TMPDIR"] = _orig_tmpdir
+  else
+    delete ENVIRON["TMPDIR"]
 }
