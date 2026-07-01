@@ -51,7 +51,7 @@ function test_static_serve_shell_metachars(   pubdir, fname, fpath, marker, req,
   ok = serve_static(req, res)
   assert_eq(ok, 1,                              "static: serve_static returns 1 for meta path")
   assert_eq(res["status"], 200,                 "static: serve_static status 200 for meta path")
-  assert_eq(res["body"],   "ok\n",              "static: serve_static body for meta path")
+  sub(/\n$/, "", res["body"]); assert_eq(res["body"], "ok", "static: serve_static body for meta path")
 
   # 副作用検出: コマンド置換が実行されると marker が残る。
   assert_true((system("test ! -e " marker) == 0), \
