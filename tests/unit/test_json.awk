@@ -449,6 +449,16 @@ function test_json_decode_rejects_invalid_unicode_escape(    res) {
   assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects invalid unicode escape")
 }
 
+function test_json_decode_rejects_missing_colon_inside_nested_object(    res) {
+  res = json::dispatch("decode", "[{\"b\"]")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects missing colon inside nested object")
+}
+
+function test_json_decode_rejects_array_closed_by_parent_brace(    res) {
+  res = json::dispatch("decode", "{\"a\":[1}")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects array closed by parent brace")
+}
+
 function test_json_decode_value_rejects_leading_zero(    out, out_type, ret) {
   ret = json_decode_value("01", out, out_type)
   assert_eq(ret, 0, "json_decode_value: leading zero number rejected")

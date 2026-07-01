@@ -89,6 +89,8 @@ BEGIN {
   test_json_decode_t_jsonscalar_rejects_array_root()
   test_json_decode_rejects_invalid_escape()
   test_json_decode_rejects_invalid_unicode_escape()
+  test_json_decode_rejects_missing_colon_inside_nested_object()
+  test_json_decode_rejects_array_closed_by_parent_brace()
   test_json_decode_value_rejects_leading_zero()
 
   test_tsv_append_and_read()

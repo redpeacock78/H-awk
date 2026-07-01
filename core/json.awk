@@ -235,7 +235,7 @@ function _jp_parse_object(out, path, out_type, depth,   c, key, subpath) {
     if (c == ",") { _jp_i++; continue }
     break
   }
-  if (_jp_i > _jp_n) {
+  if (!_jp_parse_error) {
     _jp_parse_error = 1
     HAWK_JSON_ERROR = "unexpected end of input"
   }
@@ -253,7 +253,7 @@ function _jp_parse_array(out, path, out_type, depth,   c, idx, subpath) {
     if (c == ",") { _jp_i++; idx++; continue }
     break
   }
-  if (_jp_i > _jp_n) {
+  if (!_jp_parse_error) {
     _jp_parse_error = 1
     HAWK_JSON_ERROR = "unexpected end of input"
   }
