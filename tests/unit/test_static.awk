@@ -25,3 +25,40 @@ function test_static_read(   tmpdir, content) {
 
   system("rm -rf " tmpdir)
 }
+
+function test_static_serve_shell_metachars(   pubdir, fname, fpath, marker, req, res, ok) {
+  pubdir = "public"
+  system("mkdir -p " pubdir)
+
+  # 副作用検出用マーカー。事前に消しておく。
+  ENVIRON["TMPDIR"] = "/tmp/"
+  marker = ENVIRON["TMPDIR"] "hawk_pwn_marker_" PROCINFO["pid"]
+  system("rm -f " marker)
+
+  # スペース、シングルクォート、$、バッククォート、波括弧、glob 文字に加え、
+  # 実行されれば marker を作るコマンド置換を埋め込む。
+  fname = "sq test '$(touch ${TMPDIR}hawk_pwn_marker_" PROCINFO["pid"] ")`x`{a,b}*_" PROCINFO["pid"] ".txt"
+  fpath = pubdir "/" fname
+
+  # fixture 生成はシェルを介さず AWK のリダイレクトで行う。
+  print "ok" > fpath
+  close(fpath)
+
+  delete req; delete res
+  req["method"] = "GET"
+  req["path"]   = "/" fname
+
+  ok = serve_static(req, res)
+  assert_eq(ok, 1,                              "static: serve_static returns 1 for meta path")
+  assert_eq(res["status"], 200,                 "static: serve_static status 200 for meta path")
+  assert_eq(res["body"],   "ok\n",              "static: serve_static body for meta path")
+
+  # 副作用検出: コマンド置換が実行されると marker が残る。
+  assert_true((system("test ! -e " marker) == 0), \
+              "static: no command substitution side effect")
+
+  # 後始末（assertion で早期 fatal しても marker 消去は次回実行で救う）。
+  system("rm -f " marker)
+  # ファイル削除もシェルを介さない安全な経路を通す（本体 _shellquote 経由）。
+  system("rm -f -- " _shellquote(fpath))
+}

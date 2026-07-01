@@ -11,6 +11,7 @@
 #   log_error(msg)         -- stderr に "[ERROR] ..." 出力
 #   now_ms()               -- 起動時間からのミリ秒 (リクエスト計測用)
 #   trim(s)                -- 前後空白除去
+#   _shellquote(s)         -- POSIX sh 用にシングルクォート囲みでエスケープ
 #
 # 副作用: BEGIN で UTIL_LOWER / UTIL_UPPER テーブルを初期化
 
@@ -99,6 +100,11 @@ function trim(s) {
   return s
 }
 
+function _shellquote(s) {
+  gsub(/'/, "'\\''", s)
+  return "'" s "'"
+}
+
 function _on_impl(methods, paths, handler,    ms, ps, i, j) {
   # Handle methods (string or array) - uses gawk built-in isarray()
   if (isarray(methods)) {
@@ -127,4 +133,3 @@ function _all_impl(paths, handler,    std_ms, ps, i, j) {
   }
   for (i in std_ms) for (j in ps) _route_add(std_ms[i], ps[j], handler)
 }
-

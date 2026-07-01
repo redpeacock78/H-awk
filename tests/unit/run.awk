@@ -13,6 +13,11 @@ BEGIN {
   test_util_escape_html()
   test_util_to_lower()
   test_util_log_warn()
+  test_util_shellquote_plain()
+  test_util_shellquote_single_quote()
+  test_util_shellquote_shell_meta()
+  test_util_shellquote_whitespace_and_backslash()
+  test_util_shellquote_glob_and_expansion()
 
   test_json_encode_flat()
   test_json_encode_type_suffix()
@@ -64,6 +69,7 @@ BEGIN {
   test_static_mime()
   test_static_safe_path()
   test_static_read()
+  test_static_serve_shell_metachars()
 
   test_request_parse_get()
   test_request_parse_form()
