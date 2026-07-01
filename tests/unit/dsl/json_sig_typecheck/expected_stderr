@@ -1,1 +1,1 @@
-type mismatch: cannot assign Result<Str, JsonError> to Result<Int, JsonError>
+type mismatch: cannot assign Result<Str, JsonParseError|JsonTypeError|JsonTooDeepError> to Result<Int, JsonParseError>
