@@ -172,13 +172,26 @@ function _jp_skip(   c) {
 function _jp_path(parent, child) {
   return (parent == "") ? child : parent "." child
 }
-function _jp_parse_string(   buf, c, nx) {
+function _jp_parse_string(   buf, c, nx, hex) {
   _jp_i++
   buf = ""
   while (_jp_i <= _jp_n) {
     c = substr(_jp_s, _jp_i, 1)
     if (c == "\\") {
       nx = substr(_jp_s, _jp_i + 1, 1)
+      if (nx !~ /^[\\\/"bfnrtu]$/) {
+        _jp_parse_error = 1
+        HAWK_JSON_ERROR = "invalid escape sequence"
+        return ""
+      }
+      if (nx == "u") {
+        hex = substr(_jp_s, _jp_i + 2, 4)
+        if (length(hex) != 4 || hex !~ /^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$/) {
+          _jp_parse_error = 1
+          HAWK_JSON_ERROR = "invalid escape sequence"
+          return ""
+        }
+      }
       buf = buf c nx
       _jp_i += 2
     } else if (c == "\"") {
@@ -201,9 +214,9 @@ function _jp_parse_literal(out, path, out_type,   buf, c) {
   out[path] = buf
   if (buf == "true" || buf == "false") out_type[path] = "bool"
   else if (buf == "null") out_type[path] = "null"
-  else if (buf ~ /^-?[0-9]+$/) out_type[path] = "int"
-  else if (buf ~ /^-?([0-9]+(\.[0-9]+)?|[0-9]*\.[0-9]+)[eE][+-]?[0-9]+$/) out_type[path] = "float"
-  else if (buf ~ /^-?[0-9]+(\.[0-9]+)?$/) out_type[path] = "float"
+  else if (buf ~ /^-?(0|[1-9][0-9]*)$/) out_type[path] = "int"
+  else if (buf ~ /^-?(0|[1-9][0-9]*)(\.[0-9]+)?[eE][+-]?[0-9]+$/) out_type[path] = "float"
+  else if (buf ~ /^-?(0|[1-9][0-9]*)\.[0-9]+$/) out_type[path] = "float"
 }
 function _jp_parse_object(out, path, out_type, depth,   c, key, subpath) {
   if (depth > _JP_MAX_DEPTH) { _jp_too_deep = 1; return }
@@ -222,6 +235,10 @@ function _jp_parse_object(out, path, out_type, depth,   c, key, subpath) {
     if (c == ",") { _jp_i++; continue }
     break
   }
+  if (_jp_i > _jp_n) {
+    _jp_parse_error = 1
+    HAWK_JSON_ERROR = "unexpected end of input"
+  }
 }
 function _jp_parse_array(out, path, out_type, depth,   c, idx, subpath) {
   if (depth > _JP_MAX_DEPTH) { _jp_too_deep = 1; return }
@@ -235,6 +252,10 @@ function _jp_parse_array(out, path, out_type, depth,   c, idx, subpath) {
     if (c == "]") { _jp_i++; return }
     if (c == ",") { _jp_i++; idx++; continue }
     break
+  }
+  if (_jp_i > _jp_n) {
+    _jp_parse_error = 1
+    HAWK_JSON_ERROR = "unexpected end of input"
   }
 }
 function _jp_parse_value(out, path, out_type, depth,   c) {
@@ -265,6 +286,9 @@ function json_decode(s, out, out_type,   raw, n, i, recs, rest, sep1, sep2, k, v
     HAWK_JSON_ERROR = "invalid JSON"
     return 0
   }
+  for (k in out) {
+    if (!(k in out_type)) return 0
+  }
   if (LIBS_LOADED["json"]) {
     delete out
     delete out_type
@@ -293,13 +317,15 @@ function json_decode(s, out, out_type,   raw, n, i, recs, rest, sep1, sep2, k, v
   return 1
 }
 
-function json_decode_value(s, out, out_type,   k) {
+function json_decode_value(s, out, out_type,   k, first) {
   delete out
   delete out_type
   HAWK_JSON_ERROR = ""
   _jp_s = s; _jp_n = length(s); _jp_i = 1; _jp_too_deep = 0; _jp_parse_error = 0
   _jp_skip()
   if (_jp_i > _jp_n) return 0
+  first = substr(_jp_s, _jp_i, 1)
+  _jp_root_kind = (first == "{") ? "object" : ((first == "[") ? "array" : "scalar")
   _jp_parse_value(out, "", out_type, 1)
   if (_jp_too_deep) return -1
   if (_jp_parse_error) return 0
@@ -344,8 +370,15 @@ function decode_t(type, s,    ok, out, out_type, msg, k, has_leaf) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
     return awk::result_ng("JsonParseError", msg)
   }
-  if (_is_container_type(type))
+  if (_is_container_type(type)) {
+    if (type == "Array" && awk::_jp_root_kind != "array")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected Array but got non-array root")
+    if ((type == "JsonObject" || type == "Map") && awk::_jp_root_kind != "object")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-object root")
+    if (type == "JsonScalar" && awk::_jp_root_kind != "scalar")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected JsonScalar but got non-scalar root")
     return awk::result_ok_from_map(out, out_type)
+  }
   has_leaf = 0
   for (k in out) {
     has_leaf = 1

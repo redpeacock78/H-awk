@@ -300,6 +300,16 @@ function test_json_decode_value_nested_invalid_array_literal(    out, out_type, 
   assert_eq(ret, 0, "json_decode_value: nested invalid array literal returns 0")
 }
 
+function test_json_decode_value_truncated_object(    out, out_type, ret) {
+  ret = json_decode_value("{\"a\":1,", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: truncated object returns 0")
+}
+
+function test_json_decode_value_truncated_array(    out, out_type, ret) {
+  ret = json_decode_value("[1", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: truncated array returns 0")
+}
+
 function test_json_decode_object_dispatch_ok(    res, out, out_type) {
   res = json::dispatch("decode_object", "{\"k\":\"v\"}")
   assert_true(awk::result_ok(res), "json::dispatch decode_object ok")
@@ -311,6 +321,11 @@ function test_json_decode_object_dispatch_ng(    res) {
   res = json::dispatch("decode_object", "not json")
   assert_true(!awk::result_ok(res), "json::dispatch decode_object ng")
   assert_eq(awk::result_err_type(res), "JsonParseError", "decode_object err type")
+}
+
+function test_json_decode_object_invalid_nested_literal(    res) {
+  res = json::dispatch("decode_object", "{\"a\":tru}")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode_object rejects invalid nested literal")
 }
 
 function test_json_decode_too_deep(    res, s, i) {
@@ -407,4 +422,34 @@ function test_json_decode_t_jsonvalue_accepts_scalar(    res) {
 function test_json_decode_t_array_accepts_array(    res) {
   res = json::dispatch("decode_t", "Array", "[1,2,3]")
   assert_true(awk::result_ok(res), "decode_t Array accepts array")
+}
+
+function test_json_decode_t_array_rejects_scalar_root(    res) {
+  res = json::dispatch("decode_t", "Array", "42")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t Array rejects scalar root")
+}
+
+function test_json_decode_t_jsonobject_rejects_array_root(    res) {
+  res = json::dispatch("decode_t", "JsonObject", "[1]")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t JsonObject rejects array root")
+}
+
+function test_json_decode_t_jsonscalar_rejects_array_root(    res) {
+  res = json::dispatch("decode_t", "JsonScalar", "[1]")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t JsonScalar rejects array root")
+}
+
+function test_json_decode_rejects_invalid_escape(    res) {
+  res = json::dispatch("decode", "\"\\q\"")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects invalid escape")
+}
+
+function test_json_decode_rejects_invalid_unicode_escape(    res) {
+  res = json::dispatch("decode", "[\"\\u12xx\"]")
+  assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects invalid unicode escape")
+}
+
+function test_json_decode_value_rejects_leading_zero(    out, out_type, ret) {
+  ret = json_decode_value("01", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: leading zero number rejected")
 }
