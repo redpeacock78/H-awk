@@ -290,6 +290,16 @@ function test_json_decode_value_invalid_scalar(    res) {
   assert_eq(awk::result_err_type(res), "JsonParseError", "invalid top-level scalar err type")
 }
 
+function test_json_decode_value_nested_invalid_object_literal(    out, out_type, ret) {
+  ret = json_decode_value("{\"a\":tru}", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: nested invalid object literal returns 0")
+}
+
+function test_json_decode_value_nested_invalid_array_literal(    out, out_type, ret) {
+  ret = json_decode_value("[nul]", out, out_type)
+  assert_eq(ret, 0, "json_decode_value: nested invalid array literal returns 0")
+}
+
 function test_json_decode_object_dispatch_ok(    res, out, out_type) {
   res = json::dispatch("decode_object", "{\"k\":\"v\"}")
   assert_true(awk::result_ok(res), "json::dispatch decode_object ok")

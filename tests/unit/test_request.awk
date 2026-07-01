@@ -29,6 +29,15 @@ function test_request_parse_json(   raw, req) {
   assert_eq(req["json:n"],   "42",  "req: json num")
 }
 
+function test_request_parse_json_too_deep_does_not_populate(   body, req, s, i) {
+  s = "1"
+  for (i = 0; i < 40; i++) s = "[" s "]"
+  body = "{\"ok\":1,\"deep\":" s "}"
+  delete req
+  _request_parse_json_body(body, req)
+  assert_true(!("json:ok" in req), "req: too-deep json does not populate parsed keys")
+}
+
 function test_request_bad_line(   raw, req, ok) {
   raw = "GARBAGE\r\n\r\n"
   delete req

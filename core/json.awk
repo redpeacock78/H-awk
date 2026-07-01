@@ -289,7 +289,7 @@ function json_decode(s, out, out_type,   raw, n, i, recs, rest, sep1, sep2, k, v
   return 1
 }
 
-function json_decode_value(s, out, out_type) {
+function json_decode_value(s, out, out_type,   k) {
   delete out
   delete out_type
   HAWK_JSON_ERROR = ""
@@ -300,7 +300,9 @@ function json_decode_value(s, out, out_type) {
   if (_jp_too_deep) return -1
   _jp_skip()
   if (_jp_i <= _jp_n) return 0
-  if (("" in out) && !("" in out_type)) return 0
+  for (k in out) {
+    if (!(k in out_type)) return 0
+  }
   return 1
 }
 
