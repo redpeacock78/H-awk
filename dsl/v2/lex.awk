@@ -32,6 +32,7 @@ function v2_lex(src,    line, lineno, in_when, in_block, tmp, n_open, n_close) {
     lineno = ++V2_NLINES
     if (in_when > 0 || in_block > 0 || v2_is_dsl(line)) {
       v2_tok_line(line, lineno)
+      V2_LINE_TEXT[lineno] = line   # 生行テキスト（RAWLINE 用）
       # when...end ブロック追跡
       if (line ~ /(^|[^[:alnum:]_])when([^[:alnum:]_]|$)/) in_when++
       if (line ~ /(^|[^[:alnum:]_])end([^[:alnum:]_]|$)/)  in_when--

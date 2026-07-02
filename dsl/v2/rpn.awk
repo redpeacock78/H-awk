@@ -393,8 +393,32 @@ function v2_rpn_return(i,    line, j) {
   return j + 1
 }
 
+# 位置 i の行が式文として解釈不能かどうかを判定
+# (v2_shunt_expr が扱えない LBRACE/LBRACK/RBRACK/COLON/ARROW/INTERP_* を含む)
+function v2_is_rawline(i,    line, j, k) {
+  line = TOK[i,"line"]
+  for (j = i; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
+    k = TOK[j,"kind"]
+    if (k == "LBRACE"     || k == "LBRACK"      || k == "RBRACK" ||
+        k == "COLON"      || k == "ARROW"        ||
+        k == "INTERP_OPEN" || k == "INTERP_CLOSE") return 1
+  }
+  return 0
+}
+
 # その他の文（裸の式文・代入・未知トークン）
-function v2_rpn_stmt(i,    j) {
+function v2_rpn_stmt(i,    j, line) {
+  line = TOK[i,"line"]
+
+  if (v2_is_rawline(i)) {
+    # 解釈不能トークン列を RAWLINE マーカーで素通し
+    v2_emit_rpn("MARKER",  "RAWLINE",             line, "")
+    v2_emit_rpn("OPERAND", V2_LINE_TEXT[line], line, "")
+    j = i
+    while (j <= TOK["n"] && TOK[j,"line"] == line) j++
+    return j
+  }
+
   j = v2_find_expr_end(i)
   if (j >= i) {
     v2_shunt_expr(i, j)
