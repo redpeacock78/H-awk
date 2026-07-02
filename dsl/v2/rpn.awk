@@ -63,11 +63,11 @@ function v2_os_fn_top(    i) {
 
 # ─── 補助 ─────────────────────────────────────────────────────────
 
-# "(" または FN: 境界まで OP を出力スタックへ送る（境界は残す）
+# "(" / "[" または FN: 境界まで OP を出力スタックへ送る（境界は残す）
 function v2_pop_until_lp(line,    t) {
   while (v2_os_sp > 0) {
     t = v2_os_top()
-    if (t == "(" || t ~ /^FN:/) break
+    if (t == "(" || t == "[" || t ~ /^FN:/) break
     v2_emit_rpn("OP", v2_os_pop(), line, "")
   }
 }
@@ -86,6 +86,23 @@ function v2_pop_lp_or_call(line,    t, fname, saved_sp) {
     fname    = substr(v2_os_pop(), 4)   # "FN:" の 3 文字を除く
     v2_emit_rpn("CALL", fname, line, V2_ARITY[saved_sp])
     delete V2_ARITY[saved_sp]
+  } else {
+    v2_diag(line, 1, "unmatched ')'")
+  }
+}
+
+# "[" を捨て、添字アクセスを二項演算子 INDEX として出力する
+function v2_pop_bracket(line,    t) {
+  if (v2_os_sp == 0) {
+    v2_diag(line, 1, "unmatched ']'")
+    return
+  }
+  t = v2_os_top()
+  if (t == "[") {
+    v2_os_pop()
+    v2_emit_rpn("OP", "INDEX", line, "")
+  } else {
+    v2_diag(line, 1, "unmatched ']'")
   }
 }
 
@@ -96,7 +113,7 @@ function v2_pop_ge(op, line,    t, tp, op_prec, op_assoc) {
   if (op_prec == "") return   # 未知の演算子
   while (v2_os_sp > 0) {
     t = v2_os_top()
-    if (t == "(" || t ~ /^FN:/) break
+    if (t == "(" || t == "[" || t ~ /^FN:/) break
     tp = V2_OP_PREC[t]
     if (tp == "") break
     if (tp > op_prec || (tp == op_prec && op_assoc == "L"))
@@ -112,6 +129,8 @@ function v2_os_flush(line,    t) {
     t = v2_os_pop()
     if (t == "(" || t ~ /^FN:/)
       v2_diag(line, 1, "unmatched '('")
+    else if (t == "[")
+      v2_diag(line, 1, "unmatched '['")
     else
       v2_emit_rpn("OP", t, line, "")
   }
@@ -119,19 +138,69 @@ function v2_os_flush(line,    t) {
 
 # ─── 操車場法コア ────────────────────────────────────────────────
 
+# 位置 k の IDENT から始まる "a.b.c" 形のドット連結 callee 名を走査する。
+# 戻り値: チェーンの直後（DOT でも IDENT でもない最初のトークン）の位置。
+# 副作用: V2_CHAIN_NAME にチェーン全体を "." 結合した文字列を格納する。
+function v2_scan_dotted_chain(k,    idx) {
+  idx = k
+  V2_CHAIN_NAME = TOK[idx,"text"]
+  idx++
+  while (TOK[idx,"kind"] == "DOT" && TOK[idx+1,"kind"] == "IDENT") {
+    V2_CHAIN_NAME = V2_CHAIN_NAME "." TOK[idx+1,"text"]
+    idx += 2
+  }
+  return idx
+}
+
+# 位置 k（generic の "<" の位置）から単純な型引数 <TYPE> を走査する。
+# 一致すれば ">" の次の位置を返し V2_GENERIC_ARG に型名を格納する。
+# 一致しなければ k をそのまま返し V2_GENERIC_ARG を空にする（generic ではない）。
+function v2_scan_generic_arg(k,    idx) {
+  V2_GENERIC_ARG = ""
+  idx = k + 1
+  if (TOK[idx,"kind"] != "TYPE" && TOK[idx,"kind"] != "IDENT") return k
+  if (!(TOK[idx+1,"kind"] == "OP" && TOK[idx+1,"text"] == ">")) return k
+  V2_GENERIC_ARG = TOK[idx,"text"]
+  return idx + 2
+}
+
 # トークン区間 [i, j] を操車場法で RPN に変換する
-function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary_pos, text) {
+function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary_pos, text, \
+                        chain_end, call_open, fname, has_generic) {
   for (k = i; k <= j; k++) {
     t    = TOK[k,"kind"]
     line = TOK[k,"line"]
 
-    # 関数呼び出し: IDENT の直後が LP
-    if (t == "IDENT" && TOK[k+1,"kind"] == "LP") {
-      v2_os_push("FN:" TOK[k,"text"])
-      # 空引数 g() か判定: LP の次が RP なら arity=0、そうでなければ 1
-      V2_ARITY[v2_os_sp] = (TOK[k+2,"kind"] == "RP") ? 0 : 1
-      k++   # LP をスキップ
-      continue
+    # 呼び出し可能な callee の走査: 単純 IDENT、dotted (a.b.c)、
+    # generic (f<T>) のいずれも FN: を push する前に callee 全体を収集する。
+    # dotted の組込みシグネチャは "ctx.res.text" のようにフルネームで
+    # 登録されているため、末尾の識別子だけを CALL 名にすると検査が壊れる。
+    if (t == "IDENT") {
+      chain_end = v2_scan_dotted_chain(k)
+      fname     = V2_CHAIN_NAME
+      has_generic = 0
+      call_open = chain_end
+      if (TOK[chain_end,"kind"] == "OP" && TOK[chain_end,"text"] == "<") {
+        call_open = v2_scan_generic_arg(chain_end)
+        if (call_open != chain_end) has_generic = 1
+        else call_open = chain_end   # generic でなかった（"<" は比較演算子）
+      }
+      if (TOK[call_open,"kind"] == "LP") {
+        # generic 呼び出しは型パラメータを組込み表のキー形式（"_t" 接尾）に
+        # 正規化し、型名を第 1 引数の文字列リテラルとして注入する
+        # （dsl/desugar_dot.awk の ns.path_t 変換と同じ規約）。
+        if (has_generic) fname = fname "_t"
+        v2_os_push("FN:" fname)
+        # 空引数か判定: LP の次が RP なら arity=0、そうでなければ 1
+        # （generic 注入引数がある場合は基底 arity に +1 する）
+        V2_ARITY[v2_os_sp] = (TOK[call_open+1,"kind"] == "RP") ? 0 : 1
+        if (has_generic) {
+          V2_ARITY[v2_os_sp]++
+          v2_emit_rpn("OPERAND", "\"" V2_GENERIC_ARG "\"", line, "")
+        }
+        k = call_open   # LP をスキップ（for の自動 k++ 込みで LP の次へ）
+        continue
+      }
     }
 
     if (t == "IDENT" || t == "NUM" || t == "TYPE") {
@@ -177,6 +246,23 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
     if (t == "LBRACE" && TOK[k+1,"kind"] == "RBRACE") {
       v2_emit_rpn("OPERAND", "{}", line, "")
       k++
+      continue
+    }
+
+    # 添字式 rows[id] / user["name"]: 直前に値（IDENT/NUM/TYPE/STR/")"/"]"）が
+    # あれば非空 "[" を添字アクセスの開始として扱う（二項演算子 INDEX に還元）。
+    if (t == "LBRACK") {
+      prevkind = (k > i) ? TOK[k-1,"kind"] : ""
+      if (prevkind == "IDENT" || prevkind == "NUM" || prevkind == "TYPE" || \
+          prevkind == "STR" || prevkind == "RP" || prevkind == "RBRACK") {
+        v2_os_push("[")
+        continue
+      }
+    }
+
+    if (t == "RBRACK") {
+      v2_pop_until_lp(line)
+      v2_pop_bracket(line)
       continue
     }
 
@@ -308,8 +394,17 @@ function v2_rpn_dispatch(i,    kw) {
   else                        return v2_rpn_stmt(i)
 }
 
+# 型注釈開始位置 typestart から v2_skip_type で終端位置まで読み飛ばし、
+# 結合したテキスト（Dict<Str, Str> / Str|Int のような複数トークン型）を返す。
+function v2_read_type_text(typestart, end,    k, typetext) {
+  typetext = ""
+  for (k = typestart; k < end; k++)
+    typetext = typetext ((TOK[k,"kind"] == "COMMA") ? ", " : TOK[k,"text"])
+  return typetext
+}
+
 # function NAME( PARAMS ) -> RETTYPE { BODY }
-function v2_rpn_func(i,    fname, line, j) {
+function v2_rpn_func(i,    fname, line, j, typestart) {
   line  = TOK[i,"line"]
   fname = TOK[i+1,"text"]
 
@@ -324,22 +419,29 @@ function v2_rpn_func(i,    fname, line, j) {
     while (j <= TOK["n"] && TOK[j,"kind"] != "RP") {
       if (TOK[j,"kind"] == "IDENT") {
         v2_emit_rpn("OPERAND", TOK[j,"text"], TOK[j,"line"], "")
-        # 型注釈 [: TYPE] → `:TYPE` として出力（パラメータ型を parse で識別）
-        if (TOK[j+1,"kind"] == "COLON" &&
-            (TOK[j+2,"kind"] == "TYPE" || TOK[j+2,"kind"] == "IDENT")) {
-          v2_emit_rpn("OPERAND", ":" TOK[j+2,"text"], TOK[j+2,"line"], "")
+        j++
+        # 型注釈 [: TYPE] → `:TYPE...` として出力（Union/Generic の
+        # 複数トークン型に対応。let の型スキャンと同じ v2_skip_type を使う）
+        if (TOK[j,"kind"] == "COLON" &&
+            (TOK[j+1,"kind"] == "TYPE" || TOK[j+1,"kind"] == "IDENT")) {
+          j++  # skip :
+          typestart = j
+          j = v2_skip_type(j)
+          v2_emit_rpn("OPERAND", ":" v2_read_type_text(typestart, j), TOK[typestart,"line"], "")
         }
+      } else {
+        j++
       }
-      j++
     }
     if (j <= TOK["n"]) j++  # skip RP
   }
 
-  # -> RETTYPE
+  # -> RETTYPE（Effect<Option<Str>> / Int | Str のような複数トークン型に対応）
   if (j <= TOK["n"] && TOK[j,"kind"] == "ARROW") j++
   if (j <= TOK["n"] && (TOK[j,"kind"] == "TYPE" || TOK[j,"kind"] == "IDENT")) {
-    v2_emit_rpn("OPERAND", TOK[j,"text"], TOK[j,"line"], "")
-    j++
+    typestart = j
+    j = v2_skip_type(j)
+    v2_emit_rpn("OPERAND", v2_read_type_text(typestart, j), TOK[typestart,"line"], "")
   }
 
   # { BODY }
@@ -359,15 +461,28 @@ function v2_rpn_func(i,    fname, line, j) {
 }
 
 # 型注釈の先頭トークン位置 j から、型を構成するトークン（TYPE/IDENT と
-# 区切り記号 < > |）を読み飛ばし、型注釈の直後（= / ?= が来るはず）の位置を返す。
+# 区切り記号 < > |）を読み飛ばし、型注釈の直後の位置を返す。
 # 例: Dict<Str, Str> / Str|Int / Result<T, E> のような複数トークンの型に対応する。
-function v2_skip_type(j) {
+# `<...>` の深さを追跡し、深さ 0 の COMMA では停止する（呼び出し元がパラメータ
+# リストの区切り ',' なのか、Dict<Str, Str> の内側の ',' なのかを区別するため）。
+function v2_skip_type(j,    startline, depth) {
+  startline = TOK[j,"line"]
   j++   # 型名先頭トークンを読み飛ばす
-  while (j <= TOK["n"] &&
-         ((TOK[j,"kind"] == "OP" &&
-           (TOK[j,"text"] == "<" || TOK[j,"text"] == ">" || TOK[j,"text"] == "|")) ||
-          TOK[j,"kind"] == "TYPE" || TOK[j,"kind"] == "IDENT" || TOK[j,"kind"] == "COMMA"))
-    j++
+  depth = 0
+  while (j <= TOK["n"] && TOK[j,"line"] == startline) {
+    if (TOK[j,"kind"] == "OP" && TOK[j,"text"] == "<") { depth++; j++; continue }
+    if (TOK[j,"kind"] == "OP" && TOK[j,"text"] == ">") {
+      if (depth == 0) break
+      depth--; j++; continue
+    }
+    if (TOK[j,"kind"] == "OP" && TOK[j,"text"] == "|") { j++; continue }
+    if (TOK[j,"kind"] == "COMMA") {
+      if (depth == 0) break
+      j++; continue
+    }
+    if (TOK[j,"kind"] == "TYPE" || TOK[j,"kind"] == "IDENT") { j++; continue }
+    break
+  }
   return j
 }
 
@@ -396,13 +511,17 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
     v2_emit_rpn("OPERAND", typetext, TOK[typestart,"line"], "")
   }
 
-  # = または ?= をスキップ
-  if (j <= TOK["n"] && TOK[j,"kind"] == "OP") j++
-
-  # 右辺式を操車場法で変換
-  expr_end = v2_find_expr_end(j)
-  if (expr_end >= j) {
-    v2_shunt_expr(j, expr_end)
+  # 裸の let 宣言（hoist 形 `let tmp` / `let n: Int`、= も ?= もない）は
+  # 初期化式を持たない。次文の先頭トークンを無条件に initializer として
+  # shunt しないよう、= / ?= がある場合のみ RHS をパースする。
+  if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && (TOK[j,"text"] == "=" || TOK[j,"text"] == "?=")) {
+    j++  # = または ?= をスキップ
+    expr_end = v2_find_expr_end(j)
+    if (expr_end >= j) {
+      v2_shunt_expr(j, expr_end)
+    } else {
+      expr_end = j - 1
+    }
   } else {
     expr_end = j - 1
   }
@@ -476,12 +595,15 @@ function v2_rpn_return(i,    line, j) {
   v2_emit_rpn("MARKER", "RETURN", line, "")
   i++  # skip "return"
 
-  # 同一行上の式トークンを収集
-  j = i
-  while (j <= TOK["n"] && TOK[j,"line"] == line) j++
-  j--  # j は同一行の最後のトークン（i-1 は式なしを意味する）
-
-  if (j >= i) v2_shunt_expr(i, j)
+  # 同一行上の式トークンを、深さ 0 の RBRACE/RP/RBRACK で終端する
+  # v2_find_expr_end で収集する（`function f() -> Str { return x }` の
+  # ような 1 行関数で、閉じ } を式に含めてしまわないため）。
+  if (i <= TOK["n"] && TOK[i,"line"] == line) {
+    j = v2_find_expr_end(i)
+    if (j >= i) v2_shunt_expr(i, j)
+  } else {
+    j = i - 1   # 式なし
+  }
 
   v2_emit_rpn("MARKER", "STMT_END", line, "")
   return j + 1
@@ -500,11 +622,16 @@ function v2_is_rawline(i,    line, j, k) {
   return 0
 }
 
+# 行頭が素の awk 文形式（print / printf 等）かどうかを判定する
+function v2_is_awk_stmt_head(i) {
+  return TOK[i,"kind"] == "IDENT" && (TOK[i,"text"] == "print" || TOK[i,"text"] == "printf")
+}
+
 # その他の文（裸の式文・代入・未知トークン）
 function v2_rpn_stmt(i,    j, line) {
   line = TOK[i,"line"]
 
-  if (v2_is_rawline(i)) {
+  if (v2_is_rawline(i) || v2_is_awk_stmt_head(i)) {
     # 解釈不能トークン列を RAWLINE マーカーで素通し
     v2_emit_rpn("MARKER",  "RAWLINE",             line, "")
     v2_emit_rpn("OPERAND", V2_LINE_TEXT[line], line, "")

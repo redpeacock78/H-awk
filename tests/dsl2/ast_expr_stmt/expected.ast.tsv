@@ -1,9 +1,5 @@
 1	PROGRAM	1	1	2	
-2	EXPR	1	1	9	
-3	IDENT	1	0		hawk
-4	IDENT	1	0		app
-5	DOT	1	2	3,4	
-6	STRLIT	1	0		"/todos"
-7	STRLIT	1	0		"list_todos"
-8	CALL	1	2	6,7	get
-9	DOT	1	2	5,8	
+2	EXPR	1	1	5	
+3	STRLIT	1	0		"/todos"
+4	STRLIT	1	0		"list_todos"
+5	CALL	1	2	3,4	hawk.app.get

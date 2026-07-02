@@ -61,10 +61,11 @@ function v2_reduce_op(op, line,    id, r, l) {
   if (V2_SP < 2) { v2_diag(line, 0, "stack underflow on operator '" op "'"); return }
   r = V2_STK[V2_SP--]
   l = V2_STK[V2_SP--]
-  if      (op == "|>") id = v2_node("PIPE", line)
-  else if (op == "??") id = v2_node("COALESCE", line)
-  else if (op == ".")  id = v2_node("DOT", line)
-  else                 { id = v2_node("BINOP", line); AST[id,"text"] = op }
+  if      (op == "|>")    id = v2_node("PIPE", line)
+  else if (op == "??")    id = v2_node("COALESCE", line)
+  else if (op == ".")     id = v2_node("DOT", line)
+  else if (op == "INDEX") id = v2_node("INDEX", line)
+  else                    { id = v2_node("BINOP", line); AST[id,"text"] = op }
   v2_addchild(id, l)
   v2_addchild(id, r)
   V2_STK[++V2_SP] = id

@@ -1,0 +1,5 @@
+1	PROGRAM	1	1	2	
+2	FUNC	1	2	3,4	f
+3	TYPEANN	1	0		Effect<Option<Str>>
+4	RETURN	2	1	5	
+5	IDENT	2	0		x
