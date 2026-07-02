@@ -113,7 +113,14 @@ function v2_expr_until_marker(i, parent,    sp_saved, expr_id) {
 function v2_parse_pat(text, line,    pat_id, parts, n, k, m) {
   pat_id = v2_node("PAT", line)
   n = split(text, parts, " ")
-  AST[pat_id,"text"] = parts[1]
+  # 型付き no-bind パターン `ng<AuthError>`（バインド変数なし）は parts[1] 自体に
+  # `<...>` が来る。この場合はタグ名と TYPEANN のみに分離する（IDENT は生成しない）。
+  if (match(parts[1], /^([^<]+)<([^>]+)>$/, m)) {
+    AST[pat_id,"text"] = m[1]
+    v2_addchild(pat_id, v2_leaf("TYPEANN", m[2], line))
+  } else {
+    AST[pat_id,"text"] = parts[1]
+  }
   for (k = 2; k <= n; k++) {
     # `e<NotFoundError>` → IDENT(e) + TYPEANN(NotFoundError)
     if (match(parts[k], /^([^<]+)<([^>]+)>$/, m)) {
@@ -162,9 +169,22 @@ function v2_stmt_dispatch(marker, i, parent) {
       marker == "LETQ")               return v2_parse_let(i, parent)
   if (marker == "RETURN")             return v2_parse_return(i, parent)
   if (marker == "WHEN")               return v2_p_when(i, parent)
+  if (marker == "EXPR")               return v2_parse_expr_stmt(i, parent)
   # RAWLINE はスキップ（marker + operand の 2 トークン）
   if (marker == "RAWLINE")            return i + 1
   return i
+}
+
+# ─── 裸の式文 ────────────────────────────────────────────────────
+
+# EXPR 文（i: EXPR の RPN インデックス）
+# 消費: expr... STMT_END
+# 返す: STMT_END の RPN インデックス
+function v2_parse_expr_stmt(i, parent,    id) {
+  id = v2_node("EXPR", RPN[i,"line"])
+  i  = v2_expr_until_marker(i + 1, id)   # STMT_END まで式を還元
+  v2_addchild(parent, id)
+  return i   # STMT_END の位置
 }
 
 # ─── when 文 ────────────────────────────────────────────────────
@@ -232,6 +252,7 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
       if (RPN[j,"val"] == "RAWLINE")                 { j++; j++; continue }   # marker + operand
       if (RPN[j,"val"] == "RETURN")                  { j = v2_parse_return(j, func_id); continue }
       if (RPN[j,"val"] == "WHEN")                    { j = v2_p_when(j, func_id); continue }
+      if (RPN[j,"val"] == "EXPR")                    { j = v2_parse_expr_stmt(j, func_id); continue }
       j++; continue
     }
     if (RPN[j,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[j,"val"], RPN[j,"line"])

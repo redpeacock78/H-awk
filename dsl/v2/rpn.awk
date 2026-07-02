@@ -506,7 +506,11 @@ function v2_rpn_stmt(i,    j, line) {
 
   j = v2_find_expr_end(i)
   if (j >= i) {
+    # 裸の式文（例: hawk.app.get("/x", "h")）も EXPR/STMT_END で囲んで
+    # parse 側に還元させる（囲まないと式の結果が AST に接続されず消える）。
+    v2_emit_rpn("MARKER", "EXPR", line, "")
     v2_shunt_expr(i, j)
+    v2_emit_rpn("MARKER", "STMT_END", TOK[j,"line"], "")
   } else {
     j = i  # 最低 1 トークン進める（無限ループ防止）
   }

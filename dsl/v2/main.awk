@@ -27,7 +27,15 @@ BEGIN {
 }
 
 # Task 8 以降で各モジュールに移す仮実装。
-function v2_emit(   l) { for (l = 1; l <= V2_NLINES; l++) print PASS[l] }
+# DSL 構文（TOK["n"] > 0）を含む入力はまだコード生成できないため、
+# passthrough のみで exit 0 にせず診断してエラー終了する。
+function v2_emit(   l) {
+  if (TOK["n"] > 0) {
+    v2_diag(1, 1, "code generation for DSL constructs is not implemented yet (use V2_DUMP=lex|rpn|ast|types to inspect stages)")
+    exit 1
+  }
+  for (l = 1; l <= V2_NLINES; l++) print PASS[l]
+}
 function v2_dump_lex(   i) { for (i = 1; i <= TOK["n"]; i++) printf "%d\t%s\t%d\t%d\t%s\n", i, TOK[i,"kind"], TOK[i,"line"], TOK[i,"col"], TOK[i,"text"] }
 function v2_dump_rpn(   i) { for (i = 1; i <= RPN["n"]; i++) printf "%d\t%s\t%d\t%s\t%s\n", i, RPN[i,"kind"], RPN[i,"line"], RPN[i,"val"], ((RPN[i,"kind"]=="CALL") ? RPN[i,"arity"] : "") }
 function v2_dump_ast(   id, k, cs) { for (id = 1; id <= V2_NAST; id++) { cs = ""; for (k = 1; k <= AST[id,"nc"]; k++) cs = cs ((k>1)?",":"") AST[id,"c" k]; printf "%d\t%s\t%d\t%d\t%s\t%s\n", id, AST[id,"kind"], AST[id,"line"], AST[id,"nc"], cs, AST[id,"text"] } }
