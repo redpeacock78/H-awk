@@ -254,9 +254,14 @@ function v2_rpn_func(i,    fname, line, j) {
   if (j <= TOK["n"] && TOK[j,"kind"] == "LP") {
     j++  # skip LP
     while (j <= TOK["n"] && TOK[j,"kind"] != "RP") {
-      # パラメータ名のみ出力（型注釈はスキップ）
-      if (TOK[j,"kind"] == "IDENT")
+      if (TOK[j,"kind"] == "IDENT") {
         v2_emit_rpn("OPERAND", TOK[j,"text"], TOK[j,"line"], "")
+        # 型注釈 [: TYPE] → `:TYPE` として出力（パラメータ型を parse で識別）
+        if (TOK[j+1,"kind"] == "COLON" &&
+            (TOK[j+2,"kind"] == "TYPE" || TOK[j+2,"kind"] == "IDENT")) {
+          v2_emit_rpn("OPERAND", ":" TOK[j+2,"text"], TOK[j+2,"line"], "")
+        }
+      }
       j++
     }
     if (j <= TOK["n"]) j++  # skip RP
@@ -345,6 +350,7 @@ function v2_rpn_when(i,    line, j, end_idx, depth, k, pat_text, arm_line) {
     }
     end_idx++
   }
+  if (end_idx > TOK["n"]) v2_diag(line, 1, "unclosed 'when' (missing 'end')")
 
   i = j + 1  # 最初の腕パターン開始位置
 
