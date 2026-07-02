@@ -55,6 +55,19 @@ function test_response_json(   data, body) {
   assert_eq(res["body"], "{\"foo\":\"bar\"}", "res: json body")
 }
 
+function test_response_json_type_sidecar(   data, types) {
+  delete res
+  delete data
+  delete types
+  data["n"] = "42"
+  data["ok"] = "true"
+  types["n"] = "int"
+  types["ok"] = "bool"
+  json(res, data, types)
+  assert_true(index(res["body"], "\"n\":42") > 0, "res: json sidecar int")
+  assert_true(index(res["body"], "\"ok\":true") > 0, "res: json sidecar bool")
+}
+
 function test_response_json_raw() {
   delete res
   json_raw(res, "{\"ok\":true}")

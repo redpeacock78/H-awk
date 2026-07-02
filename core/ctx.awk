@@ -35,11 +35,62 @@ function status(code)        { awk::status(ctx::res, code);     return 1 }
 function set_header(name, v) { awk::header(ctx::res, name, v);  return 1 }
 
 function req_form(key,    k) { k = "form:" key; if (!(k in ctx::req)) return awk::result_ng("ParseError", "missing " key); return awk::result_ok_make(ctx::req[k]) }
-function req_json(        k) { k = "body"; if (!(k in ctx::req)) return awk::result_ng("ParseError", "missing body"); return awk::result_ok_make(ctx::req[k]) }
+function req_json(        k, ok, out, out_type, msg) {
+  k = "body"
+  if (!(k in ctx::req)) return awk::result_ng("JsonParseError", "missing body")
+  ok = awk::json_decode_value(ctx::req[k], out, out_type)
+  if (ok == -1) return awk::result_ng("JsonTooDeepError", "max nesting depth exceeded")
+  if (ok == 0) {
+    msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
+    return awk::result_ng("JsonParseError", msg)
+  }
+  return awk::result_ok_from_map(out, out_type)
+}
+function req_json_object(  k, ok, out, out_type, msg) {
+  k = "body"
+  if (!(k in ctx::req)) return awk::result_ng("JsonParseError", "missing body")
+  ok = awk::json_decode(ctx::req[k], out, out_type)
+  if (ok == -1) return awk::result_ng("JsonTooDeepError", "max nesting depth exceeded")
+  if (!ok) {
+    msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
+    return awk::result_ng("JsonParseError", msg)
+  }
+  return awk::result_ok_from_map(out, out_type)
+}
+function req_json_t(type,  k, ok, out, out_type, msg, key, has_leaf) {
+  k = "body"
+  if (!(k in ctx::req)) return awk::result_ng("JsonParseError", "missing body")
+  ok = awk::json_decode_value(ctx::req[k], out, out_type)
+  if (ok == -1) return awk::result_ng("JsonTooDeepError", "max nesting depth exceeded")
+  if (ok == 0) {
+    msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
+    return awk::result_ng("JsonParseError", msg)
+  }
+  if (type == "JsonScalar" && awk::_jp_root_kind != "scalar")
+    return awk::result_ng("JsonTypeError", "type mismatch: expected JsonScalar but got non-scalar root")
+  if (json::_is_container_type(type)) {
+    if (json::_is_array_container_type(type) && awk::_jp_root_kind != "array")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-array root")
+    if (json::_is_object_container_type(type) && awk::_jp_root_kind != "object")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-object root")
+    return awk::result_ok_from_map(out, out_type)
+  }
+  has_leaf = 0
+  for (key in out) {
+    has_leaf = 1
+    if (!json::_validate_leaf(type, out[key], out_type[key]))
+      return awk::result_ng("JsonTypeError", "type mismatch: expected " type " at " key)
+  }
+  if (!has_leaf && type != "Any")
+    return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got empty container")
+  return awk::result_ok_from_map(out, out_type)
+}
 
 BEGIN {
     _CTX_ROUTES["req.form"]     = "ctx::req_form";   _CTX_ARITY["req.form"]     = 1
     _CTX_ROUTES["req.json"]     = "ctx::req_json";   _CTX_ARITY["req.json"]     = 0
+    _CTX_ROUTES["req.json_object"] = "ctx::req_json_object"; _CTX_ARITY["req.json_object"] = 0
+    _CTX_ROUTES["req.json_t"]      = "ctx::req_json_t";      _CTX_ARITY["req.json_t"]      = 1
     _CTX_ROUTES["req.query"]    = "ctx::query";      _CTX_ARITY["req.query"]    = 1
     _CTX_ROUTES["req.param"]    = "ctx::param";      _CTX_ARITY["req.param"]    = 1
     _CTX_ROUTES["req.header"]   = "ctx::get_header"; _CTX_ARITY["req.header"]   = 1

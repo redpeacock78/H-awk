@@ -116,8 +116,169 @@ function test_ctx_body_helper(    req, res, r) {
   req["body"] = ""
   _ctx_load(req, res)
   r = ctx::req_json()
-  assert_true(result_ok(r), "ctx::req_json treats empty existing body as ok")
-  assert_eq(result_val(r), "", "ctx::req_json returns empty body")
+  assert_true(!result_ok(r), "ctx::req_json empty body is ng under JsonValue contract")
+  assert_eq(result_err_type(r), "JsonParseError", "ctx::req_json empty body error type")
+}
+
+function test_ctx_req_json_value(    req, res, r, out, out_type) {
+  delete req
+  delete res
+  req["body"] = "{\"name\":\"alice\",\"age\":30}"
+  _ctx_load(req, res)
+  r = ctx::req_json()
+  assert_true(result_ok(r), "ctx::req_json returns ok for valid JSON object")
+  delete out
+  delete out_type
+  result_val_into_map(r, out, out_type)
+  assert_eq(out["name"], "alice", "ctx::req_json map has name")
+  assert_eq(out["age"],  "30",    "ctx::req_json map has age")
+
+  delete req
+  delete res
+  req["body"] = "[1,2,3]"
+  _ctx_load(req, res)
+  r = ctx::req_json()
+  assert_true(result_ok(r), "ctx::req_json returns ok for top-level array")
+
+  delete req
+  delete res
+  req["body"] = "not json"
+  _ctx_load(req, res)
+  r = ctx::req_json()
+  assert_true(!result_ok(r), "ctx::req_json invalid body is ng")
+  assert_eq(result_err_type(r), "JsonParseError", "ctx::req_json invalid body error type")
+
+  delete req
+  delete res
+  _ctx_load(req, res)
+  r = ctx::req_json()
+  assert_true(!result_ok(r), "ctx::req_json missing body is ng")
+  assert_eq(result_err_type(r), "JsonParseError", "ctx::req_json missing body error type")
+}
+
+function test_ctx_req_json_object(    req, res, r, out, out_type) {
+  delete req
+  delete res
+  req["body"] = "{\"name\":\"alice\"}"
+  _ctx_load(req, res)
+  r = ctx::req_json_object()
+  assert_true(result_ok(r), "ctx::req_json_object returns ok for valid JSON object")
+  delete out
+  delete out_type
+  result_val_into_map(r, out, out_type)
+  assert_eq(out["name"], "alice", "ctx::req_json_object map has name")
+
+  delete req
+  delete res
+  req["body"] = "[1,2,3]"
+  _ctx_load(req, res)
+  r = ctx::req_json_object()
+  assert_true(!result_ok(r), "ctx::req_json_object rejects top-level array")
+  assert_eq(result_err_type(r), "JsonParseError", "ctx::req_json_object array error type")
+}
+
+function test_ctx_req_json_t(    req, res, r, out, out_type) {
+  delete req
+  delete res
+  req["body"] = "{\"n\":1}"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Int")
+  assert_true(result_ok(r), "ctx::req_json_t Int ok")
+  delete out
+  delete out_type
+  result_val_into_map(r, out, out_type)
+  assert_eq(out["n"], "1", "ctx::req_json_t Int payload")
+
+  delete req
+  delete res
+  req["body"] = "{\"n\":\"abc\"}"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Int")
+  assert_true(!result_ok(r), "ctx::req_json_t Int type mismatch is ng")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t type mismatch error type")
+}
+
+function test_ctx_req_json_t_container_root_shape(    req, res, r) {
+  delete req
+  delete res
+  req["body"] = "[1]"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Array")
+  assert_true(result_ok(r), "ctx::req_json_t Array accepts array root")
+
+  delete req
+  delete res
+  req["body"] = "{}"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Array")
+  assert_true(!result_ok(r), "ctx::req_json_t Array rejects object root")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t Array object root error type")
+
+  delete req
+  delete res
+  req["body"] = "[]"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Int")
+  assert_true(!result_ok(r), "ctx::req_json_t Int rejects empty array root")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t Int empty array error type")
+}
+
+function test_ctx_req_json_t_generic_container_root_shape(    req, res, r) {
+  delete req
+  delete res
+  req["body"] = "{}"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "List<Int>")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t List rejects object root")
+
+  delete req
+  delete res
+  req["body"] = "[]"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Dict<Str,Int>")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t Dict rejects array root")
+
+  delete req
+  delete res
+  req["body"] = "[]"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Todo")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t record rejects array root")
+}
+
+function test_ctx_req_json_too_deep(    req, res, r, s, i) {
+  s = "1"
+  for (i = 0; i < 40; i++) s = "[" s "]"
+  delete req
+  delete res
+  req["body"] = s
+  _ctx_load(req, res)
+  r = ctx::req_json()
+  assert_true(!result_ok(r), "ctx::req_json too-deep is ng")
+  assert_eq(result_err_type(r), "JsonTooDeepError", "ctx::req_json too-deep error type")
+}
+
+function test_ctx_req_json_object_too_deep(    req, res, r, s, i, body) {
+  body = "\"a\":1"
+  for (i = 0; i < 40; i++) body = "\"a\":{" body "}"
+  s = "{" body "}"
+  delete req
+  delete res
+  req["body"] = s
+  _ctx_load(req, res)
+  r = ctx::req_json_object()
+  assert_true(!result_ok(r), "ctx::req_json_object too-deep is ng")
+  assert_eq(result_err_type(r), "JsonTooDeepError", "ctx::req_json_object too-deep error type")
+}
+
+function test_ctx_req_json_object_trailing_garbage(    req, res, r) {
+  delete req
+  delete res
+  req["body"] = "{\"a\":1} junk"
+  _ctx_load(req, res)
+  r = ctx::req_json_object()
+  assert_true(!result_ok(r), "ctx::req_json_object trailing garbage is ng")
+  assert_eq(result_err_type(r), "JsonParseError", "ctx::req_json_object trailing garbage error type")
 }
 
 function test_ctx_json_helper(    req, res) {

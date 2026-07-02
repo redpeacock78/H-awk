@@ -93,32 +93,38 @@ function _json_escape_str(s) {
   return _json_escape(s)
 }
 
-function _json_encode_array(arr,    i, n, out, sep) {
-  n = 0; for (i in arr) { if (i+0 > n && i == i+0) n = i+0 }
+function _json_encode_array(arr, types, prefix,    i, n, start, out, sep, key) {
+  n = 0
+  start = (0 in arr) ? 0 : 1
+  for (i in arr) { if (i+0 > n && i == i+0) n = i+0 }
   out = "["; sep = ""
-  for (i = 1; i <= n; i++) {
-    out = out sep json_encode_any(arr[i])
+  for (i = start; i <= n; i++) {
+    key = (prefix == "") ? i : prefix "." i
+    out = out sep json_encode_any(arr[i], types, key)
     sep = ","
   }
   return out "]"
 }
 
-function _json_encode_object(obj,    k, out, sep) {
+function _json_encode_object(obj, types, prefix,    k, out, sep, key) {
   out = "{"; sep = ""
   for (k in obj) {
     if (k == "__json_type") continue
-    out = out sep "\"" _json_escape_str(k) "\":" json_encode_any(obj[k])
+    key = (prefix == "") ? k : prefix "." k
+    out = out sep "\"" _json_escape_str(k) "\":" json_encode_any(obj[k], types, key)
     sep = ","
   }
   return out "}"
 }
 
-function json_encode_any(val,    t) {
+function json_encode_any(val, types, prefix,    t, hint) {
   t = typeof(val)
   if (t == "array") {
-    if (val["__json_type"] == "array") return _json_encode_array(val)
-    return _json_encode_object(val)
+    if (val["__json_type"] == "array") return _json_encode_array(val, types, prefix)
+    return _json_encode_object(val, types, prefix)
   }
+  hint = (typeof(types) == "array" && (prefix in types)) ? types[prefix] : ""
+  if (hint != "") return _json_value(val, hint)
   if (t == "number") return val + 0
   return "\"" _json_escape_str(val) "\""
 }
@@ -370,13 +376,13 @@ function decode_t(type, s,    ok, out, out_type, msg, k, has_leaf) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
     return awk::result_ng("JsonParseError", msg)
   }
+  if (type == "JsonScalar" && awk::_jp_root_kind != "scalar")
+    return awk::result_ng("JsonTypeError", "type mismatch: expected JsonScalar but got non-scalar root")
   if (_is_container_type(type)) {
-    if (type == "Array" && awk::_jp_root_kind != "array")
-      return awk::result_ng("JsonTypeError", "type mismatch: expected Array but got non-array root")
-    if ((type == "JsonObject" || type == "Map") && awk::_jp_root_kind != "object")
+    if (_is_array_container_type(type) && awk::_jp_root_kind != "array")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-array root")
+    if (_is_object_container_type(type) && awk::_jp_root_kind != "object")
       return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-object root")
-    if (type == "JsonScalar" && awk::_jp_root_kind != "scalar")
-      return awk::result_ng("JsonTypeError", "type mismatch: expected JsonScalar but got non-scalar root")
     return awk::result_ok_from_map(out, out_type)
   }
   has_leaf = 0
@@ -391,6 +397,7 @@ function decode_t(type, s,    ok, out, out_type, msg, k, has_leaf) {
 }
 
 function _validate_leaf(t, v, vtype) {
+  if (t == "JsonScalar") return vtype == "int" || vtype == "float" || vtype == "string" || vtype == "bool" || vtype == "null"
   if (t == "Int")   return vtype == "int"
   if (t == "Float") return vtype == "float" || vtype == "int"
   if (t == "Bool")  return vtype == "bool"
@@ -401,7 +408,19 @@ function _validate_leaf(t, v, vtype) {
 }
 
 function _is_container_type(t) {
-  return t == "JsonValue" || t == "JsonObject" || t == "Array" || t == "Map" || t == "JsonScalar"
+  return t == "JsonValue" || t == "JsonObject" || t == "Array" || t == "Map" || \
+         t ~ /^List</ || t ~ /^Dict</ || \
+         (t !~ /^(JsonScalar|Int|Float|Str|Bool|Null|Any)$/ && t ~ /^[A-Z][A-Za-z0-9_]*$/)
+}
+
+function _is_array_container_type(t) {
+  return t == "Array" || t ~ /^List</
+}
+
+function _is_object_container_type(t) {
+  return t == "JsonObject" || t == "Map" || t ~ /^Dict</ || \
+         (t !~ /^(JsonValue|JsonScalar|Int|Float|Str|Bool|Null|Any|Array|Map|JsonObject)$/ && \
+          t !~ /^List</ && t ~ /^[A-Z][A-Za-z0-9_]*$/)
 }
 
 function dispatch(path, a1, a2, a3) {

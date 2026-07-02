@@ -1,4 +1,4 @@
-function handler(    _ds_tc_1, body, _ds_tct_1, _ds_err_type__ds_tc_1) {
+function handler(body_types,    _ds_tc_1, body, _ds_tct_1, _ds_err_type__ds_tc_1) {
   _ds_tc_1 = ctx::dispatch("req.json")
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)
@@ -8,4 +8,5 @@ function handler(    _ds_tc_1, body, _ds_tct_1, _ds_err_type__ds_tc_1) {
     return ctx::dispatch("res.status", 500)
   }
   result_val_into_map(_ds_tc_1, body, _ds_tct_1)
+  return json(res, body, _ds_tct_1)
 }

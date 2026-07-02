@@ -288,6 +288,10 @@ function _ds_process_line(line, lineno,    transformed, nc_pre, nc_result, p, do
     }
   }
   if (match(dot_transformed, /^([[:space:]]*)return[[:space:]]+ctx::dispatch\("res\.json",[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\)[[:space:]]*$/, _json_m) && \
+      ((_DS_func_name, _json_m[2]) in _DS_JSON_TYPEVAR)) {
+    dot_transformed = _json_m[1] "return json(res, " _json_m[2] ", " _DS_JSON_TYPEVAR[_DS_func_name, _json_m[2]] ")"
+    _json_collection = 1
+  } else if (match(dot_transformed, /^([[:space:]]*)return[[:space:]]+ctx::dispatch\("res\.json",[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\)[[:space:]]*$/, _json_m) && \
       ((_DS_func_name, _json_m[2]) in _DS_VAR_TYPES) && \
       (_DS_VAR_TYPES[_DS_func_name, _json_m[2]] ~ /^(List|Dict)</ || (_DS_VAR_TYPES[_DS_func_name, _json_m[2]] in _DS_RECORD_TYPE))) {
     dot_transformed = _json_m[1] "return json(res, " _json_m[2] ")"
