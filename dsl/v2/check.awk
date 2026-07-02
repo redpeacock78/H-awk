@@ -153,13 +153,15 @@ function v2_collect(id,    k, name, child, argn) {
 
 # ─── パス 2: CALL の arity 検査・TYPEOF 設定 ───────────────────────
 
-function v2_check_calls(id,    k, name, min_arity, max_arity, actual) {
+# extra: PIPE の RHS にある CALL は、パイプで渡される左辺値の分だけ実引数が
+# +1 されるとみなす（`x |> f()` は f を実質 1 引数で呼ぶのと同じ）。
+function v2_check_calls(id, extra,    k, name, min_arity, max_arity, actual, child_extra) {
   if (AST[id,"kind"] == "CALL") {
     name = AST[id,"text"]
     if ((name,"arity") in SIG) {
       min_arity = SIG[name,"arity"]
       max_arity = ((name,"arity_max") in SIG) ? SIG[name,"arity_max"] : min_arity
-      actual    = AST[id,"nc"]
+      actual    = AST[id,"nc"] + extra
       if (min_arity != -1 && (actual < min_arity || actual > max_arity)) {
         v2_diag(AST[id,"line"], 1, name " expects " min_arity " argument(s), got " actual)
       }
@@ -167,7 +169,10 @@ function v2_check_calls(id,    k, name, min_arity, max_arity, actual) {
     }
   }
 
-  for (k = 1; k <= AST[id,"nc"]; k++) v2_check_calls(AST[id,"c" k])
+  for (k = 1; k <= AST[id,"nc"]; k++) {
+    child_extra = (AST[id,"kind"] == "PIPE" && k == 2) ? 1 : 0
+    v2_check_calls(AST[id,"c" k], child_extra)
+  }
 }
 
 # ─── パス 3: ボトムアップ型推論・注釈検査（Task 8） ─────────────────
@@ -384,6 +389,6 @@ function v2_check() {
   VARIANTS["Option"]  = "some" SUBSEP "none"
 
   v2_collect(1)
-  v2_check_calls(1)
+  v2_check_calls(1, 0)
   v2_infer(1)
 }
