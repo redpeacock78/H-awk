@@ -6,6 +6,7 @@
 
 @include "dsl/v2/util.awk"
 @include "dsl/v2/lex.awk"
+@include "dsl/v2/rpn.awk"
 
 BEGIN {
   V2_SRC = (ARGC > 1) ? ARGV[1] : "/dev/stdin"
@@ -23,8 +24,7 @@ BEGIN {
   exit 0
 }
 
-# Task 3 以降で各モジュールに移す仮実装。
-function v2_rpn()   { RPN["n"] = 0 }
+# Task 4 以降で各モジュールに移す仮実装。
 function v2_parse() { V2_NAST = 1; AST[1,"kind"] = "PROGRAM"; AST[1,"nc"] = 0 }
 function v2_check() { }
 function v2_emit(   l) { for (l = 1; l <= V2_NLINES; l++) print PASS[l] }
