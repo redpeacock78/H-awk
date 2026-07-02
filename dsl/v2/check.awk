@@ -9,12 +9,13 @@
 #   SIG[name,"arg" n]      n 番目（1-indexed）の引数型
 #   ALIAS[name]            型エイリアスの展開先
 #   VARIANTS[adt]          ADT のタグ集合（SUBSEP 区切り、"ok" SUBSEP "ng" など）
-#   TYPEOF[id]             AST ノード id の型（このパスでは CALL の戻り値型のみ）
+#   TYPEOF[id]             AST ノード id の型（式ノード全般。文ノードは持たない）
 #
 # v2_check() はこのファイルの唯一のエントリポイント。
-# 2 周構成:
+# 3 周構成:
 #   1. v2_collect(1)     -- FUNC ノードを収集して SIG[] を充填（前方参照に対応するため全体を先に走査）
 #   2. v2_check_calls(1) -- CALL ノードの arity を検査し TYPEOF[] を設定
+#   3. v2_infer(1)       -- 後順走査でボトムアップ型推論を行い、LET/RETURN の型注釈を検査
 
 # ─── 組込みシグネチャ・型エイリアス登録（dsl/sig.awk より移植） ──────
 
@@ -169,6 +170,212 @@ function v2_check_calls(id,    k, name, min_arity, max_arity, actual) {
   for (k = 1; k <= AST[id,"nc"]; k++) v2_check_calls(AST[id,"c" k])
 }
 
+# ─── パス 3: ボトムアップ型推論・注釈検査（Task 8） ─────────────────
+#
+# v2_infer(id) は後順走査で TYPEOF[id] を充填する。戻り値は自ノードの型文字列
+# （型を持たない文ノード = LET/FUNC/RETURN 等では ""）。
+#
+# 型規則（docs/dsl.md・dsl/typecheck.awk 互換）:
+#   NUMLIT                              -> Int（小数点含みは Num）
+#   STRLIT                              -> Str
+#   BINOP + - * / % ^                   -> 両辺 Int なら Int、どちらか Num なら Num、他は error
+#   BINOP CONCAT                        -> Str
+#   BINOP == != < <= > >= ~ !~ && ||    -> Bool
+#   UNOP NOT                            -> Bool
+#   UNOP NEG                            -> オペランドと同じ数値型（Unknown なら Unknown）
+#   CALL f(...)                         -> SIG[f,"ret"]（未知関数は Unknown）
+#   DOT（レシーバ.メソッド(...) 呼び出し）-> SIG["レシーバ.メソッド","ret"]（未登録は Unknown）
+#   COALESCE a ?? b                     -> unwrap(typeof a) と typeof b の合流
+#   RAW                                 -> Unknown
+#   Unknown が絡む演算                   -> Unknown（診断なし = 誤検出防止）
+
+# 型文字列をトップレベル "|"（<...> の深さを尊重）で分割する
+function v2_split_union(t, out,    i, c, depth, cur, n) {
+  n = 0; depth = 0; cur = ""
+  for (i = 1; i <= length(t); i++) {
+    c = substr(t, i, 1)
+    if      (c == "<") depth++
+    else if (c == ">") depth--
+    else if (c == "|" && depth == 0) { out[++n] = cur; cur = ""; continue }
+    cur = cur c
+  }
+  if (length(cur) > 0) out[++n] = cur
+  return n
+}
+
+# 型エイリアスを 1 段展開する（循環防止のため最大 8 段まで）
+function v2_expand_alias(t,    guard) {
+  guard = 0
+  while ((t in ALIAS) && guard < 8) { t = ALIAS[t]; guard++ }
+  return t
+}
+
+# 2 つの型を合流させた Union 文字列を返す（重複は除去）
+function v2_union_of(a, b,    parts, seen, n, i, out, k, result) {
+  if (a == "" || a == "Any") return b
+  if (b == "" || b == "Any") return a
+  if (a == b) return a
+  n = v2_split_union(a "|" b, parts)
+  k = 0
+  for (i = 1; i <= n; i++) {
+    if (!(parts[i] in seen)) { seen[parts[i]] = 1; out[++k] = parts[i] }
+  }
+  result = out[1]
+  for (i = 2; i <= k; i++) result = result "|" out[i]
+  return result
+}
+
+# expected が actual を受理するか（Union `A|B` 対応・ALIAS 展開）
+function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, aparts) {
+  if (expected == actual)             return 1
+  if (expected == "Any" || expected == "Unknown") return 1
+  if (actual   == "Any" || actual   == "Unknown") return 1
+  if (actual == "")                   return 1
+
+  ea = v2_expand_alias(expected)
+  aa = v2_expand_alias(actual)
+  if (ea != expected || aa != actual) return v2_type_compat(ea, aa)
+
+  en = v2_split_union(expected, eparts)
+  an = v2_split_union(actual,   aparts)
+
+  if (en > 1) {
+    for (i = 1; i <= en; i++) if (v2_type_compat(eparts[i], actual)) return 1
+    return 0
+  }
+  if (an > 1) {
+    for (j = 1; j <= an; j++) if (!v2_type_compat(expected, aparts[j])) return 0
+    return 1
+  }
+  return 0
+}
+
+# Option<T> / Result<T, E> の内側の型を取り出す（Union は各枝を合流）
+function v2_unwrap_type(t,    parts, n, i, inner, m, result) {
+  n = v2_split_union(t, parts)
+  result = ""
+  for (i = 1; i <= n; i++) {
+    inner = parts[i]
+    if (match(inner, /^Option<(.+)>$/, m))       inner = m[1]
+    else if (match(inner, /^Result<([^,]+),/, m)) inner = m[1]
+    else                                          inner = "Any"
+    result = v2_union_of(result, inner)
+  }
+  return result
+}
+
+# 二項演算子の結果型を決定する（Unknown が絡む場合は診断なしで Unknown）
+function v2_binop_type(op, lt, rt, line,    is_num_op) {
+  if (op == "==" || op == "!=" || op == "<" || op == "<=" || \
+      op == ">"  || op == ">=" || op == "~" || op == "!~" || \
+      op == "&&" || op == "||") {
+    return "Bool"
+  }
+  if (op == "CONCAT") return "Str"
+
+  is_num_op = (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "^")
+  if (is_num_op) {
+    if (lt == "Unknown" || rt == "Unknown") return "Unknown"
+    if (lt == "Int" && rt == "Int") return "Int"
+    if ((lt == "Int" || lt == "Num") && (rt == "Int" || rt == "Num")) return "Num"
+    v2_diag(line, 1, "type mismatch: incompatible operand types " lt " and " rt " for operator '" op "'")
+    return "Unknown"
+  }
+
+  return "Unknown"
+}
+
+# DOT（レシーバ.メソッド(...) 呼び出し）の戻り型を決定する
+# receiver が単純 IDENT でメソッドが CALL の場合のみ "receiver.method" で SIG[] を引く。
+function v2_dot_type(id,    recv, callnode, name) {
+  recv     = AST[id,"c1"]
+  callnode = AST[id,"c2"]
+  if (AST[recv,"kind"] != "IDENT" || AST[callnode,"kind"] != "CALL") return "Unknown"
+  name = AST[recv,"text"] "." AST[callnode,"text"]
+  if ((name,"ret") in SIG) return SIG[name,"ret"]
+  return "Unknown"
+}
+
+# 現在走査中の関数の宣言戻り値型・名前（RETURN 文の検査に使う）
+V2_CUR_FUNC_RET = ""
+V2_CUR_FUNC_NAME = ""
+
+function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
+                   saved_ret, saved_name, ret_type, name) {
+  kind = AST[id,"kind"]
+
+  if (kind == "FUNC") {
+    name = AST[id,"text"]
+    ret_type = ((name,"ret") in SIG) ? SIG[name,"ret"] : "Unknown"
+    saved_ret  = V2_CUR_FUNC_RET
+    saved_name = V2_CUR_FUNC_NAME
+    V2_CUR_FUNC_RET  = ret_type
+    V2_CUR_FUNC_NAME = name
+    for (k = 1; k <= AST[id,"nc"]; k++) v2_infer(AST[id,"c" k])
+    V2_CUR_FUNC_RET  = saved_ret
+    V2_CUR_FUNC_NAME = saved_name
+    return ""
+  }
+
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_infer(AST[id,"c" k])
+
+  t = ""
+  if (kind == "NUMLIT") {
+    t = (AST[id,"text"] ~ /\./) ? "Num" : "Int"
+  } else if (kind == "STRLIT") {
+    t = "Str"
+  } else if (kind == "IDENT") {
+    t = "Unknown"
+  } else if (kind == "RAW" || kind == "RAWLINE") {
+    t = "Unknown"
+  } else if (kind == "UNOP") {
+    ct = TYPEOF[AST[id,"c1"]]
+    if (AST[id,"text"] == "NOT") t = "Bool"
+    else if (ct == "Int" || ct == "Num") t = ct
+    else t = "Unknown"
+  } else if (kind == "BINOP") {
+    lt = TYPEOF[AST[id,"c1"]]
+    rt = TYPEOF[AST[id,"c2"]]
+    t = v2_binop_type(AST[id,"text"], lt, rt, AST[id,"line"])
+  } else if (kind == "COALESCE") {
+    lt = TYPEOF[AST[id,"c1"]]
+    rt = TYPEOF[AST[id,"c2"]]
+    t = v2_union_of(v2_unwrap_type(lt), rt)
+  } else if (kind == "DOT") {
+    t = v2_dot_type(id)
+    TYPEOF[id] = t
+  } else if (kind == "CALL") {
+    t = ((id) in TYPEOF) ? TYPEOF[id] : "Unknown"
+  } else if (kind == "LET" || kind == "LETQ") {
+    typeann_id = 0; expr_id = 0
+    for (k = 1; k <= AST[id,"nc"]; k++) {
+      child = AST[id,"c" k]
+      if (AST[child,"kind"] == "TYPEANN") typeann_id = child
+      else                                expr_id    = child
+    }
+    if (typeann_id != 0 && expr_id != 0) {
+      ct = TYPEOF[expr_id]
+      if (ct != "" && !v2_type_compat(AST[typeann_id,"text"], ct)) {
+        v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " ct " to " AST[typeann_id,"text"])
+      }
+    }
+    t = ""
+  } else if (kind == "RETURN") {
+    if (AST[id,"nc"] >= 1) {
+      ct = TYPEOF[AST[id,"c1"]]
+      if (ct != "" && V2_CUR_FUNC_RET != "" && V2_CUR_FUNC_RET != "Unknown" && \
+          !v2_type_compat(V2_CUR_FUNC_RET, ct)) {
+        v2_diag(AST[id,"line"], 1, \
+          "function " V2_CUR_FUNC_NAME " expects return " V2_CUR_FUNC_RET ", got " ct)
+      }
+    }
+    t = ""
+  }
+
+  if (t != "") TYPEOF[id] = t
+  return t
+}
+
 # ─── エントリポイント ─────────────────────────────────────────────
 
 function v2_check() {
@@ -178,4 +385,5 @@ function v2_check() {
 
   v2_collect(1)
   v2_check_calls(1)
+  v2_infer(1)
 }

@@ -92,6 +92,7 @@ function v2_expr_until_marker(i, parent,    sp_saved, expr_id) {
     if (RPN[i,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[i,"val"], RPN[i,"line"])
     else if (RPN[i,"kind"] == "OP")   v2_reduce_op(RPN[i,"val"], RPN[i,"line"])
     else if (RPN[i,"kind"] == "CALL") v2_reduce_call(RPN[i,"val"], RPN[i,"arity"], RPN[i,"line"])
+    else if (RPN[i,"kind"] == "RAW")  V2_STK[++V2_SP] = v2_leaf("RAW", RPN[i,"val"], RPN[i,"line"])
     i++
   }
   if (V2_SP > sp_saved) {
@@ -258,6 +259,7 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
     if (RPN[j,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[j,"val"], RPN[j,"line"])
     else if (RPN[j,"kind"] == "OP")   v2_reduce_op(RPN[j,"val"], RPN[j,"line"])
     else if (RPN[j,"kind"] == "CALL") v2_reduce_call(RPN[j,"val"], RPN[j,"arity"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "RAW")  V2_STK[++V2_SP] = v2_leaf("RAW", RPN[j,"val"], RPN[j,"line"])
     j++
   }
 
@@ -291,6 +293,7 @@ function v2_parse_let(i, parent,    varname, let_id, typeann_id, j, expr_id) {
     if (RPN[j,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[j,"val"], RPN[j,"line"])
     else if (RPN[j,"kind"] == "OP")   v2_reduce_op(RPN[j,"val"], RPN[j,"line"])
     else if (RPN[j,"kind"] == "CALL") v2_reduce_call(RPN[j,"val"], RPN[j,"arity"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "RAW")  V2_STK[++V2_SP] = v2_leaf("RAW", RPN[j,"val"], RPN[j,"line"])
     j++
   }
 
@@ -318,6 +321,7 @@ function v2_parse_return(i, parent,    j, return_id, sp_saved, expr_id) {
     if (RPN[j,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[j,"val"], RPN[j,"line"])
     else if (RPN[j,"kind"] == "OP")   v2_reduce_op(RPN[j,"val"], RPN[j,"line"])
     else if (RPN[j,"kind"] == "CALL") v2_reduce_call(RPN[j,"val"], RPN[j,"arity"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "RAW")  V2_STK[++V2_SP] = v2_leaf("RAW", RPN[j,"val"], RPN[j,"line"])
     j++
   }
   if (V2_SP > sp_saved) {

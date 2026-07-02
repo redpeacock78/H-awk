@@ -204,6 +204,15 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
       continue
     }
 
+    # awk フィールド参照 $0 / $NF は DSL の演算子集合に属さない素の awk 式。
+    # 診断せず 1 個の RAW オペランドとして素通しする（$IDENT / $NUM の単純形のみ）。
+    if (t == "OP" && TOK[k,"text"] == "$" && \
+        (TOK[k+1,"kind"] == "NUM" || TOK[k+1,"kind"] == "IDENT")) {
+      v2_emit_rpn("RAW", "$" TOK[k+1,"text"], line, "")
+      k++   # フィールド番号/識別子トークンをスキップ
+      continue
+    }
+
     if (t == "OP") {
       # 単項 - / ! : 式先頭・演算子直後・"(" 直後・"," 直後に現れる場合は
       # arity 1 の NEG / NOT として扱う（二項演算子として push しない）。
