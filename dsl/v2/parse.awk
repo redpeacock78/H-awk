@@ -38,8 +38,10 @@ function v2_addchild(parent, child) {
 # ─── 式還元 ──────────────────────────────────────────────────────
 
 # OPERAND の val から適切なリーフノードを返す
+# val ~ /^"/ のとき STRLIT（引用符を含むまま text に保持）
 function v2_operand_node(val, line) {
   if (val ~ /^[0-9]/) return v2_leaf("NUMLIT", val, line)
+  if (val ~ /^"/)     return v2_leaf("STRLIT", val, line)
   return v2_leaf("IDENT", val, line)
 }
 

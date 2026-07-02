@@ -135,7 +135,7 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp) {
     }
 
     if (t == "IDENT" || t == "NUM" || t == "STR" || t == "TYPE") {
-      v2_emit_rpn("OPERAND", TOK[k,"text"], line, "")
+      v2_emit_rpn("OPERAND", (t == "STR") ? ("\"" TOK[k,"text"] "\"") : TOK[k,"text"], line, "")
       continue
     }
 
