@@ -12,10 +12,12 @@
 #   TYPEOF[id]             AST ノード id の型（式ノード全般。文ノードは持たない）
 #
 # v2_check() はこのファイルの唯一のエントリポイント。
-# 3 周構成:
+# 5 周構成:
 #   1. v2_collect(1)     -- FUNC ノードを収集して SIG[] を充填（前方参照に対応するため全体を先に走査）
 #   2. v2_check_calls(1) -- CALL ノードの arity を検査し TYPEOF[] を設定
-#   3. v2_infer(1)       -- 後順走査でボトムアップ型推論を行い、LET/RETURN の型注釈を検査
+#   3. v2_infer(1)       -- 後順走査でボトムアップ型推論を行い、LET/RETURN の型注釈・LETQ の ?= 規則を検査
+#   4. v2_check_when(1)  -- WHEN ノードの網羅性（ok/ng/some/none・型付き ng 腕の union 網羅）を検査
+#   5. v2_check_brand(1) -- CALL 引数の型（XSS ブランド型含む）を SIG[] の宣言と照合
 
 # ─── 組込みシグネチャ・型エイリアス登録（dsl/sig.awk より移植） ──────
 
@@ -351,7 +353,7 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     TYPEOF[id] = t
   } else if (kind == "CALL") {
     t = ((id) in TYPEOF) ? TYPEOF[id] : "Unknown"
-  } else if (kind == "LET" || kind == "LETQ") {
+  } else if (kind == "LET") {
     typeann_id = 0; expr_id = 0
     for (k = 1; k <= AST[id,"nc"]; k++) {
       child = AST[id,"c" k]
@@ -364,6 +366,15 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
         v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " ct " to " AST[typeann_id,"text"])
       }
     }
+    t = ""
+  } else if (kind == "LETQ") {
+    typeann_id = 0; expr_id = 0
+    for (k = 1; k <= AST[id,"nc"]; k++) {
+      child = AST[id,"c" k]
+      if (AST[child,"kind"] == "TYPEANN") typeann_id = child
+      else                                expr_id    = child
+    }
+    v2_coalesce_type(id, typeann_id, expr_id)
     t = ""
   } else if (kind == "RETURN") {
     if (AST[id,"nc"] >= 1) {
@@ -381,6 +392,144 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
   return t
 }
 
+# ─── パス 3 補助: LETQ（?=）の型規則（Task 9） ───────────────────────
+
+# t の Union 各要素が Option<...> / Result<...> のいずれかであれば真
+function v2_is_nullable(t,    parts, n, i) {
+  n = v2_split_union(t, parts)
+  if (n < 1) return 0
+  for (i = 1; i <= n; i++) {
+    if (parts[i] !~ /^Option</ && parts[i] !~ /^Result</) return 0
+  }
+  return 1
+}
+
+# `let name [: Type] ?= expr` の RHS 型を検査する。
+# RHS が Unknown なら検査しない（誤検出防止）。RHS が Option/Result でなければ
+# エラー（dsl/desugar_let.awk の "?= requires Option or Result" 互換）。
+# 型注釈があれば unwrap 後の型と比較する。
+function v2_coalesce_type(id, typeann_id, expr_id,    ct, inner) {
+  if (expr_id == 0) return
+  ct = TYPEOF[expr_id]
+  if (ct == "" || ct == "Unknown") return
+  if (!v2_is_nullable(ct)) {
+    v2_diag(AST[id,"line"], 1, "?= requires Option or Result, got " ct)
+    return
+  }
+  if (typeann_id == 0) return
+  inner = v2_unwrap_type(ct)
+  # json.decode_t/ctx.req.json_t 等の SIG は未解決の generic 型引数 "T" を
+  # そのまま ret に持つ（dsl/desugar_let.awk の resolved フォールバックと同様、
+  # 未解決なら注釈側を信用して検査しない）。
+  if (inner == "T") return
+  if (inner != "" && !v2_type_compat(AST[typeann_id,"text"], inner)) {
+    v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " inner " to " AST[typeann_id,"text"])
+  }
+}
+
+# ─── パス 4: when 網羅性検査（Task 9） ───────────────────────────────
+
+# Result<T, E> の E 部分を取り出す（Union でなければそのまま返す）
+function v2_result_err_part(t,    m) {
+  if (match(t, /^Result<[^,]+,[[:space:]]*(.+)>$/, m)) return m[1]
+  return ""
+}
+
+# WHEN ノードを再帰的に走査し、腕の網羅性を検査する。
+# - 対象式が Unknown/未知型なら検査しない。
+# - `_`/`default` 腕があれば免除。
+# - ok/some 以外の腕（ng/none）が 1 つもなければ
+#   "when...of missing ng/none/default branch"。
+# - 対象式が Result<T, E1|E2> のように型付きエラー Union を持ち、
+#   型付き ng 腕（`ng e<Type>:` / `ng <Type>:`）のみでカバーしている場合、
+#   未カバーの E メンバーごとに "when...of missing arm for E (add '...' or 'default:')"。
+function v2_check_when(id,    k, j, arm, pat, tag, typeann_id, \
+                        target_id, ttype, is_result, catchall, ng_count, \
+                        covered, err_part, members, nmem, i) {
+  if (AST[id,"kind"] == "WHEN") {
+    target_id = AST[id,"c1"]
+    ttype = TYPEOF[target_id]
+    if (ttype != "" && ttype != "Unknown" && (ttype ~ /^Option</ || ttype ~ /^Result</)) {
+      is_result = (ttype ~ /^Result</)
+      catchall = 0
+      ng_count = 0
+      delete covered
+      for (k = 2; k <= AST[id,"nc"]; k++) {
+        arm = AST[id,"c" k]
+        pat = AST[arm,"c1"]
+        tag = AST[pat,"text"]
+        typeann_id = 0
+        for (j = 1; j <= AST[pat,"nc"]; j++) {
+          if (AST[AST[pat,"c" j],"kind"] == "TYPEANN") typeann_id = AST[pat,"c" j]
+        }
+        if (tag == "_" || tag == "default") {
+          catchall = 1
+        } else if (tag == "none") {
+          ng_count++
+          catchall = 1
+        } else if (tag == "ng") {
+          ng_count++
+          if (typeann_id != 0) covered[AST[typeann_id,"text"]] = 1
+          else                 catchall = 1
+        }
+      }
+      if (ng_count == 0 && !catchall) {
+        v2_diag(AST[id,"line"], 1, "when...of missing ng/none/default branch")
+      } else if (!catchall && is_result) {
+        err_part = v2_result_err_part(ttype)
+        if (err_part != "") {
+          nmem = v2_split_union(err_part, members)
+          if (nmem > 1) {
+            for (i = 1; i <= nmem; i++) {
+              if (!(members[i] in covered)) {
+                v2_diag(AST[id,"line"], 1, \
+                  "when...of missing arm for " members[i] " (add 'ng e<" members[i] ">:' or 'default:')")
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_check_when(AST[id,"c" k])
+}
+
+# ─── パス 5: CALL 引数の型検査（XSS ブランド型を含む、Task 9） ────────
+
+# CALL ノードを再帰的に走査し、実引数の型を SIG["name","argN"] と照合する。
+# PIPE の RHS にある CALL は v2_check_calls と同様に extra で引数位置をずらす。
+# safe.html.fragment への文字列リテラル引数は静的 HTML として常に許容する
+# （dsl/typecheck.awk の同名の特例に合わせる）。
+function v2_check_brand(id, extra,    k, name, arity, argidx, expected, actual, child, child_extra) {
+  if (AST[id,"kind"] == "CALL") {
+    name = AST[id,"text"]
+    if ((name,"arity") in SIG) {
+      arity = SIG[name,"arity"]
+      for (k = 1; k <= AST[id,"nc"]; k++) {
+        child  = AST[id,"c" k]
+        argidx = k + extra
+        if ((name, "arg" argidx) in SIG) {
+          expected = SIG[name, "arg" argidx]
+        } else if (arity == -1 && (name, "arg1") in SIG) {
+          expected = SIG[name, "arg1"]
+        } else {
+          continue
+        }
+        if (name == "safe.html.fragment" && AST[child,"kind"] == "STRLIT") continue
+        actual = ((child) in TYPEOF) ? TYPEOF[child] : ""
+        if (actual == "" || v2_type_compat(expected, actual)) continue
+        v2_diag(AST[id,"line"], 1, name " argument " argidx " expects " expected ", got " actual)
+      }
+    }
+  }
+
+  for (k = 1; k <= AST[id,"nc"]; k++) {
+    child_extra = (AST[id,"kind"] == "PIPE" && k == 2) ? 1 : 0
+    v2_check_brand(AST[id,"c" k], child_extra)
+  }
+}
+
 # ─── エントリポイント ─────────────────────────────────────────────
 
 function v2_check() {
@@ -391,4 +540,6 @@ function v2_check() {
   v2_collect(1)
   v2_check_calls(1, 0)
   v2_infer(1)
+  v2_check_when(1)
+  v2_check_brand(1, 0)
 }

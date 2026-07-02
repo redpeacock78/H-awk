@@ -1,0 +1,5 @@
+5	Str
+6	Unknown
+7	Result<T, JsonParseError|JsonTypeError|JsonTooDeepError>
+9	Unknown
+10	Response
