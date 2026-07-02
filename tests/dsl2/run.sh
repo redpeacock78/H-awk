@@ -1,31 +1,53 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# tests/dsl2/run.sh -- DSL v2 工程別 golden test
+set -e
+cd "$(dirname "$0")/../.."
 
-PASS=0
-FAIL=0
+PASS=0; FAIL=0
 
-for case_dir in tests/dsl2/*/; do
-  case_name=$(basename "$case_dir")
-  input_file="$case_dir/input.awk"
-  expected_file="$case_dir/expected.awk"
+check() { # name, expected_file, actual_text
+  if diff -u "$2" <(printf '%s\n' "$3") >/dev/null 2>&1; then
+    printf "  PASS: %s\n" "$1"; PASS=$((PASS + 1))
+  else
+    printf "  FAIL: %s\n" "$1"
+    diff -u "$2" <(printf '%s\n' "$3") || true
+    FAIL=$((FAIL + 1))
+  fi
+}
 
-  if [ ! -f "$input_file" ] || [ ! -f "$expected_file" ]; then
+for dir in tests/dsl2/*/; do
+  name=$(basename "$dir")
+  [[ -f "${dir}input.awk" ]] || continue
+
+  # エラー fixture
+  if [[ -f "${dir}expected_stderr" ]]; then
+    set +e
+    actual_err=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>&1 >/dev/null)
+    ret=$?
+    set -e
+    if [[ $ret -eq 1 ]] && grep -qF "$(cat "${dir}expected_stderr")" <<<"$actual_err"; then
+      printf "  PASS: %s\n" "$name"; PASS=$((PASS + 1))
+    else
+      printf "  FAIL: %s (exit=%d)\n  got: %s\n" "$name" "$ret" "$actual_err"
+      FAIL=$((FAIL + 1))
+    fi
     continue
   fi
 
-  output=$(LC_ALL=C gawk -b -f dsl/v2/main.awk "$input_file" 2>&1)
-  expected=$(cat "$expected_file")
+  # 工程ダンプ fixture（存在するものだけ検査）
+  for stage in lex rpn ast types; do
+    [[ -f "${dir}expected.${stage}.tsv" ]] || continue
+    actual=$(gawk -v V2_DUMP=$stage -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null)
+    check "$name ($stage)" "${dir}expected.${stage}.tsv" "$actual"
+  done
 
-  if [ "$output" = "$expected" ]; then
-    ((PASS++))
-  else
-    echo "FAIL: $case_name" >&2
-    echo "expected:" >&2
-    echo "$expected" >&2
-    echo "got:" >&2
-    echo "$output" >&2
-    ((FAIL++))
+  # emit fixture
+  if [[ -f "${dir}expected.awk" ]]; then
+    actual=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null)
+    check "$name (emit)" "${dir}expected.awk" "$actual"
   fi
 done
 
-printf "%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
+[[ $FAIL -eq 0 ]]
