@@ -3,6 +3,6 @@ function run() -> Void {
     ok v:
       return v
     ng _:
-      return 0
+      return ""
   end
 }

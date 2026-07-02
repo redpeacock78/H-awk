@@ -114,7 +114,7 @@ function v2_tok_str(rest, lineno, startcol,    i, ch, ch2, acc, acc_col, consume
 
     # 文字列終端
     if (ch == "\"") {
-      if (length(acc) > 0) v2_push("STR", acc, lineno, acc_col)
+      v2_push("STR", acc, lineno, acc_col)
       return i   # 消費した文字数（'"' 開始の i=1 含む）
     }
 
