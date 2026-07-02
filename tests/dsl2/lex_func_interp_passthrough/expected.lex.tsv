@@ -1,0 +1,14 @@
+1	KW	1	1	function
+2	IDENT	1	10	handler
+3	LP	1	17	(
+4	RP	1	18	)
+5	LBRACE	1	20	{
+6	KW	2	3	let
+7	IDENT	2	7	s
+8	OP	2	9	=
+9	STR	2	11	a
+10	INTERP_OPEN	2	13	#{
+11	IDENT	2	15	x
+12	INTERP_CLOSE	2	16	}
+13	STR	2	17	b
+14	RBRACE	3	1	}

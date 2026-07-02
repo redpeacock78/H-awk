@@ -43,6 +43,28 @@ function v2_is_dsl(line,    s) {
   return 0
 }
 
+# 文字列リテラル・コメントを丸ごと取り除いた行を返す（ブレース深さ計測専用）。
+# v2_strip_str_comment と異なり、文字列内の補間 #{ ... } も丸ごと取り除く。
+# 補間の閉じ } まで対称に残さないと、文字列内の "#{" だけが LBRACE として
+# カウントされて深さが過大になり、本体終端 } の探索がファイル末尾まで暴走する
+# （実際に無注釈関数の本体に補間文字列があるケースで発生した回帰）。
+function v2_strip_for_brace_count(line,    i, ch, out, instr) {
+  out   = ""
+  instr = 0
+  for (i = 1; i <= length(line); i++) {
+    ch = substr(line, i, 1)
+    if (instr) {
+      if (ch == "\\") { i++; continue }
+      if (ch == "\"") { instr = 0; continue }
+      continue
+    }
+    if (ch == "\"") { instr = 1; continue }
+    if (ch == "#") break
+    out = out ch
+  }
+  return out
+}
+
 # 注釈なし（-> RETTYPE を持たない）DSL 関数ヘッダを検出する。
 # 本体（{ に対応する } まで）に DSL 構文が 1 行でもあれば、
 # ヘッダ行から閉じ } の行までを V2_FORCE_DSL[] に印付けする。
@@ -55,13 +77,15 @@ function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_op
     depth   = 1
     has_dsl = 0
     for (j = i + 1; j <= nlines && depth > 0; j++) {
-      stripped = v2_strip_str_comment(V2_RAWLINE[j])
+      stripped = v2_strip_for_brace_count(V2_RAWLINE[j])
       tmp = stripped; n_open  = gsub(/{/, "", tmp)
       tmp = stripped; n_close = gsub(/}/, "", tmp)
       depth += n_open - n_close
       if (v2_is_dsl(V2_RAWLINE[j])) has_dsl = 1
     }
-    if (has_dsl) {
+    # depth が 0 に戻らずファイル末尾まで走った（本体が閉じていない）場合は
+    # 誤って残り全行を DSL 扱いにしないよう、印付けをスキップする。
+    if (has_dsl && depth <= 0) {
       for (k = i; k < j; k++) V2_FORCE_DSL[k] = 1
     }
   }
