@@ -361,7 +361,10 @@ function v2_rpn_when(i,    line, j, end_idx, depth, k, pat_text, arm_line) {
     pat_text = ""
     k = i
     while (k < end_idx && TOK[k,"kind"] != "COLON") {
-      if (pat_text != "") pat_text = pat_text " "
+      # `<` / `>` / `<` 直後はスペースなしで連結（型注釈 e<NotFoundError> 対応）
+      if (pat_text != "" && TOK[k,"text"] != ">" && TOK[k,"text"] != "<" && \
+          (k == i || TOK[k-1,"text"] != "<"))
+        pat_text = pat_text " "
       pat_text = pat_text TOK[k,"text"]
       k++
     }

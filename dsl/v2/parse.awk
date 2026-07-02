@@ -99,12 +99,19 @@ function v2_expr_until_marker(i, parent,    sp_saved, expr_id) {
 # "some v" → PAT(text=some, c1=IDENT v)
 # "none"   → PAT(text=none)
 # "_"      → PAT(text=_)
-function v2_parse_pat(text, line,    pat_id, parts, n, k) {
+function v2_parse_pat(text, line,    pat_id, parts, n, k, m) {
   pat_id = v2_node("PAT", line)
   n = split(text, parts, " ")
   AST[pat_id,"text"] = parts[1]
-  for (k = 2; k <= n; k++)
-    v2_addchild(pat_id, v2_leaf("IDENT", parts[k], line))
+  for (k = 2; k <= n; k++) {
+    # `e<NotFoundError>` → IDENT(e) + TYPEANN(NotFoundError)
+    if (match(parts[k], /^([^<]+)<([^>]+)>$/, m)) {
+      v2_addchild(pat_id, v2_leaf("IDENT",   m[1], line))
+      v2_addchild(pat_id, v2_leaf("TYPEANN", m[2], line))
+    } else {
+      v2_addchild(pat_id, v2_leaf("IDENT", parts[k], line))
+    }
+  }
   return pat_id
 }
 
@@ -190,9 +197,6 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
       v2_addchild(func_id, typeann_id)
       j++
       break
-    } else if (RPN[j,"val"] ~ /^:/) {
-      # `:TYPE` はパラメータ型注釈（直前 PARAM に addchild 済み）
-      j++
     } else {
       # パラメータ名
       param_id = v2_node("PARAM", RPN[j,"line"])
