@@ -179,12 +179,17 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp) {
 # ─── 式区間末尾の探索 ────────────────────────────────────────────
 
 # トークン start から走査し、式が終わる最後のトークン番号を返す。
-# 終端条件: 深さ 0 での RBRACE/RP/RBRACK、または文開始 KW (let/function/when/end)。
-function v2_find_expr_end(start,    k, depth, t, txt) {
-  depth = 0
+# 終端条件: 深さ 0 での RBRACE/RP/RBRACK、文開始 KW (let/function/when/end/return)、
+# または深さ 0 でのソース行の変化（式は原則同一行内で終端する。丸括弧・角括弧・
+# 波括弧による継続は depth > 0 のため対象外）。
+function v2_find_expr_end(start,    k, depth, t, txt, startline) {
+  depth     = 0
+  startline = TOK[start,"line"]
   for (k = start; k <= TOK["n"]; k++) {
     t   = TOK[k,"kind"]
     txt = TOK[k,"text"]
+
+    if (depth == 0 && k > start && TOK[k,"line"] != startline) return k - 1
 
     if (t == "LP" || t == "LBRACK") { depth++; continue }
 
@@ -203,7 +208,8 @@ function v2_find_expr_end(start,    k, depth, t, txt) {
     }
 
     if (depth == 0 && t == "KW" &&
-        (txt == "let" || txt == "function" || txt == "when" || txt == "end")) {
+        (txt == "let" || txt == "function" || txt == "when" ||
+         txt == "end" || txt == "return")) {
       return k - 1
     }
   }
@@ -290,25 +296,42 @@ function v2_rpn_func(i,    fname, line, j) {
   return TOK["n"] + 1
 }
 
+# 型注釈の先頭トークン位置 j から、型を構成するトークン（TYPE/IDENT と
+# 区切り記号 < > |）を読み飛ばし、型注釈の直後（= / ?= が来るはず）の位置を返す。
+# 例: Dict<Str, Str> / Str|Int / Result<T, E> のような複数トークンの型に対応する。
+function v2_skip_type(j) {
+  j++   # 型名先頭トークンを読み飛ばす
+  while (j <= TOK["n"] &&
+         ((TOK[j,"kind"] == "OP" &&
+           (TOK[j,"text"] == "<" || TOK[j,"text"] == ">" || TOK[j,"text"] == "|")) ||
+          TOK[j,"kind"] == "TYPE" || TOK[j,"kind"] == "IDENT" || TOK[j,"kind"] == "COMMA"))
+    j++
+  return j
+}
+
 # let NAME [: TYPE] = EXPR  または  let NAME [: TYPE] ?= EXPR
-function v2_rpn_let(i,    line, name, j, marker, expr_end) {
+function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, k) {
   line = TOK[i,"line"]
   name = TOK[i+1,"text"]
 
   # LET / LETQ 判別: 型注釈を読み飛ばして代入演算子を確認
   j = i + 2
-  if (TOK[j,"kind"] == "COLON") j += 2
+  if (TOK[j,"kind"] == "COLON") j = v2_skip_type(j + 1)
   marker = (TOK[j,"kind"] == "OP" && TOK[j,"text"] == "?=") ? "LETQ" : "LET"
 
   v2_emit_rpn("MARKER", marker, line, "")
   v2_emit_rpn("OPERAND", name, line, "")
 
-  # 型注釈 [: TYPE]
+  # 型注釈 [: TYPE]（Dict<Str, Str> / Str|Int のような複数トークンの型に対応）
   j = i + 2
   if (TOK[j,"kind"] == "COLON") {
     j++  # skip :
-    v2_emit_rpn("OPERAND", TOK[j,"text"], TOK[j,"line"], "")
-    j++  # skip TYPE
+    typestart = j
+    j = v2_skip_type(j)
+    typetext = ""
+    for (k = typestart; k < j; k++)
+      typetext = typetext ((TOK[k,"kind"] == "COMMA") ? ", " : TOK[k,"text"])
+    v2_emit_rpn("OPERAND", typetext, TOK[typestart,"line"], "")
   }
 
   # = または ?= をスキップ

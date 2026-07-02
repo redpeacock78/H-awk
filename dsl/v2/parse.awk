@@ -120,7 +120,7 @@ function v2_parse_pat(text, line,    pat_id, parts, n, k, m) {
 # close_marker まで文を積む
 # 戻り値: close_marker の一つ後の位置
 function v2_p_block(i, parent, close_marker) {
-  while (i <= RPN["n"] && RPN[i,"val"] != close_marker) {
+  while (i <= RPN["n"] && !(RPN[i,"kind"] == "MARKER" && RPN[i,"val"] == close_marker)) {
     if (RPN[i,"kind"] == "MARKER") {
       i = v2_stmt_dispatch(RPN[i,"val"], i, parent)
       i++  # 終端マーカーを読み飛ばす

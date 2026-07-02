@@ -38,13 +38,13 @@ for dir in tests/dsl2/*/; do
   # 工程ダンプ fixture（存在するものだけ検査）
   for stage in lex rpn ast types; do
     [[ -f "${dir}expected.${stage}.tsv" ]] || continue
-    actual=$(gawk -v V2_DUMP=$stage -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null)
+    actual=$(gawk -v V2_DUMP=$stage -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null) || true
     check "$name ($stage)" "${dir}expected.${stage}.tsv" "$actual"
   done
 
   # emit fixture
   if [[ -f "${dir}expected.awk" ]]; then
-    actual=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null)
+    actual=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null) || true
     check "$name (emit)" "${dir}expected.awk" "$actual"
   fi
 done
