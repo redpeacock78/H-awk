@@ -1,0 +1,9 @@
+1	PROGRAM	1	1	2	
+2	FUNC	1	2	3,4	run
+3	TYPEANN	1	0		Void
+4	LET	2	1	9	r
+5	IDENT	2	0		a
+6	IDENT	2	0		f
+7	PIPE	2	2	5,6	
+8	IDENT	2	0		g
+9	PIPE	2	2	7,8	
