@@ -35,6 +35,7 @@ function v2_lex(src,    line, lineno, in_when, in_block, tmp, n_open, n_close) {
       # when...end ブロック追跡
       if (line ~ /(^|[^[:alnum:]_])when([^[:alnum:]_]|$)/) in_when++
       if (line ~ /(^|[^[:alnum:]_])end([^[:alnum:]_]|$)/)  in_when--
+      if (in_when < 0) in_when = 0
       # DSL ブロック { } 深さ追跡（補間内 #{ } は対称なので相殺される）
       tmp = line; n_open  = gsub(/{/, "", tmp)
       tmp = line; n_close = gsub(/}/, "", tmp)
