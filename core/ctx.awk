@@ -66,13 +66,13 @@ function req_json_t(type,  k, ok, out, out_type, msg, key, has_leaf) {
     msg = (awk::HAWK_JSON_ERROR != "") ? awk::HAWK_JSON_ERROR : "invalid JSON"
     return awk::result_ng("JsonParseError", msg)
   }
+  if (type == "JsonScalar" && awk::_jp_root_kind != "scalar")
+    return awk::result_ng("JsonTypeError", "type mismatch: expected JsonScalar but got non-scalar root")
   if (json::_is_container_type(type)) {
     if (type == "Array" && awk::_jp_root_kind != "array")
       return awk::result_ng("JsonTypeError", "type mismatch: expected Array but got non-array root")
     if ((type == "JsonObject" || type == "Map") && awk::_jp_root_kind != "object")
       return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-object root")
-    if (type == "JsonScalar" && awk::_jp_root_kind != "scalar")
-      return awk::result_ng("JsonTypeError", "type mismatch: expected JsonScalar but got non-scalar root")
     return awk::result_ok_from_map(out, out_type)
   }
   has_leaf = 0

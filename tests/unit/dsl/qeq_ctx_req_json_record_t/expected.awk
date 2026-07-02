@@ -1,5 +1,5 @@
-function handler(    _ds_tc_1, obj, _ds_tct_1, _ds_err_type__ds_tc_1) {
-  _ds_tc_1 = ctx::dispatch("req.json_object")
+function handler(    _ds_tc_1, todo, _ds_tct_1, _ds_err_type__ds_tc_1) {
+  _ds_tc_1 = ctx::dispatch("req.json_t", "Todo")
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)
     if (_ds_err_type__ds_tc_1 == "ParseError") return ctx::dispatch("res.status", 400)
@@ -7,6 +7,6 @@ function handler(    _ds_tc_1, obj, _ds_tct_1, _ds_err_type__ds_tc_1) {
     if (_ds_err_type__ds_tc_1 == "NotFoundError") return ctx::dispatch("res.status", 404)
     return ctx::dispatch("res.status", 500)
   }
-  result_val_into_map(_ds_tc_1, obj, _ds_tct_1)
-  return json(res, obj, _ds_tct_1)
+  result_val_into_map(_ds_tc_1, todo, _ds_tct_1)
+  return json(res, todo, _ds_tct_1)
 }

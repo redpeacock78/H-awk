@@ -1,22 +1,30 @@
 # SPDX-License-Identifier: MIT
 # dsl/desugar_let.awk -- let declaration transform + function signature hoisting
 
-function _ds_resolve_t_in_ret(transformed_expr,    _dm, _dispatch_ns, _dispatch_path, _dispatch_t, _sig_key, _ret) {
-    if (!match(transformed_expr, /^([a-zA-Z_][a-zA-Z0-9_]*)::dispatch\("([a-zA-Z_][a-zA-Z0-9_]*)"[[:space:]]*,[[:space:]]*"([A-Z][a-zA-Z0-9_]*)"/, _dm))
-        return ""
-    _dispatch_ns   = _dm[1]
-    _dispatch_path = _dm[2]
-    _dispatch_t    = _dm[3]
-    _sig_key       = _dispatch_ns "." _dispatch_path
-    if (!(_sig_key in _DS_SIG_RET)) return ""
-    _ret = _DS_SIG_RET[_sig_key]
-    gsub(/\<T\>/, _dispatch_t, _ret)
+function _ds_resolve_t_sig(sig_key, type_arg,    _ret) {
+    if (!(sig_key in _DS_SIG_RET)) return ""
+    _ret = _DS_SIG_RET[sig_key]
+    gsub(/\<T\>/, type_arg, _ret)
     return _ret
+}
+
+function _ds_resolve_t_in_ret(transformed_expr,    _dm) {
+    if (!match(transformed_expr, /^([a-zA-Z_][a-zA-Z0-9_]*)::dispatch\("([^"]+)"[[:space:]]*,[[:space:]]*"([^"]+)"/, _dm))
+        return ""
+    return _ds_resolve_t_sig(_dm[1] "." _dm[2], _dm[3])
+}
+
+function _ds_resolve_surface_generic(expr,    m) {
+    if (!match(expr, /^((ctx\.)?[a-z][a-zA-Z0-9_]*(\.[a-z][a-zA-Z0-9_]*)*)<([^>]+)>[[:space:]]*\(/, m))
+        return ""
+    return _ds_resolve_t_sig(m[1] "_t", m[4])
 }
 
 # _ds_infer_type: 式の静的型を推論する。不明な場合は "" を返す
 function _ds_infer_type(expr,    m, _m, arg_type, _resolved) {
     _resolved = _ds_resolve_t_in_ret(expr)
+    if (_resolved != "") return _resolved
+    _resolved = _ds_resolve_surface_generic(expr)
     if (_resolved != "") return _resolved
     # 数字のみの文字列リテラル: "8080" 形式 → NumericStr
     if (expr ~ /^"[0-9]+"$/) return "NumericStr"
@@ -89,6 +97,8 @@ function _ds_infer_type(expr,    m, _m, arg_type, _resolved) {
 function _ds_infer_type_safe(expr,    m, _m, m2, key, fname, arg_type, _resolved) {
     _resolved = _ds_resolve_t_in_ret(expr)
     if (_resolved != "") return _resolved
+    _resolved = _ds_resolve_surface_generic(expr)
+    if (_resolved != "") return _resolved
     if (expr ~ /^"[0-9]+"$/) return "NumericStr"
     if (expr ~ /^".*"$/) return "Str"
     if (expr ~ /^-?[0-9]+$/) return "Int"
@@ -156,11 +166,13 @@ function _ds_kind_of(t) {
 }
 
 function _ds_is_json_decode_rhs(rhs) {
-    return (rhs ~ /^(json\.decode(_object|_t)?|ctx\.req\.json(_object|_t)?)[[:space:]]*[(<]/)
+    return (rhs ~ /^(json\.decode(_object|_t)?|ctx\.req\.json(_object|_t)?)[[:space:]]*[(<]/ || \
+            rhs ~ /^(json::dispatch\("decode(_object|_t)?"|ctx::dispatch\("req\.json(_object|_t)?")/)
 }
 
 function _ds_is_json_container_type(t) {
-    return (t == "JsonValue" || t == "JsonObject" || t == "Array" || t == "Map" || t == "JsonScalar")
+    return (t == "JsonValue" || t == "JsonObject" || t == "Array" || t == "Map" || \
+            t ~ /^List</ || t ~ /^Dict</ || (t in _DS_RECORD_TYPE))
 }
 
 function _ds_strip_untrusted(t,    m) {
@@ -257,8 +269,11 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, surface_rhs, de
     } else {
       if (_ds_is_json_decode_rhs(surface_rhs)) {
         resolved = _ds_strip_untrusted(_ds_inner_type(rhs_type))
+        if (resolved == "" || resolved == "T") resolved = var_type
         if (_ds_is_json_container_type(resolved)) {
-          _DS_let_locals[++_DS_let_count] = arr[2] "_types"
+          map_type_var = "_ds_tct_" _DS_tc_count
+          _DS_let_locals[++_DS_let_count] = map_type_var
+          _DS_JSON_TYPEVAR[_DS_func_name, arr[2]] = map_type_var
         } else {
           map_var = "_ds_tcm_" _DS_tc_count
           map_type_var = "_ds_tcmt_" _DS_tc_count
@@ -272,7 +287,9 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, surface_rhs, de
       _DS_body_buf[++_DS_body_count] = arr[1] "}"
       if (_ds_is_json_decode_rhs(surface_rhs)) {
         if (_ds_is_json_container_type(resolved)) {
-          _DS_body_buf[++_DS_body_count] = arr[1] "result_val_into_map(_ds_tc_" _DS_tc_count ", " arr[2] ", " arr[2] "_types)"
+          _DS_body_buf[++_DS_body_count] = arr[1] "result_val_into_map(_ds_tc_" _DS_tc_count ", " arr[2] ", " map_type_var ")"
+          if (resolved == "Array" || resolved ~ /^List</)
+            _DS_body_buf[++_DS_body_count] = arr[1] arr[2] "[\"__json_type\"] = \"array\""
         } else {
           _DS_body_buf[++_DS_body_count] = arr[1] "result_val_into_map(_ds_tc_" _DS_tc_count ", " map_var ", " map_type_var ")"
           _DS_body_buf[++_DS_body_count] = arr[1] arr[2] " = " map_var "[\"\"]"

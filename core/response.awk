@@ -6,7 +6,7 @@
 #   header(res, name, value)             -- 上書き
 #   header_append(res, name, value)      -- 既存に追加 (LF区切り内部表現)
 #   redirect(res, location [, code])
-#   json(res, data [, code])
+#   json(res, data [, types] [, code])
 #   json_raw(res, str [, code])
 #   text(res, body [, code])
 #   html(res, body [, code])
@@ -49,13 +49,19 @@ function redirect(res, location, code) {
   res["body"] = ""
 }
 
-function json(res, data, code,    body, validated) {
-  body = json_encode_any(data)
+function json(res, data, types, code,    body, validated, status_code) {
+  if (typeof(types) == "array") {
+    status_code = code
+    body = json_encode_any(data, types)
+  } else {
+    status_code = types
+    body = json_encode_any(data)
+  }
   if (LIBS_LOADED["json"]) {
     validated = hawk_json_encode(body)
     if (validated != "") body = validated
   }
-  if (code != "" && code != 0) res["status"] = code
+  if (status_code != "" && status_code != 0) res["status"] = status_code
   else if (!("status" in res)) res["status"] = 200
   res["header:content-type"] = "application/json; charset=utf-8"
   res["body"] = body

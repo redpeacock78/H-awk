@@ -419,7 +419,9 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
   header_lineno = (_DS_match_lineno[d] != "" ? _DS_match_lineno[d] : lineno)
   _saved_lineno = _DS_current_lineno
   _DS_current_lineno = header_lineno
-  type_t = _ds_infer_type(_DS_match_expr[d])
+  type_t = _ds_infer_type(_ds_dot_transform(_DS_match_expr[d]))
+  if (type_t == "")
+    type_t = _ds_infer_type(_DS_match_expr[d])
   _DS_current_lineno = _saved_lineno
   type_t = _ds_strip_effect(type_t)
 
@@ -447,10 +449,13 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
     if (!_ds_is_json_container_type(resolved)) {
       map_var = "_ds_mcm_" _DS_mc_count
       map_type_var = "_ds_mcmt_" _DS_mc_count
+    } else {
+      map_type_var = "_ds_mct_" _DS_mc_count
+      _DS_JSON_TYPEVAR[_DS_func_name, _DS_match_ok_var[d]] = map_type_var
     }
     if (_DS_in_function) {
       if (_ds_is_json_container_type(resolved))
-        _ds_match_add_local(_DS_match_ok_var[d] "_types")
+        _ds_match_add_local(map_type_var)
       else {
         _ds_match_add_local(map_var)
         _ds_match_add_local(map_type_var)
@@ -493,11 +498,13 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
   if (_DS_match_ok_var[d] != "") {
     if (json_result_bind) {
       if (_ds_is_json_container_type(resolved))
-        _ds_match_push(_DS_match_indent[d] "  result_val_into_map(" tmpvar ", " _DS_match_ok_var[d] ", " _DS_match_ok_var[d] "_types)", header_lineno)
+        _ds_match_push(_DS_match_indent[d] "  result_val_into_map(" tmpvar ", " _DS_match_ok_var[d] ", " map_type_var ")", header_lineno)
       else {
         _ds_match_push(_DS_match_indent[d] "  result_val_into_map(" tmpvar ", " map_var ", " map_type_var ")", header_lineno)
         _ds_match_push(_DS_match_indent[d] "  " _DS_match_ok_var[d] " = " map_var "[\"\"]", header_lineno)
       }
+      if (resolved == "Array" || resolved ~ /^List</)
+        _ds_match_push(_DS_match_indent[d] "  " _DS_match_ok_var[d] "[\"__json_type\"] = \"array\"", header_lineno)
     } else {
       _ds_match_push(_DS_match_indent[d] "  " _DS_match_ok_var[d] " = " val_fn "(" tmpvar ")", header_lineno)
     }
@@ -596,7 +603,7 @@ function _ds_match_move_emit_to_parent(d, emit_base,    parent, i, base, cur) {
 
 # Process a collected body line through the full pipeline, push to _DS_body_buf.
 # Normalizes indentation: strips original leading whitespace and prepends _DS_match_indent "  ".
-function _ds_match_process_body(line, lineno, d,    pipe_pre, nc_pre, p, pipe_r, dot_r, nc_r, xf) {
+function _ds_match_process_body(line, lineno, d,    pipe_pre, nc_pre, p, pipe_r, dot_r, nc_r, xf, _json_m, _json_collection) {
   _DS_current_lineno = lineno
   # Normalize indentation: strip original leading whitespace, apply canonical indent
   sub(/^[[:space:]]*/, _DS_match_indent[d] "  ", line)
@@ -612,9 +619,14 @@ function _ds_match_process_body(line, lineno, d,    pipe_pre, nc_pre, p, pipe_r,
   pipe_r = _ds_pipe_transform(line, pipe_pre)
   for (p = 1; p in pipe_pre; p++) _ds_match_push(_ds_dot_transform(pipe_pre[p]), lineno)
   dot_r = _ds_dot_transform(pipe_r)
+  if (match(dot_r, /^([[:space:]]*)return[[:space:]]+ctx::dispatch\("res\.json",[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)\)[[:space:]]*$/, _json_m) && \
+      ((_DS_func_name, _json_m[2]) in _DS_JSON_TYPEVAR)) {
+    dot_r = _json_m[1] "return json(res, " _json_m[2] ", " _DS_JSON_TYPEVAR[_DS_func_name, _json_m[2]] ")"
+    _json_collection = 1
+  }
   nc_r  = _ds_nc_transform(dot_r, nc_pre)
   for (p = 1; p in nc_pre; p++) _ds_match_push(nc_pre[p], lineno)
-  _ds_typecheck_plain_call(nc_r)
+  if (!_json_collection) _ds_typecheck_plain_call(nc_r)
   _ds_check_return(dot_r, lineno)
   xf = _ds_let_transform(nc_r, lineno, line)
   if (xf != "") _ds_match_push(xf, lineno)

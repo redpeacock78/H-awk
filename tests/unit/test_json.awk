@@ -60,6 +60,21 @@ function test_json_encode_any_object(   obj, out) {
   assert_true(index(out, "\"y\":\"hello\"") > 0, "json any: object string field")
 }
 
+function test_json_encode_any_type_sidecar(   obj, types, out) {
+  delete obj
+  delete types
+  obj["n"] = "42"
+  obj["ok"] = "true"
+  obj["none"] = "null"
+  types["n"] = "int"
+  types["ok"] = "bool"
+  types["none"] = "null"
+  out = json_encode_any(obj, types)
+  assert_true(index(out, "\"n\":42") > 0, "json any: sidecar int")
+  assert_true(index(out, "\"ok\":true") > 0, "json any: sidecar bool")
+  assert_true(index(out, "\"none\":null") > 0, "json any: sidecar null")
+}
+
 function test_json_unescape_basic(    res) {
   _json_init()
   res = _json_unescape("hello")
