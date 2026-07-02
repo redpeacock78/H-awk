@@ -8,6 +8,7 @@
 @include "dsl/v2/lex.awk"
 @include "dsl/v2/rpn.awk"
 @include "dsl/v2/parse.awk"
+@include "dsl/v2/check.awk"
 
 BEGIN {
   V2_SRC = (ARGC > 1) ? ARGV[1] : "/dev/stdin"
@@ -25,8 +26,7 @@ BEGIN {
   exit 0
 }
 
-# Task 6 以降で各モジュールに移す仮実装。
-function v2_check() { }
+# Task 8 以降で各モジュールに移す仮実装。
 function v2_emit(   l) { for (l = 1; l <= V2_NLINES; l++) print PASS[l] }
 function v2_dump_lex(   i) { for (i = 1; i <= TOK["n"]; i++) printf "%d\t%s\t%d\t%d\t%s\n", i, TOK[i,"kind"], TOK[i,"line"], TOK[i,"col"], TOK[i,"text"] }
 function v2_dump_rpn(   i) { for (i = 1; i <= RPN["n"]; i++) printf "%d\t%s\t%d\t%s\t%s\n", i, RPN[i,"kind"], RPN[i,"line"], RPN[i,"val"], ((RPN[i,"kind"]=="CALL") ? RPN[i,"arity"] : "") }
