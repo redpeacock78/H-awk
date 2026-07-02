@@ -47,6 +47,7 @@ function v2_operand_node(val, line) {
 
 # 二項演算子を還元してスタックに積む
 function v2_reduce_op(op, line,    id, r, l) {
+  if (V2_SP < 2) { v2_diag(line, 0, "stack underflow on operator '" op "'"); return }
   r = V2_STK[V2_SP--]
   l = V2_STK[V2_SP--]
   if      (op == "|>") id = v2_node("PIPE", line)
@@ -61,6 +62,7 @@ function v2_reduce_op(op, line,    id, r, l) {
 
 # 関数呼び出しを還元してスタックに積む
 function v2_reduce_call(name, arity, line,    id, k, args) {
+  if (arity > V2_SP) { v2_diag(line, 0, "stack underflow on call '" name "'"); return }
   id = v2_node("CALL", line)
   AST[id,"text"] = name
   for (k = arity; k >= 1; k--) args[k] = V2_STK[V2_SP--]
