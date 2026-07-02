@@ -14,10 +14,29 @@ function _ds_resolve_t_in_ret(transformed_expr,    _dm) {
     return _ds_resolve_t_sig(_dm[1] "." _dm[2], _dm[3])
 }
 
-function _ds_resolve_surface_generic(expr,    m) {
-    if (!match(expr, /^((ctx\.)?[a-z][a-zA-Z0-9_]*(\.[a-z][a-zA-Z0-9_]*)*)<([^>]+)>[[:space:]]*\(/, m))
+function _ds_resolve_surface_generic(expr,    m, name, i, c, depth, type_arg) {
+    if (!match(expr, /^((ctx\.)?[a-z][a-zA-Z0-9_]*(\.[a-z][a-zA-Z0-9_]*)*)</, m))
         return ""
-    return _ds_resolve_t_sig(m[1] "_t", m[4])
+    name = m[1]
+    for (i = length(name) + 1; i <= length(expr); i++) {
+        c = substr(expr, i, 1)
+        if (c == "<") {
+            if (depth > 0) type_arg = type_arg c
+            depth++
+        } else if (c == ">") {
+            depth--
+            if (depth == 0) {
+                i++
+                while (substr(expr, i, 1) ~ /[[:space:]]/) i++
+                if (substr(expr, i, 1) != "(") return ""
+                return _ds_resolve_t_sig(name "_t", type_arg)
+            }
+            type_arg = type_arg c
+        } else if (depth > 0) {
+            type_arg = type_arg c
+        }
+    }
+    return ""
 }
 
 # _ds_infer_type: 式の静的型を推論する。不明な場合は "" を返す
@@ -279,6 +298,7 @@ function _ds_let_transform(line, lineno, orig_line,    arr, rhs, surface_rhs, de
           map_type_var = "_ds_tcmt_" _DS_tc_count
           _DS_let_locals[++_DS_let_count] = map_var
           _DS_let_locals[++_DS_let_count] = map_type_var
+          _DS_JSON_TYPEVAR[_DS_func_name, arr[2]] = map_type_var
         }
       }
       _DS_let_locals[++_DS_let_count] = "_ds_err_type__ds_tc_" _DS_tc_count

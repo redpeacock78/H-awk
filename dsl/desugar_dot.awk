@@ -61,7 +61,7 @@ function _ds_dot_transform_segs(segs, n,    result, i, code_buf, skip_chars) {
     if (segs[i, "safe"]) {
       # Try to find a dot-call in this code segment
       if (match(segs[i, "safe"] ? segs[i, "text"] : "", \
-                /[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+(<[A-Z][a-zA-Z0-9_]*>)?\(/)) {
+                /[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+(<[^()]*>)?\(/)) {
         # Found a dot-call at RSTART..RSTART+RLENGTH-1 in segs[i,"text"]
         result = result substr(segs[i, "text"], 1, RSTART - 1)
 
@@ -91,7 +91,7 @@ function _ds_dot_transform_segs(segs, n,    result, i, code_buf, skip_chars) {
 # Recursively handle remaining segments after the ")" is found.
 function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
     ns, path, parts, np, j, args, after_close, rem_seg, rem_segs, k, tmp, tparam, tmatch, \
-    _candidate_chain, _candidate_ns, _candidate_path, _dot) {
+    _candidate_chain, _candidate_ns, _candidate_path, _dot, _lt, _i, _c, _depth) {
   # Build full string from cur_rest + subsequent segments
   tmp = cur_rest
   for (k = next_i; k <= n; k++) tmp = tmp segs[k, "text"]
@@ -100,8 +100,17 @@ function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
   after_close = substr(tmp, length(args) + 2)  # skip args + ")"
 
   tparam = ""
-  if (match(m, /<([A-Z][a-zA-Z0-9_]*)>$/, tmatch)) {
-    _candidate_chain = substr(m, 1, RSTART - 1)
+  _lt = index(m, "<")
+  if (_lt > 0 && substr(m, length(m), 1) == ">") {
+    _depth = 0
+    for (_i = _lt; _i <= length(m); _i++) {
+      _c = substr(m, _i, 1)
+      if (_c == "<") _depth++
+      else if (_c == ">") _depth--
+      if (_depth == 0 && _i < length(m)) break
+    }
+    if (_depth != 0 || _i < length(m)) return ""
+    _candidate_chain = substr(m, 1, _lt - 1)
     _candidate_ns    = ""
     _candidate_path  = ""
     _dot = index(_candidate_chain, ".")
@@ -115,7 +124,7 @@ function _ds_dispatch_from(m, segs, n, cur_i, cur_rest, next_i,    \
                 "unknown generic dispatch: " _candidate_ns "." _candidate_path "_t", "")
       return ""
     }
-    tparam = tmatch[1]
+    tparam = substr(m, _lt + 1, length(m) - _lt - 1)
     m = _candidate_chain
   }
 

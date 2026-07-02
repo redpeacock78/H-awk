@@ -379,9 +379,9 @@ function decode_t(type, s,    ok, out, out_type, msg, k, has_leaf) {
   if (type == "JsonScalar" && awk::_jp_root_kind != "scalar")
     return awk::result_ng("JsonTypeError", "type mismatch: expected JsonScalar but got non-scalar root")
   if (_is_container_type(type)) {
-    if (type == "Array" && awk::_jp_root_kind != "array")
-      return awk::result_ng("JsonTypeError", "type mismatch: expected Array but got non-array root")
-    if ((type == "JsonObject" || type == "Map") && awk::_jp_root_kind != "object")
+    if (_is_array_container_type(type) && awk::_jp_root_kind != "array")
+      return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-array root")
+    if (_is_object_container_type(type) && awk::_jp_root_kind != "object")
       return awk::result_ng("JsonTypeError", "type mismatch: expected " type " but got non-object root")
     return awk::result_ok_from_map(out, out_type)
   }
@@ -411,6 +411,16 @@ function _is_container_type(t) {
   return t == "JsonValue" || t == "JsonObject" || t == "Array" || t == "Map" || \
          t ~ /^List</ || t ~ /^Dict</ || \
          (t !~ /^(JsonScalar|Int|Float|Str|Bool|Null|Any)$/ && t ~ /^[A-Z][A-Za-z0-9_]*$/)
+}
+
+function _is_array_container_type(t) {
+  return t == "Array" || t ~ /^List</
+}
+
+function _is_object_container_type(t) {
+  return t == "JsonObject" || t == "Map" || t ~ /^Dict</ || \
+         (t !~ /^(JsonValue|JsonScalar|Int|Float|Str|Bool|Null|Any|Array|Map|JsonObject)$/ && \
+          t !~ /^List</ && t ~ /^[A-Z][A-Za-z0-9_]*$/)
 }
 
 function dispatch(path, a1, a2, a3) {

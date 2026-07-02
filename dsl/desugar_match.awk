@@ -406,7 +406,7 @@ END {
 }
 
 # Emit desugared if/else into _DS_body_buf.
-function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered, emit_base, header_lineno, _saved_lineno, resolved, map_var, map_type_var, json_result_bind) {
+function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, i, j, arm_type, arm_var, arm_default, _ds_emit_added_vars, _ds_union_members, _ds_n_union, _ds_has_catchall, _ds_covered, emit_base, header_lineno, _saved_lineno, resolved, map_var, map_type_var, json_result_bind, had_json_typevar, old_json_typevar) {
   if (_DS_match_ng_arms[d] == 0) {
     _ds_error(lineno, "when...of missing ng/none/default branch", \
         "add an ng: or default: arm to handle the error case")
@@ -451,6 +451,9 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
       map_type_var = "_ds_mcmt_" _DS_mc_count
     } else {
       map_type_var = "_ds_mct_" _DS_mc_count
+      had_json_typevar = ((_DS_func_name, _DS_match_ok_var[d]) in _DS_JSON_TYPEVAR)
+      if (had_json_typevar)
+        old_json_typevar = _DS_JSON_TYPEVAR[_DS_func_name, _DS_match_ok_var[d]]
       _DS_JSON_TYPEVAR[_DS_func_name, _DS_match_ok_var[d]] = map_type_var
     }
     if (_DS_in_function) {
@@ -519,6 +522,12 @@ function _ds_match_emit(lineno, d,    tmpvar, type_t, check_fn, val_fn, err_fn, 
   }
   if (_DS_in_function && _DS_match_ok_var[d] != "")
     _ds_match_unregister_arm_bind_types(d, "ok", _DS_func_name)
+  if (json_result_bind && _ds_is_json_container_type(resolved)) {
+    if (had_json_typevar)
+      _DS_JSON_TYPEVAR[_DS_func_name, _DS_match_ok_var[d]] = old_json_typevar
+    else
+      delete _DS_JSON_TYPEVAR[_DS_func_name, _DS_match_ok_var[d]]
+  }
 
   for (i = 1; i <= _DS_match_ng_arms[d]; i++) {
     arm_type    = _DS_match_ng_type[d, i]

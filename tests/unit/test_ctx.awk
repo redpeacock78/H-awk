@@ -223,6 +223,29 @@ function test_ctx_req_json_t_container_root_shape(    req, res, r) {
   assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t Int empty array error type")
 }
 
+function test_ctx_req_json_t_generic_container_root_shape(    req, res, r) {
+  delete req
+  delete res
+  req["body"] = "{}"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "List<Int>")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t List rejects object root")
+
+  delete req
+  delete res
+  req["body"] = "[]"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Dict<Str,Int>")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t Dict rejects array root")
+
+  delete req
+  delete res
+  req["body"] = "[]"
+  _ctx_load(req, res)
+  r = ctx::dispatch("req.json_t", "Todo")
+  assert_eq(result_err_type(r), "JsonTypeError", "ctx::req_json_t record rejects array root")
+}
+
 function test_ctx_req_json_too_deep(    req, res, r, s, i) {
   s = "1"
   for (i = 0; i < 40; i++) s = "[" s "]"

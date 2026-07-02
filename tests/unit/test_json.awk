@@ -454,6 +454,17 @@ function test_json_decode_t_jsonscalar_rejects_array_root(    res) {
   assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t JsonScalar rejects array root")
 }
 
+function test_json_decode_t_generic_container_root_shape(    res) {
+  res = json::dispatch("decode_t", "List<Int>", "{}")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t List rejects object root")
+
+  res = json::dispatch("decode_t", "Dict<Str,Int>", "[]")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t Dict rejects array root")
+
+  res = json::dispatch("decode_t", "Todo", "[]")
+  assert_eq(awk::result_err_type(res), "JsonTypeError", "decode_t record rejects array root")
+}
+
 function test_json_decode_rejects_invalid_escape(    res) {
   res = json::dispatch("decode", "\"\\q\"")
   assert_eq(awk::result_err_type(res), "JsonParseError", "decode rejects invalid escape")
