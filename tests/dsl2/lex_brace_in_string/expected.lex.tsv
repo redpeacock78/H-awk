@@ -1,0 +1,14 @@
+1	KW	1	1	function
+2	IDENT	1	10	run
+3	LP	1	13	(
+4	RP	1	14	)
+5	ARROW	1	16	->
+6	TYPE	1	19	Str
+7	LBRACE	1	23	{
+8	KW	2	3	let
+9	IDENT	2	7	s
+10	OP	2	9	=
+11	STR	2	11	}
+12	KW	3	3	return
+13	IDENT	3	10	s
+14	RBRACE	4	1	}

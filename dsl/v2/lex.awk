@@ -4,49 +4,107 @@
 # v2_lex(src)    : TOK[], PASS[], V2_NLINES を埋める
 # v2_is_dsl(line): DSL 構文を含む行なら 1 を返す
 
+# 文字列リテラルと行コメントを取り除いた行を返す（DSL キーワード判定の誤検出防止）。
+# 文字列内の補間開始 #{ はキーワード判定上も意味を持つため残す。
+function v2_strip_str_comment(line,    i, ch, out, instr) {
+  out   = ""
+  instr = 0
+  for (i = 1; i <= length(line); i++) {
+    ch = substr(line, i, 1)
+    if (instr) {
+      if (ch == "\\") { i++; continue }
+      if (ch == "\"") { instr = 0; continue }
+      if (ch == "#" && substr(line, i + 1, 1) == "{") { out = out "#{"; i++; continue }
+      continue
+    }
+    if (ch == "\"") { instr = 1; continue }
+    if (ch == "#") {
+      if (substr(line, i + 1, 1) == "{") { out = out "#{"; i++; continue }
+      break
+    }
+    out = out ch
+  }
+  return out
+}
+
 # DSL 構文を含む行か判定する述語
-function v2_is_dsl(line) {
+function v2_is_dsl(line,    s) {
+  s = v2_strip_str_comment(line)
   # let / when / of / end をワード境界で検出
-  if (line ~ /(^|[^[:alnum:]_])(let|when|of|end)([^[:alnum:]_]|$)/) return 1
+  if (s ~ /(^|[^[:alnum:]_])(let|when|of|end)([^[:alnum:]_]|$)/) return 1
   # ??  |>  #{  ?=  演算子
-  if (line ~ /\?\?|\|>|#\{|\?=/) return 1
+  if (s ~ /\?\?|\|>|#\{|\?=/) return 1
   # function NAME(...) ->  シグネチャ
-  if (line ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*->/) return 1
+  if (s ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*->/) return 1
   # 名前空間付きアクセス (hawk. ctx. 等)
-  if (line ~ /(^|[^[:alnum:]_])(hawk|ctx|env|cache|safe|msg|proc)\.[[:alnum:]_]/) return 1
+  if (s ~ /(^|[^[:alnum:]_])(hawk|ctx|env|cache|safe|msg|proc)\.[[:alnum:]_]/) return 1
   # 型注釈  : Int / : Str / : Response 等
-  if (line ~ /:[[:space:]]*(Int|Str|Bool|Num|Void|Response|List<|Dict<|Record|Result<|Option<)/) return 1
+  if (s ~ /:[[:space:]]*(Int|Str|Bool|Num|Void|Response|List<|Dict<|Record|Result<|Option<)/) return 1
   return 0
+}
+
+# 注釈なし（-> RETTYPE を持たない）DSL 関数ヘッダを検出する。
+# 本体（{ に対応する } まで）に DSL 構文が 1 行でもあれば、
+# ヘッダ行から閉じ } の行までを V2_FORCE_DSL[] に印付けする。
+function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_open, n_close, has_dsl) {
+  for (i = 1; i <= nlines; i++) {
+    if (V2_RAWLINE[i] !~ /(^|[^[:alnum:]_])function([^[:alnum:]_]|$)/) continue
+    if (V2_RAWLINE[i] ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*->/) continue
+    if (V2_RAWLINE[i] !~ /\{[[:space:]]*$/) continue
+
+    depth   = 1
+    has_dsl = 0
+    for (j = i + 1; j <= nlines && depth > 0; j++) {
+      stripped = v2_strip_str_comment(V2_RAWLINE[j])
+      tmp = stripped; n_open  = gsub(/{/, "", tmp)
+      tmp = stripped; n_close = gsub(/}/, "", tmp)
+      depth += n_open - n_close
+      if (v2_is_dsl(V2_RAWLINE[j])) has_dsl = 1
+    }
+    if (has_dsl) {
+      for (k = i; k < j; k++) V2_FORCE_DSL[k] = 1
+    }
+  }
 }
 
 # src ファイルを読み込み TOK[], PASS[], V2_NLINES を設定する
 #
 # in_when  : when...end ブロックの深さ（end で閉じる）
 # in_block : DSL 関数本体 { } の深さ（} で閉じる）
-function v2_lex(src,    line, lineno, in_when, in_block, tmp, n_open, n_close) {
+function v2_lex(src,    line, lineno, in_when, in_block, nlines, tok_start, k) {
   V2_NLINES = 0
   TOK["n"]  = 0
   in_when   = 0
   in_block  = 0
-  while ((getline line < src) > 0) {
-    lineno = ++V2_NLINES
-    if (in_when > 0 || in_block > 0 || v2_is_dsl(line)) {
+
+  nlines = 0
+  while ((getline line < src) > 0) { nlines++; V2_RAWLINE[nlines] = line }
+  close(src)
+
+  v2_mark_unannotated_func(nlines)
+
+  for (lineno = 1; lineno <= nlines; lineno++) {
+    line = V2_RAWLINE[lineno]
+    V2_NLINES = lineno
+    if (in_when > 0 || in_block > 0 || v2_is_dsl(line) || (lineno in V2_FORCE_DSL)) {
+      tok_start = TOK["n"]
       v2_tok_line(line, lineno)
       V2_LINE_TEXT[lineno] = line   # 生行テキスト（RAWLINE 用）
-      # when...end ブロック追跡
-      if (line ~ /(^|[^[:alnum:]_])when([^[:alnum:]_]|$)/) in_when++
-      if (line ~ /(^|[^[:alnum:]_])end([^[:alnum:]_]|$)/)  in_when--
-      if (in_when < 0) in_when = 0
-      # DSL ブロック { } 深さ追跡（補間内 #{ } は対称なので相殺される）
-      tmp = line; n_open  = gsub(/{/, "", tmp)
-      tmp = line; n_close = gsub(/}/, "", tmp)
-      in_block += n_open - n_close
+      # when...end / { } 深さは、この行が生成したトークンから数える
+      # （文字列・コメント内の同名文字列に反応しないようにするため。トークン化後の
+      #   LBRACE/RBRACE で数えることで rpn.awk 側の深さカウントとも方針を揃える）
+      for (k = tok_start + 1; k <= TOK["n"]; k++) {
+        if (TOK[k,"kind"] == "KW" && TOK[k,"text"] == "when") in_when++
+        if (TOK[k,"kind"] == "KW" && TOK[k,"text"] == "end")  in_when--
+        if (TOK[k,"kind"] == "LBRACE")                        in_block++
+        if (TOK[k,"kind"] == "RBRACE")                        in_block--
+      }
+      if (in_when  < 0) in_when  = 0
       if (in_block < 0) in_block = 0
     } else {
       PASS[lineno] = line
     }
   }
-  close(src)
 }
 
 # ─── 内部ヘルパー ─────────────────────────────────────────────
@@ -98,7 +156,7 @@ function v2_tok_word(rest, lineno, col,    c) {
 
 # 文字列リテラル（補間含む）をトークン化し、消費文字数を返す。
 # rest[1] は '"' であること。startcol は '"' の列番号（1 始まり）。
-function v2_tok_str(rest, lineno, startcol,    i, ch, ch2, acc, acc_col, consumed) {
+function v2_tok_str(rest, lineno, startcol,    i, ch, ch2, acc, acc_col, consumed, closed_interp) {
   i       = 2          # '"' を読み飛ばす
   acc     = ""
   acc_col = startcol   # 現 STR セグメントの開始列（'"' 位置）
@@ -129,12 +187,14 @@ function v2_tok_str(rest, lineno, startcol,    i, ch, ch2, acc, acc_col, consume
         v2_push("INTERP_OPEN", "#{", lineno, startcol + i - 1)
         i += 2
         # #{ 内の式を }  まで逐次トークン化
+        closed_interp = 0
         while (i <= length(rest)) {
           ch = substr(rest, i, 1)
           # 補間終端
           if (ch == "}") {
             v2_push("INTERP_CLOSE", "}", lineno, startcol + i - 1)
             i++
+            closed_interp = 1
             break
           }
           # 空白読み飛ばし
@@ -151,6 +211,10 @@ function v2_tok_str(rest, lineno, startcol,    i, ch, ch2, acc, acc_col, consume
           consumed = v2_tok_word(substr(rest, i), lineno, startcol + i - 1)
           i += consumed
         }
+        if (!closed_interp) {
+          v2_diag(lineno, startcol, "unterminated interpolation")
+          return length(rest)
+        }
         acc     = ""
         acc_col = startcol + i - 1   # 次 STR セグメントの開始列
         continue
@@ -161,7 +225,8 @@ function v2_tok_str(rest, lineno, startcol,    i, ch, ch2, acc, acc_col, consume
     acc = acc ch
     i++
   }
-  return i - 1
+  v2_diag(lineno, startcol, "unterminated string literal")
+  return length(rest)
 }
 
 # 1 行分のトークンを解析して TOK[] に追加する
