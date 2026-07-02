@@ -68,11 +68,15 @@ function v2_strip_for_brace_count(line,    i, ch, out, instr) {
 # 注釈なし（-> RETTYPE を持たない）DSL 関数ヘッダを検出する。
 # 本体（{ に対応する } まで）に DSL 構文が 1 行でもあれば、
 # ヘッダ行から閉じ } の行までを V2_FORCE_DSL[] に印付けする。
-function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_open, n_close, has_dsl) {
+function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_open, n_close, has_dsl, header) {
   for (i = 1; i <= nlines; i++) {
-    if (V2_RAWLINE[i] !~ /(^|[^[:alnum:]_])function([^[:alnum:]_]|$)/) continue
-    if (V2_RAWLINE[i] ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*->/) continue
-    if (V2_RAWLINE[i] !~ /\{[[:space:]]*$/) continue
+    # ヘッダ判定はコメントを含む生行ではなく、コメント除去後の行に対して行う
+    # （`function f() { # comment` のような行末コメントがあると「行末 {」判定が
+    #   偽になり、ヘッダが未検出のまま本体が DSL 扱いされない不具合を防ぐ）。
+    header = v2_strip_for_brace_count(V2_RAWLINE[i])
+    if (header !~ /(^|[^[:alnum:]_])function([^[:alnum:]_]|$)/) continue
+    if (header ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*->/) continue
+    if (header !~ /\{[[:space:]]*$/) continue
 
     depth   = 1
     has_dsl = 0
