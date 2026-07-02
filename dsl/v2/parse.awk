@@ -47,6 +47,17 @@ function v2_operand_node(val, line) {
 
 # 二項演算子を還元してスタックに積む
 function v2_reduce_op(op, line,    id, r, l) {
+  # 単項演算子 NEG / NOT はオペランドを 1 つだけ消費する
+  if (op == "NEG" || op == "NOT") {
+    if (V2_SP < 1) { v2_diag(line, 0, "stack underflow on operator '" op "'"); return }
+    r = V2_STK[V2_SP--]
+    id = v2_node("UNOP", line)
+    AST[id,"text"] = op
+    v2_addchild(id, r)
+    V2_STK[++V2_SP] = id
+    return id
+  }
+
   if (V2_SP < 2) { v2_diag(line, 0, "stack underflow on operator '" op "'"); return }
   r = V2_STK[V2_SP--]
   l = V2_STK[V2_SP--]

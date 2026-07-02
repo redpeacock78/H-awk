@@ -120,7 +120,7 @@ function v2_os_flush(line,    t) {
 # ─── 操車場法コア ────────────────────────────────────────────────
 
 # トークン区間 [i, j] を操車場法で RPN に変換する
-function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp) {
+function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary_pos, text) {
   for (k = i; k <= j; k++) {
     t    = TOK[k,"kind"]
     line = TOK[k,"line"]
@@ -134,8 +134,49 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp) {
       continue
     }
 
-    if (t == "IDENT" || t == "NUM" || t == "STR" || t == "TYPE") {
-      v2_emit_rpn("OPERAND", (t == "STR") ? ("\"" TOK[k,"text"] "\"") : TOK[k,"text"], line, "")
+    if (t == "IDENT" || t == "NUM" || t == "TYPE") {
+      v2_emit_rpn("OPERAND", TOK[k,"text"], line, "")
+      continue
+    }
+
+    # 文字列リテラル（補間 #{ expr } を含む場合は連続する
+    # STR / INTERP_OPEN ... INTERP_CLOSE 列をまとめて 1 個の STRLIT オペランドに戻す）
+    if (t == "STR" || t == "INTERP_OPEN") {
+      if (t == "STR" && TOK[k+1,"kind"] != "INTERP_OPEN") {
+        v2_emit_rpn("OPERAND", "\"" TOK[k,"text"] "\"", line, "")
+        continue
+      }
+      text = "\""
+      while (k <= j && (TOK[k,"kind"] == "STR" || TOK[k,"kind"] == "INTERP_OPEN")) {
+        if (TOK[k,"kind"] == "STR") {
+          text = text TOK[k,"text"]
+          k++
+        } else {
+          text = text "#{"
+          k++
+          while (k <= j && TOK[k,"kind"] != "INTERP_CLOSE") {
+            text = text TOK[k,"text"]
+            k++
+          }
+          text = text "}"
+          k++   # INTERP_CLOSE をスキップ
+        }
+      }
+      text = text "\""
+      k--     # for の自動 k++ 分を差し引く
+      v2_emit_rpn("OPERAND", text, line, "")
+      continue
+    }
+
+    # 空リテラル [] / {}
+    if (t == "LBRACK" && TOK[k+1,"kind"] == "RBRACK") {
+      v2_emit_rpn("OPERAND", "[]", line, "")
+      k++
+      continue
+    }
+    if (t == "LBRACE" && TOK[k+1,"kind"] == "RBRACE") {
+      v2_emit_rpn("OPERAND", "{}", line, "")
+      k++
       continue
     }
 
@@ -164,8 +205,18 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp) {
     }
 
     if (t == "OP") {
-      v2_pop_ge(TOK[k,"text"], line)
-      v2_os_push(TOK[k,"text"])
+      # 単項 - / ! : 式先頭・演算子直後・"(" 直後・"," 直後に現れる場合は
+      # arity 1 の NEG / NOT として扱う（二項演算子として push しない）。
+      prevkind  = (k > i) ? TOK[k-1,"kind"] : ""
+      unary_pos = (k == i || prevkind == "OP" || prevkind == "LP" || prevkind == "COMMA")
+      if (unary_pos && TOK[k,"text"] == "-") {
+        v2_os_push("NEG")
+      } else if (unary_pos && TOK[k,"text"] == "!") {
+        v2_os_push("NOT")
+      } else {
+        v2_pop_ge(TOK[k,"text"], line)
+        v2_os_push(TOK[k,"text"])
+      }
       continue
     }
 
@@ -222,10 +273,12 @@ function v2_find_expr_end(start,    k, depth, t, txt, startline) {
 # KW や演算子（< > 以外）が COLON より先に出れば 0。
 function v2_is_arm_pat(i,    j) {
   if (i > TOK["n"]) return 0
-  if (TOK[i,"kind"] != "IDENT") return 0
+  # "default" は正規の arm 開始キーワード（docs/dsl.md: default / default name:）
+  if (!(TOK[i,"kind"] == "IDENT" ||
+        (TOK[i,"kind"] == "KW" && TOK[i,"text"] == "default"))) return 0
   for (j = i; j <= TOK["n"]; j++) {
     if (TOK[j,"kind"] == "COLON")                                    return 1
-    if (TOK[j,"kind"] == "KW")                                       return 0
+    if (TOK[j,"kind"] == "KW" && TOK[j,"text"] != "default")        return 0
     if (TOK[j,"kind"] == "OP" &&
         TOK[j,"text"] != "<" && TOK[j,"text"] != ">")               return 0
     if (TOK[j,"kind"] == "LP"     || TOK[j,"kind"] == "LBRACE")     return 0
