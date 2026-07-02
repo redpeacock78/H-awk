@@ -210,6 +210,9 @@ function _ds_result_ng_return(varname,    t) {
         "    if (" t " == \"ParseError\") return ctx::dispatch(\"res.status\", 400)\n" \
         "    if (" t " == \"AuthError\") return ctx::dispatch(\"res.status\", 401)\n" \
         "    if (" t " == \"NotFoundError\") return ctx::dispatch(\"res.status\", 404)\n" \
+        "    if (" t " == \"JsonParseError\") return ctx::dispatch(\"res.status\", 400)\n" \
+        "    if (" t " == \"JsonTypeError\") return ctx::dispatch(\"res.status\", 422)\n" \
+        "    if (" t " == \"JsonTooDeepError\") return ctx::dispatch(\"res.status\", 400)\n" \
         "    return ctx::dispatch(\"res.status\", 500)"
 }
 
