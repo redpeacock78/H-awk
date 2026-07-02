@@ -5,6 +5,7 @@
 # V2_DUMP=lex|rpn|ast|types で工程ダンプして終了。
 
 @include "dsl/v2/util.awk"
+@include "dsl/v2/lex.awk"
 
 BEGIN {
   V2_SRC = (ARGC > 1) ? ARGV[1] : "/dev/stdin"
@@ -22,14 +23,7 @@ BEGIN {
   exit 0
 }
 
-# Task 2 以降で各モジュールに移す仮実装。
-# 現段階では全行パススルー。
-function v2_lex(src,    line) {
-  V2_NLINES = 0
-  while ((getline line < src) > 0) { V2_NLINES++; PASS[V2_NLINES] = line }
-  close(src)
-  TOK["n"] = 0
-}
+# Task 3 以降で各モジュールに移す仮実装。
 function v2_rpn()   { RPN["n"] = 0 }
 function v2_parse() { V2_NAST = 1; AST[1,"kind"] = "PROGRAM"; AST[1,"nc"] = 0 }
 function v2_check() { }
