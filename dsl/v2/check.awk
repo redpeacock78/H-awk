@@ -1354,7 +1354,7 @@ function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, t
 #   v1 実測文面に合わせる（dsl/desugar_pipe.awk: "pipe input is <type>"）。BB。
 #   `type R = Result<...>` のようなエイリアス越しの sealed 値も同様に拒否する
 #   （BZ。エイリアス展開前の literal prefix しか見ていないと素通りしていた）。
-function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt) {
+function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt, parts, n, i, mt) {
   lhs_id = AST[id,"c1"]
   rhs_id = AST[id,"c2"]
   if (AST[rhs_id,"kind"] != "CALL") {
@@ -1363,9 +1363,17 @@ function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt) {
   }
   lt = ((lhs_id) in TYPEOF) ? TYPEOF[lhs_id] : ""
   if (lt == "" || lt == "Unknown") return
-  lt = v2_resolve_sealed(lt)
-  if (lt ~ /^Result</ || lt ~ /^Option</) {
-    v2_diag(AST[id,"line"], 1, "pipe input is " lt)
+  # エイリアス解決が「全体がエイリアス名のとき」しか働かないと、
+  # `R|Str`（R = Result<...> のエイリアス）のような union が全体文字列の
+  # Result</Option< prefix 判定をすり抜ける（DS。DK/DL と同じくトップ
+  # レベル "|" で member 分割してから各 member を判定する）。
+  n = v2_split_union(lt, parts)
+  for (i = 1; i <= n; i++) {
+    mt = v2_resolve_sealed(parts[i])
+    if (mt ~ /^Result</ || mt ~ /^Option</) {
+      v2_diag(AST[id,"line"], 1, "pipe input is " mt)
+      return
+    }
   }
 }
 
