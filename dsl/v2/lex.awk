@@ -12,8 +12,15 @@ function v2_regex_start_here(out,    trimmed, last) {
   trimmed = out
   sub(/[[:space:]]+$/, "", trimmed)
   if (length(trimmed) == 0) return 1
+  # 直前が値を作らないトークン（演算子・キーワード・( , 行頭等）なら
+  # regex（DC。旧許可リストは `~ ( , =` のみで `return /let/` や
+  # `&& /when/` を除算誤判定して strip し損なっていた）。2 文字演算子
+  # （== != <= >= && || !~）は末尾 1 文字が下記のいずれかに含まれるため
+  # 単文字判定のままで拾える。
+  if (trimmed ~ /(^|[^[:alnum:]_])return$/) return 1
   last = substr(trimmed, length(trimmed), 1)
-  return (last == "~" || last == "(" || last == "," || last == "=")
+  return (last == "~" || last == "(" || last == "," || last == "=" || \
+          last == "!" || last == "<" || last == ">" || last == "&" || last == "|")
 }
 
 # line の位置 i（'/' の位置）から、対応する閉じ '/' の位置までを読み飛ばし、
@@ -388,6 +395,18 @@ function v2_tok_line(line, lineno,    pos, rest) {
     # （標準的な曖昧性解消規則: 直前が値なら除算、それ以外なら regex）。
     if (rest ~ /^\// && !v2_prevtok_is_value()) {
       pos += v2_tok_regex(rest, lineno, pos)
+      continue
+    }
+
+    # 先頭ドット float リテラル（.5 / .5e2）: NUM の正規表現が小数点前の
+    # 数字を必須としており、直前が値でない位置（`return .5` 等）の `.5` が
+    # DOT + NUM に分解されて stack underflow していた（DG）。dot 演算子
+    # （`a.b`）は直前が値のときのみ意味を持つため、直前が値でない場合に
+    # 限って先頭ドット NUM として読む。
+    if (rest ~ /^\.[0-9]/ && !v2_prevtok_is_value()) {
+      match(rest, /^\.[0-9]+([eE][+-]?[0-9]+)?/)
+      v2_push("NUM", substr(rest, 1, RLENGTH), lineno, pos)
+      pos += RLENGTH
       continue
     }
 

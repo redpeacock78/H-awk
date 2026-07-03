@@ -40,7 +40,7 @@ function v2_addchild(parent, child) {
 # OPERAND の val から適切なリーフノードを返す
 # val ~ /^"/ のとき STRLIT（引用符を含むまま text に保持）
 function v2_operand_node(val, line) {
-  if (val ~ /^[0-9]/) return v2_leaf("NUMLIT", val, line)
+  if (val ~ /^[0-9]/ || val ~ /^\.[0-9]/) return v2_leaf("NUMLIT", val, line)
   if (val ~ /^"/)     return v2_leaf("STRLIT", val, line)
   if (val ~ /^\//)    return v2_leaf("REGEXLIT", val, line)
   # 空コレクションリテラル []/{}（AY）。rpn.awk が OPERAND("[]")/OPERAND("{}") として
