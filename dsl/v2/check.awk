@@ -497,10 +497,24 @@ function v2_coalesce_type(id, typeann_id, expr_id,    ct, inner) {
 
 # ─── パス 4: when 網羅性検査（Task 9） ───────────────────────────────
 
-# Result<T, E> の E 部分を取り出す（Union でなければそのまま返す）
-function v2_result_err_part(t,    m) {
-  if (match(t, /^Result<[^,]+,[[:space:]]*(.+)>$/, m)) return m[1]
-  return ""
+# Result<T, E> の E 部分を取り出す。
+# トップレベル（<...> の深さ 0）のカンマで T/E を分ける。`[^,]+` による単純分割だと
+# `Result<Dict<Str, Int>, AuthError|NotFoundError>` のような T 側のネストした generic
+# 内部のカンマで誤分割してしまうため、深さを追跡してトップレベルのカンマのみを探す。
+function v2_result_err_part(t,    m, inner, depth, i, c, comma_pos, part) {
+  if (!match(t, /^Result<(.+)>$/, m)) return ""
+  inner = m[1]
+  depth = 0; comma_pos = 0
+  for (i = 1; i <= length(inner); i++) {
+    c = substr(inner, i, 1)
+    if      (c == "<") depth++
+    else if (c == ">") depth--
+    else if (c == "," && depth == 0) { comma_pos = i; break }
+  }
+  if (comma_pos == 0) return ""
+  part = substr(inner, comma_pos + 1)
+  sub(/^[[:space:]]+/, "", part)
+  return part
 }
 
 # WHEN ノードを再帰的に走査し、腕の網羅性を検査する。
@@ -533,12 +547,16 @@ function v2_check_when(id,    k, j, arm, pat, tag, typeann_id, \
         if (tag == "_" || tag == "default") {
           catchall = 1
         } else if (tag == "none") {
-          ng_count++
-          catchall = 1
+          # none は Option 対象専用。Result 対象では家系違いとして
+          # 網羅性カウントに含めない（無視する。AO）。
+          if (!is_result) { ng_count++; catchall = 1 }
         } else if (tag == "ng") {
-          ng_count++
-          if (typeann_id != 0) covered[AST[typeann_id,"text"]] = 1
-          else                 catchall = 1
+          # ng は Result 対象専用。Option 対象では家系違いとして無視する（AO）。
+          if (is_result) {
+            ng_count++
+            if (typeann_id != 0) covered[AST[typeann_id,"text"]] = 1
+            else                 catchall = 1
+          }
         }
       }
       if (ng_count == 0 && !catchall) {
