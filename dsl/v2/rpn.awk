@@ -152,16 +152,19 @@ function v2_scan_dotted_chain(k,    idx) {
   return idx
 }
 
-# 位置 k（generic の "<" の位置）から単純な型引数 <TYPE> を走査する。
+# 位置 k（generic の "<" の位置）から型引数 <TYPE> を走査する。
+# List<Int> / Dict<Str,Int> のようなネストした generic も v2_skip_type で
+# 深さを追跡して丸ごとスキャンする。
 # 一致すれば ">" の次の位置を返し V2_GENERIC_ARG に型名を格納する。
 # 一致しなければ k をそのまま返し V2_GENERIC_ARG を空にする（generic ではない）。
-function v2_scan_generic_arg(k,    idx) {
+function v2_scan_generic_arg(k,    idx, end) {
   V2_GENERIC_ARG = ""
   idx = k + 1
   if (TOK[idx,"kind"] != "TYPE" && TOK[idx,"kind"] != "IDENT") return k
-  if (!(TOK[idx+1,"kind"] == "OP" && TOK[idx+1,"text"] == ">")) return k
-  V2_GENERIC_ARG = TOK[idx,"text"]
-  return idx + 2
+  end = v2_skip_type(idx)
+  if (!(TOK[end,"kind"] == "OP" && TOK[end,"text"] == ">")) return k
+  V2_GENERIC_ARG = v2_read_type_text(idx, end)
+  return end + 1
 }
 
 # トークン区間 [i, j] を操車場法で RPN に変換する
