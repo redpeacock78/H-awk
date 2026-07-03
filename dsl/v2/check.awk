@@ -910,15 +910,31 @@ function v2_split_toplevel_commas(s, out,    i, c, depth, in_str, cur, n) {
 # Task 11（補間の構造化 AST）のスコープ外のため、ここではテキストスキャンで
 # v1（dsl/desugar_strings.awk の _ds_interp_expr_type 相当）と同等の検出を行う。
 function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args, n, i, \
-                                    atype, expected, arity, max_arity) {
+                                    atype, expected, arity, max_arity, open_pos, close_pos, \
+                                    depth, c, trailing, call_ret, trail_type) {
   exprtext = exprtext
   sub(/^[[:space:]]+/, "", exprtext)
   sub(/[[:space:]]+$/, "", exprtext)
   if (match(exprtext, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
     name = m[0]
     sub(/[[:space:]]*\($/, "", name)
-    argstr = substr(exprtext, length(m[0]) + 1)
-    sub(/\)[[:space:]]*$/, "", argstr)
+    open_pos = length(m[0])
+    # 深さ追跡で対応する閉じ ")" を探す（CO）。旧実装は末尾の ")" を機械的に
+    # 1 個切り落とすだけだったため、call の直後に暗黙連結の式が続く場合
+    # （`safe.html.escape(raw) raw` 等）に境界を誤認識し、末尾の式（brand
+    # 検査が必要な Untrusted<Str> の可能性がある）を丸ごと argstr に取り込んで
+    # 黙って捨てていた。
+    depth = 1
+    close_pos = 0
+    for (i = open_pos + 1; i <= length(exprtext); i++) {
+      c = substr(exprtext, i, 1)
+      if (c == "(") depth++
+      else if (c == ")") { depth--; if (depth == 0) { close_pos = i; break } }
+    }
+    if (close_pos == 0) close_pos = length(exprtext) + 1
+    argstr = substr(exprtext, open_pos + 1, close_pos - open_pos - 1)
+    trailing = substr(exprtext, close_pos + 1)
+    sub(/^[[:space:]]+/, "", trailing)
     if ((name, "arity") in SIG) {
       arity = SIG[name, "arity"]
       n = v2_split_toplevel_commas(argstr, args)
@@ -938,8 +954,12 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
         v2_diag(AST[strlit_id,"line"], 1, name " argument " i " expects " expected ", got " atype)
       }
     }
-    if ((name, "ret") in SIG) return SIG[name, "ret"]
-    return "Unknown"
+    call_ret = ((name, "ret") in SIG) ? SIG[name, "ret"] : "Unknown"
+    if (trailing == "") return call_ret
+    # call の後ろに式が続く場合は awk の暗黙連結（CK）とみなし、同じ CONCAT
+    # 型付け規則（brand 喪失 / Untrusted 伝播）を適用する。
+    trail_type = v2_infer_interp_expr_type(strlit_id, trailing)
+    return v2_binop_type("CONCAT", call_ret, trail_type, AST[strlit_id,"line"])
   }
   # 単純 IDENT（レシーバ・呼び出しなし）は V2_ENV から引く（BL: Untrusted 伝播判定に使う）。
   if (exprtext ~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
