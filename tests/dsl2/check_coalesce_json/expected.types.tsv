@@ -1,5 +1,5 @@
 5	Str
 6	Unknown
 7	Result<List<Int>, JsonParseError|JsonTypeError|JsonTooDeepError>
-9	Unknown
+9	List<Int>
 10	Response

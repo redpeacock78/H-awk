@@ -318,6 +318,7 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     saved_name = V2_CUR_FUNC_NAME
     V2_CUR_FUNC_RET  = ret_type
     V2_CUR_FUNC_NAME = name
+    delete V2_ENV
     for (k = 1; k <= AST[id,"nc"]; k++) v2_infer(AST[id,"c" k])
     V2_CUR_FUNC_RET  = saved_ret
     V2_CUR_FUNC_NAME = saved_name
@@ -332,7 +333,13 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
   } else if (kind == "STRLIT") {
     t = "Str"
   } else if (kind == "IDENT") {
-    t = "Unknown"
+    t = (AST[id,"text"] in V2_ENV) ? V2_ENV[AST[id,"text"]] : "Unknown"
+  } else if (kind == "PARAM") {
+    for (k = 1; k <= AST[id,"nc"]; k++) {
+      child = AST[id,"c" k]
+      if (AST[child,"kind"] == "TYPEANN") V2_ENV[AST[id,"text"]] = AST[child,"text"]
+    }
+    t = ""
   } else if (kind == "RAW" || kind == "RAWLINE") {
     t = "Unknown"
   } else if (kind == "UNOP") {
@@ -378,6 +385,8 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
         v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " ct " to " AST[typeann_id,"text"])
       }
     }
+    V2_ENV[AST[id,"text"]] = (typeann_id != 0) ? AST[typeann_id,"text"] : \
+                              ((expr_id != 0 && TYPEOF[expr_id] != "") ? TYPEOF[expr_id] : "Unknown")
     t = ""
   } else if (kind == "LETQ") {
     typeann_id = 0; expr_id = 0
@@ -387,6 +396,7 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
       else                                expr_id    = child
     }
     v2_coalesce_type(id, typeann_id, expr_id)
+    V2_ENV[AST[id,"text"]] = (typeann_id != 0) ? AST[typeann_id,"text"] : v2_unwrap_type(TYPEOF[expr_id])
     t = ""
   } else if (kind == "RETURN") {
     if (AST[id,"nc"] >= 1) {
