@@ -497,11 +497,21 @@ function v2_check_when(id,    k, j, arm, pat, tag, typeann_id, \
 
 # ─── パス 5: CALL 引数の型検査（XSS ブランド型を含む、Task 9） ────────
 
-# CALL ノードを再帰的に走査し、実引数の型を SIG["name","argN"] と照合する。
-# PIPE の RHS にある CALL は v2_check_calls と同様に extra で引数位置をずらす。
+# CALL の 1 引数を SIG["name","argN"] と照合し、不一致なら診断する。
 # safe.html.fragment への文字列リテラル引数は静的 HTML として常に許容する
 # （dsl/typecheck.awk の同名の特例に合わせる）。
-function v2_check_brand(id, extra,    k, name, arity, argidx, expected, actual, child, child_extra) {
+function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual) {
+  if (name == "safe.html.fragment" && AST[child,"kind"] == "STRLIT") return
+  actual = ((child) in TYPEOF) ? TYPEOF[child] : ""
+  if (actual == "" || v2_type_compat(expected, actual)) return
+  v2_diag(AST[call_id,"line"], 1, name " argument " argidx " expects " expected ", got " actual)
+}
+
+# CALL ノードを再帰的に走査し、実引数の型を SIG["name","argN"] と照合する。
+# PIPE の RHS にある CALL は v2_check_calls と同様に extra で引数位置をずらす
+# （明示引数側）。PIPE 左辺の暗黙 arg1（c1）自体も CALL の子ではないため、
+# PIPE ノード側で別途 argidx=1 として検査する。
+function v2_check_brand(id, extra,    k, name, arity, argidx, expected, child, child_extra, callee) {
   if (AST[id,"kind"] == "CALL") {
     name = AST[id,"text"]
     if ((name,"arity") in SIG) {
@@ -516,10 +526,15 @@ function v2_check_brand(id, extra,    k, name, arity, argidx, expected, actual, 
         } else {
           continue
         }
-        if (name == "safe.html.fragment" && AST[child,"kind"] == "STRLIT") continue
-        actual = ((child) in TYPEOF) ? TYPEOF[child] : ""
-        if (actual == "" || v2_type_compat(expected, actual)) continue
-        v2_diag(AST[id,"line"], 1, name " argument " argidx " expects " expected ", got " actual)
+        v2_check_brand_arg(id, name, argidx, expected, child)
+      }
+    }
+  } else if (AST[id,"kind"] == "PIPE") {
+    callee = AST[id,"c2"]
+    if (AST[callee,"kind"] == "CALL") {
+      name = AST[callee,"text"]
+      if ((name, "arg1") in SIG) {
+        v2_check_brand_arg(callee, name, 1, SIG[name, "arg1"], AST[id,"c1"])
       }
     }
   }
