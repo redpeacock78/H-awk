@@ -235,17 +235,33 @@ function v2_split_union(t, out,    i, c, depth, cur, n) {
   return n
 }
 
-# 型 t のいずれかの union member が Untrusted<...> なら真を返す（prefix-only
-# 判定だと `Str|Untrusted<Str>` のような union が素通りしてしまうため、
-# v2_split_union でトップレベル分割した上で member 単位に判定する。DK/DL）。
-function v2_type_has_untrusted_member(t,    parts, n, i) {
+# 型 t の union member を再帰的に走査し、pat（正規表現文字列）に prefix
+# 一致する展開後の型を最初の 1 件返す（無ければ空文字）。member 自体が
+# エイリアスの場合は v2_resolve_sealed で展開し、展開結果が元と異なるとき
+# （＝エイリアスだった）は展開結果を union として再分割し再帰的に判定する。
+# これはエイリアス展開結果自体が union になるケース（`type U =
+# Str|Untrusted<Str>` 等）で prefix 照合が先頭 member しか見ず後続 member の
+# Untrusted</Result</Option< を見逃す問題への対応（review DW）。展開結果が
+# 元と同じ（＝エイリアスでない、または循環で解決不能）場合のみ従来どおり
+# prefix 照合する。depth は循環防止のガード（最大 16）。
+function v2_find_sealed_member(t, pat, depth,    parts, n, i, resolved, found) {
+  if (depth >= 16) return ""
   n = v2_split_union(t, parts)
-  # member 自体が Untrusted<...> への型エイリアス（`type U = Untrusted<Str>`）
-  # だと、展開前の生テキストでは prefix が一致せず判定をすり抜ける（review C1）。
-  # DS の sealed 判定と同じく、比較前に v2_resolve_sealed でエイリアスを
-  # 展開してから prefix 照合する。
-  for (i = 1; i <= n; i++) if (v2_resolve_sealed(parts[i]) ~ /^Untrusted</) return 1
-  return 0
+  for (i = 1; i <= n; i++) {
+    resolved = v2_resolve_sealed(parts[i])
+    if (resolved == parts[i]) {
+      if (resolved ~ pat) return resolved
+    } else if ((found = v2_find_sealed_member(resolved, pat, depth + 1)) != "") {
+      return found
+    }
+  }
+  return ""
+}
+
+# 型 t のいずれかの union member が Untrusted<...>（エイリアス越しを含む）
+# なら真を返す（v2_find_sealed_member 参照。DK/DL/DV から呼ばれる）。
+function v2_type_has_untrusted_member(t) {
+  return (v2_find_sealed_member(t, "^Untrusted<", 0) != "") ? 1 : 0
 }
 
 # 型引数リストをトップレベル ","（<...> の深さを尊重）で分割する
@@ -1358,7 +1374,10 @@ function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, t
 #   v1 実測文面に合わせる（dsl/desugar_pipe.awk: "pipe input is <type>"）。BB。
 #   `type R = Result<...>` のようなエイリアス越しの sealed 値も同様に拒否する
 #   （BZ。エイリアス展開前の literal prefix しか見ていないと素通りしていた）。
-function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt, parts, n, i, mt) {
+#   さらにエイリアス展開結果自体が union になる場合（`type S =
+#   Str|Result<Str,E>`）も v2_find_sealed_member が再帰的に member を
+#   走査して見逃さない（review DW）。
+function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt, mt) {
   lhs_id = AST[id,"c1"]
   rhs_id = AST[id,"c2"]
   if (AST[rhs_id,"kind"] != "CALL") {
@@ -1367,18 +1386,8 @@ function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt, parts, n, i, mt) {
   }
   lt = ((lhs_id) in TYPEOF) ? TYPEOF[lhs_id] : ""
   if (lt == "" || lt == "Unknown") return
-  # エイリアス解決が「全体がエイリアス名のとき」しか働かないと、
-  # `R|Str`（R = Result<...> のエイリアス）のような union が全体文字列の
-  # Result</Option< prefix 判定をすり抜ける（DS。DK/DL と同じくトップ
-  # レベル "|" で member 分割してから各 member を判定する）。
-  n = v2_split_union(lt, parts)
-  for (i = 1; i <= n; i++) {
-    mt = v2_resolve_sealed(parts[i])
-    if (mt ~ /^Result</ || mt ~ /^Option</) {
-      v2_diag(AST[id,"line"], 1, "pipe input is " mt)
-      return
-    }
-  }
+  mt = v2_find_sealed_member(lt, "^(Result|Option)<", 0)
+  if (mt != "") v2_diag(AST[id,"line"], 1, "pipe input is " mt)
 }
 
 # CALL ノードを再帰的に走査し、実引数の型を SIG["name","argN"] と照合する。
