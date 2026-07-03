@@ -570,6 +570,11 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     if (index(AST[id,"text"], "#{") > 0) {
       v2_cache_strlit_interp_types(id, AST[id,"text"])
       t = v2_strlit_has_untrusted_interp(id) ? "Untrusted<Str>" : "Str"
+    } else if (AST[id,"text"] ~ /^"[0-9]+"$/) {
+      # 数字のみの文字列リテラルは NumericStr に推論する（v1
+      # dsl/desugar_let.awk:_ds_infer_type と同じリテラル形状規則。実測:
+      # `function f() -> NumericStr { return "8080" }` は v1 で exit 0。CL）。
+      t = "NumericStr"
     } else {
       t = "Str"
     }

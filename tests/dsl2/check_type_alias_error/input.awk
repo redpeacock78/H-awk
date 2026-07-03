@@ -6,7 +6,7 @@ function fetch_user(id: Str) -> Result<Str, AuthError|NotFoundError> {
 }
 
 function handler() {
-  when fetch_user("1") of
+  when fetch_user("u1") of
     ok user:
       return
     ng e<AuthError>:
