@@ -4,8 +4,35 @@
 # v2_lex(src)    : TOK[], PASS[], V2_NLINES を埋める
 # v2_is_dsl(line): DSL 構文を含む行なら 1 を返す
 
-# 文字列リテラルと行コメントを取り除いた行を返す（DSL キーワード判定の誤検出防止）。
-# 文字列内の補間開始 #{ はキーワード判定上も意味を持つため残す。
+# out の末尾（末尾空白を無視）を見て、直後の '/' が正規表現リテラルの開始と
+# みなせるかを判定する（AS の「直前トークンが値なら除算」規則を、文字ベースの
+# 簡易版として近似したもの。行頭 / `~` `!~` `(` `,` `=` の直後を正規表現開始と
+# みなす。BG）。
+function v2_regex_start_here(out,    trimmed, last) {
+  trimmed = out
+  sub(/[[:space:]]+$/, "", trimmed)
+  if (length(trimmed) == 0) return 1
+  last = substr(trimmed, length(trimmed), 1)
+  return (last == "~" || last == "(" || last == "," || last == "=")
+}
+
+# line の位置 i（'/' の位置）から、対応する閉じ '/' の位置までを読み飛ばし、
+# その位置を返す（見つからなければ行末）。エスケープ '\/' に対応する。
+function v2_skip_regex_text(line, i,    j, ch) {
+  j = i + 1
+  while (j <= length(line)) {
+    ch = substr(line, j, 1)
+    if (ch == "\\") { j += 2; continue }
+    if (ch == "/") return j
+    j++
+  }
+  return length(line)
+}
+
+# 文字列リテラル・正規表現リテラル・行コメントを取り除いた行を返す（DSL
+# キーワード判定の誤検出防止）。文字列内の補間開始 #{ はキーワード判定上も
+# 意味を持つため残す。正規表現リテラルの中身は検出目的では丸ごと除去してよい
+# （BG: `$0 ~ /let/` の `let` が DSL キーワードに誤検出されるのを防ぐ）。
 function v2_strip_str_comment(line,    i, ch, out, instr) {
   out   = ""
   instr = 0
@@ -22,6 +49,7 @@ function v2_strip_str_comment(line,    i, ch, out, instr) {
       if (substr(line, i + 1, 1) == "{") { out = out "#{"; i++; continue }
       break
     }
+    if (ch == "/" && v2_regex_start_here(out)) { i = v2_skip_regex_text(line, i); continue }
     out = out ch
   }
   return out
