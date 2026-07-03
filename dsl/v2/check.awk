@@ -183,9 +183,9 @@ function v2_check_calls(id, extra,    k, name, min_arity, max_arity, actual, chi
 # （型を持たない文ノード = LET/FUNC/RETURN 等では ""）。
 #
 # 型規則（docs/dsl.md・dsl/typecheck.awk 互換）:
-#   NUMLIT                              -> Int（小数点含みは Num）
+#   NUMLIT                              -> Int（小数点含みは Float）
 #   STRLIT                              -> Str
-#   BINOP + - * / % ^                   -> 両辺 Int なら Int、どちらか Num なら Num、他は error
+#   BINOP + - * / % ^                   -> 両辺 Int なら Int、どちらか Float なら Float、他は error
 #   BINOP CONCAT                        -> Str
 #   BINOP == != < <= > >= ~ !~ && ||    -> Bool
 #   UNOP NOT                            -> Bool
@@ -284,7 +284,7 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
   if (is_num_op) {
     if (lt == "Unknown" || rt == "Unknown") return "Unknown"
     if (lt == "Int" && rt == "Int") return "Int"
-    if ((lt == "Int" || lt == "Num") && (rt == "Int" || rt == "Num")) return "Num"
+    if ((lt == "Int" || lt == "Float") && (rt == "Int" || rt == "Float")) return "Float"
     v2_diag(line, 1, "type mismatch: incompatible operand types " lt " and " rt " for operator '" op "'")
     return "Unknown"
   }
@@ -308,7 +308,7 @@ V2_CUR_FUNC_RET = ""
 V2_CUR_FUNC_NAME = ""
 
 function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
-                   saved_ret, saved_name, ret_type, name) {
+                   saved_ret, saved_name, ret_type, name, ret_sig, typearg) {
   kind = AST[id,"kind"]
 
   if (kind == "FUNC") {
@@ -328,7 +328,7 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
 
   t = ""
   if (kind == "NUMLIT") {
-    t = (AST[id,"text"] ~ /\./) ? "Num" : "Int"
+    t = (AST[id,"text"] ~ /\./) ? "Float" : "Int"
   } else if (kind == "STRLIT") {
     t = "Str"
   } else if (kind == "IDENT") {
@@ -338,7 +338,7 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
   } else if (kind == "UNOP") {
     ct = TYPEOF[AST[id,"c1"]]
     if (AST[id,"text"] == "NOT") t = "Bool"
-    else if (ct == "Int" || ct == "Num") t = ct
+    else if (ct == "Int" || ct == "Float") t = ct
     else t = "Unknown"
   } else if (kind == "BINOP") {
     lt = TYPEOF[AST[id,"c1"]]
@@ -352,7 +352,19 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     t = v2_dot_type(id)
     TYPEOF[id] = t
   } else if (kind == "CALL") {
+    name = AST[id,"text"]
     t = ((id) in TYPEOF) ? TYPEOF[id] : "Unknown"
+    if (name == "option.some" && AST[id,"nc"] >= 1) {
+      t = "Option<" TYPEOF[AST[id,"c1"]] ">"
+    } else if ((name,"ret") in SIG) {
+      ret_sig = SIG[name,"ret"]
+      if (ret_sig ~ /\<T\>/ && AST[id,"nc"] >= 1) {
+        typearg = AST[AST[id,"c1"],"text"]
+        gsub(/^"|"$/, "", typearg)
+        t = ret_sig
+        gsub(/\<T\>/, typearg, t)
+      }
+    }
   } else if (kind == "LET") {
     typeann_id = 0; expr_id = 0
     for (k = 1; k <= AST[id,"nc"]; k++) {
@@ -418,10 +430,6 @@ function v2_coalesce_type(id, typeann_id, expr_id,    ct, inner) {
   }
   if (typeann_id == 0) return
   inner = v2_unwrap_type(ct)
-  # json.decode_t/ctx.req.json_t 等の SIG は未解決の generic 型引数 "T" を
-  # そのまま ret に持つ（dsl/desugar_let.awk の resolved フォールバックと同様、
-  # 未解決なら注釈側を信用して検査しない）。
-  if (inner == "T") return
   if (inner != "" && !v2_type_compat(AST[typeann_id,"text"], inner)) {
     v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " inner " to " AST[typeann_id,"text"])
   }
