@@ -43,6 +43,10 @@ function v2_operand_node(val, line) {
   if (val ~ /^[0-9]/) return v2_leaf("NUMLIT", val, line)
   if (val ~ /^"/)     return v2_leaf("STRLIT", val, line)
   if (val ~ /^\//)    return v2_leaf("REGEXLIT", val, line)
+  # 空コレクションリテラル []/{}（AY）。rpn.awk が OPERAND("[]")/OPERAND("{}") として
+  # emit する（rpn_list_empty/rpn_dict_empty）ので、ここで専用ノードに分類する。
+  if (val == "[]")    return v2_leaf("LISTLIT", val, line)
+  if (val == "{}")    return v2_leaf("DICTLIT", val, line)
   return v2_leaf("IDENT", val, line)
 }
 

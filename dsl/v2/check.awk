@@ -375,6 +375,12 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
   } else if (kind == "REGEXLIT") {
     # v1 に Regex 型はないため Any 相当（誤検出防止。AS）。
     t = "Any"
+  } else if (kind == "LISTLIT") {
+    # 空リスト [] は List<Any>（v1 は List<T> への List<Any> 共変受容を許容。AY）。
+    t = "List<Any>"
+  } else if (kind == "DICTLIT") {
+    # 空 Dict {} は Dict<Str, Any>（docs/dsl.md:113 の Dict<Str, T> 系に合わせる。AY）。
+    t = "Dict<Str, Any>"
   } else if (kind == "IDENT") {
     # true/false/null はリテラルとして具象型を持つ（docs/dsl.md:143-144）。
     # V2_ENV lookup より前に特別扱いする（Task 8 の環境実装より優先度が高い）。
