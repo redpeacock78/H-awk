@@ -1036,7 +1036,7 @@ function v2_find_toplevel_pipe(text,    i, c, depth, in_str) {
 # `safe.str.trust(raw) raw` のような形で末尾の未エスケープ式が握り潰されていた）。
 function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, \
                               expected, arity, max_arity, open_pos, close_pos, \
-                              trailing, call_ret, trail_type) {
+                              trailing, call_ret, trail_type, uref) {
   sub(/^[[:space:]]+/, "", text)
   sub(/[[:space:]]+$/, "", text)
   if (text ~ /^"([^"\\]|\\.)*"$/)          return "Str"
@@ -1079,6 +1079,13 @@ function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, 
     return v2_binop_type("CONCAT", call_ret, trail_type, 0)
   }
   if (text ~ /^[A-Za-z_][A-Za-z0-9_]*$/)   return (text in V2_ENV) ? V2_ENV[text] : "Unknown"
+  # リテラル・識別子・認識可能な call のいずれでもない形（`raw ""` の
+  # concat 等）は Unknown に落ちる前に、v2_infer_interp_expr_type の DV
+  # フォールバックと同じ規則を適用する（review DY。旧実装は補間実引数の
+  # 型付けヘルパにこのフォールバックが効いておらず、実引数の Untrusted
+  # 参照を見逃していた）。
+  uref = v2_interp_text_has_untrusted_ref(text)
+  if (uref != "") return uref
   return "Unknown"
 }
 
@@ -1120,10 +1127,20 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
                                     atype, expected, arity, max_arity, open_pos, close_pos, \
                                     depth, c, trailing, call_ret, trail_type, \
                                     pipe_pos, lhs_text, rhs_text, lhs_type, rname, r_argstr, \
-                                    expected1, ok, cls, inner, genarg, uref) {
+                                    expected1, ok, cls, inner, genarg, uref, mt) {
   exprtext = exprtext
   sub(/^[[:space:]]+/, "", exprtext)
   sub(/[[:space:]]+$/, "", exprtext)
+  # 数値・文字列リテラル単体の補間式（`#{123}` 等）はここで型を確定させる
+  # （review DZ。旧実装は裸 IDENT・call・pipe のいずれにもマッチせず Unknown
+  # に落ち、v2_check_fragment_interp の HtmlPart 検査をスキップしていた）。
+  # 指数表記の Int/Float 判定は NUMLIT の推論規則（DO）と同一にする。
+  if (exprtext ~ /^"([^"\\]|\\.)*"$/) return "Str"
+  if (exprtext ~ /^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$/) {
+    if (exprtext ~ /\./) return "Float"
+    if (exprtext ~ /[eE]-/) return "Float"
+    return "Int"
+  }
   # `expr |> callee(args)` 形式（CT）。#{ } 補間内でも pipe 経由の sanitizer
   # 迂回を検出できるよう、既存の AST 側 PIPE 検査（AK/BB/BC）と同じ規則
   # （LHS 型を callee の arg1 として照合し、結果は callee 戻り型）を
@@ -1138,6 +1155,12 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
     sub(/[[:space:]]+$/, "", lhs_text)
     sub(/^[[:space:]]+/, "", rhs_text)
     lhs_type = v2_infer_interp_expr_type(strlit_id, lhs_text)
+    # 通常 pipe と同じ sealed 入力検査（v2_check_pipe_rules 相当）を補間内
+    # pipe にも適用する（review EF。旧実装は LHS を callee の arg1 として
+    # しか検査しておらず、RHS が Any を受ける場合に Result/Option がそのまま
+    # 通ってしまっていた）。診断文言は v2_check_pipe_rules と同一。
+    mt = v2_find_sealed_member(lhs_type, "^(Result|Option)<", 0)
+    if (mt != "") v2_diag(AST[strlit_id,"line"], 1, "pipe input is " mt)
     if (v2_interp_match_call_head(rhs_text)) {
       rname     = V2_INTERP_CALL_NAME
       close_pos = v2_match_call_close(rhs_text, V2_INTERP_CALL_OPEN)
@@ -1176,7 +1199,13 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
           v2_diag(AST[strlit_id,"line"], 1, rname " argument " (i + 1) " expects " expected ", got " atype)
         }
       }
-      return ((rname, "ret") in SIG) ? SIG[rname, "ret"] : "Unknown"
+      call_ret = ((rname, "ret") in SIG) ? SIG[rname, "ret"] : "Unknown"
+      # classify: transform/validator は通常 PIPE と同じ dataflow 規則
+      # （v2_dataflow_ret、CW）を適用する（review DX。旧実装は callee の
+      # 宣言戻り型をそのまま返しており、transform に Untrusted 入力を
+      # 通しても戻り値の Untrusted<...> が保存されなかった）。
+      if ((rname, "classify") in SIG) call_ret = v2_dataflow_ret(rname, lhs_type, call_ret)
+      return call_ret
     }
     return "Unknown"
   }
@@ -1344,7 +1373,7 @@ function v2_check_fragment_interp(call_id, strlit_id,    i, n, t) {
 # CALL の 1 引数を SIG["name","argN"] と照合し、不一致なら診断する。
 # safe.html.fragment への文字列リテラル引数は静的 HTML として常に許容するが、
 # 補間 #{ } を含む場合は動的 HTML なので免除せず、埋め込み式を検査する（AM）。
-function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, text, cls, inner) {
+function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, text, cls, inner, mt) {
   if (name == "safe.html.fragment" && AST[child,"kind"] == "STRLIT") {
     text = AST[child,"text"]
     if (index(text, "#{") == 0) return
@@ -1356,10 +1385,15 @@ function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, t
   # classify: transform/validator/sanitizer は docs/dsl.md の規定どおり
   # Untrusted<T> 入力を受容する（CA）。宣言引数型そのものは素の T のままでよく、
   # 呼び出し側の Untrusted<T> 実引数だけを classify で免除する。
-  if (actual ~ /^Untrusted</ && (name, "classify") in SIG) {
+  # actual がエイリアス（`type U = Untrusted<Str>` 等、union 展開結果を
+  # 含む）の場合は未展開テキストに prefix が一致せず免除されない非対称が
+  # あったため、DW の member 再分割ヘルパで展開後の Untrusted<...> を
+  # 探してから判定する（review EE）。
+  mt = v2_find_sealed_member(actual, "^Untrusted<", 0)
+  if (mt != "" && (name, "classify") in SIG) {
     cls = SIG[name, "classify"]
     if (cls == "transform" || cls == "validator" || cls == "sanitizer") {
-      inner = actual
+      inner = mt
       sub(/^Untrusted</, "", inner); sub(/>$/, "", inner)
       if (v2_type_compat(expected, inner)) return
     }
@@ -1498,11 +1532,23 @@ function v2_check_alias_cycle(name, lineno, visiting,    target, uparts, un, i, 
   un = v2_split_union(target, uparts)
   for (i = 1; i <= un; i++) {
     ni = v2_split_intersection(uparts[i], iparts)
-    for (j = 1; j <= ni; j++) {
-      if (iparts[j] in ALIAS) v2_check_alias_cycle(iparts[j], lineno, visiting)
-    }
+    for (j = 1; j <= ni; j++) v2_check_alias_cycle_member(iparts[j], lineno, visiting)
   }
   delete visiting[name]
+}
+
+# member（union/intersection 分割後の 1 要素）を辿る。member 自体がエイリアス
+# 名ならそのエイリアスを再帰的に辿り、`Name<...>` の generic 型なら型引数を
+# 抽出して各引数にも同じ処理を適用する（review EA。`type A = List<B>` +
+# `type B = A` のように generic 型引数の内側に隠れた循環は、member の完全
+# 一致判定だけでは検出できず素通りしていた）。
+function v2_check_alias_cycle_member(member, lineno, visiting,    m, inner, gparts, gn, k) {
+  if (member in ALIAS) v2_check_alias_cycle(member, lineno, visiting)
+  if (match(member, /^[A-Za-z_][A-Za-z0-9_]*<(.*)>$/, m)) {
+    inner = m[1]
+    gn = v2_split_generic_args(inner, gparts)
+    for (k = 1; k <= gn; k++) v2_check_alias_cycle_member(gparts[k], lineno, visiting)
+  }
 }
 
 function v2_check_alias_cycles(    i, name, visiting) {
