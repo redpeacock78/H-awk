@@ -651,6 +651,20 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
         TYPEOF[rhs_id] = t
       }
     }
+    # classify: transform の関数へ pipe すると、入力が Untrusted<T> のとき
+    # 結果も Untrusted<戻り型> になる（v1 の dsl/type_dataflow.awk:
+    # _ds_dataflow_ret と同じ規則。CW）。v1 実測: `let raw: Untrusted<Str> = x`
+    # のように明示的に型付けた変数を classify: transform の関数へ pipe すると
+    # 結果は Untrusted<Str> のまま伝播し、素の Str を要求する呼び出しへ渡すと
+    # 拒否される。実測では validator は宣言戻り型が Untrusted<...> のときそれを
+    # 常に剥がして返す（入力の trust 状態に関係なく）、sanitizer は宣言戻り型を
+    # そのまま返す（そもそも Untrusted を含まない宣言のため実質的に除去）。
+    # 実測範囲外の直接呼び出し（pipe を使わない `strip(raw)` 形）は v1 が
+    # このルールを適用しないことを確認済みのため、ここでも PIPE の場合のみ
+    # 適用する（報告書に記載）。
+    if (AST[rhs_id,"kind"] == "CALL" && (AST[rhs_id,"text"],"classify") in SIG) {
+      t = v2_dataflow_ret(AST[rhs_id,"text"], TYPEOF[AST[id,"c1"]], t)
+    }
   } else if (kind == "DOT") {
     t = v2_dot_type(id)
     TYPEOF[id] = t
@@ -857,6 +871,23 @@ function v2_check_arm_order(id,    k, j, arm, pat, tag, typeann_id, catchall_see
 }
 
 # ─── パス 5: CALL 引数の型検査（XSS ブランド型を含む、Task 9） ────────
+
+# v1 dsl/type_dataflow.awk:_ds_dataflow_ret と同じ規則で pipe の戻り型を
+# 求める（CW）。classify に応じて:
+#   - validator: 宣言戻り型が Untrusted<...> なら常に剥がして返す
+#     （入力の trust 状態に関係なく、検証済みとして扱う）
+#   - transform: 入力（input_type）が Untrusted<...> なら宣言戻り型を
+#     Untrusted<...> で包んで返す（Untrusted を伝播）
+#   - それ以外（sanitizer 等）: 宣言戻り型をそのまま返す
+function v2_dataflow_ret(name, input_type, decl_ret,    cls, ret) {
+  cls = ((name, "classify") in SIG) ? SIG[name, "classify"] : ""
+  ret = decl_ret
+  if (cls == "validator" && ret ~ /^Untrusted</) {
+    sub(/^Untrusted</, "", ret); sub(/>$/, "", ret)
+  }
+  if (cls == "transform" && input_type ~ /^Untrusted</) return "Untrusted<" ret ">"
+  return ret
+}
 
 # text 中の '(' 位置 open_pos（開き括弧そのものの直後、すなわち引数列の
 # 先頭位置）に対応する閉じ ')' の位置を、深さ追跡で求める（CO/DB 共用）。
