@@ -31,6 +31,7 @@ function v2_init_builtins() {
   ALIAS["JsonScalar"]    = "Str|Int|Float|Bool|Null"
   ALIAS["JsonValue"]     = "JsonScalar|Array|JsonObject"
   ALIAS["JsonObject"]    = "Map"
+  ALIAS["JsonError"]     = "JsonParseError|JsonTooDeepError"
 
   # env.*
   SIG["env.get","ret"] = "Str";  SIG["env.get","arity"] = 1; SIG["env.get","arg1"] = "Str"
@@ -210,6 +211,21 @@ function v2_split_union(t, out,    i, c, depth, cur, n) {
   return n
 }
 
+# 型引数リストをトップレベル ","（<...> の深さを尊重）で分割する
+function v2_split_generic_args(t, out,    i, c, depth, cur, n) {
+  n = 0; depth = 0; cur = ""
+  for (i = 1; i <= length(t); i++) {
+    c = substr(t, i, 1)
+    if      (c == "<") depth++
+    else if (c == ">") depth--
+    else if (c == "," && depth == 0) { out[++n] = cur; cur = ""; continue }
+    cur = cur c
+  }
+  if (length(cur) > 0) out[++n] = cur
+  for (i = 1; i <= n; i++) { sub(/^[ ]+/, "", out[i]); sub(/[ ]+$/, "", out[i]) }
+  return n
+}
+
 # 型エイリアスを 1 段展開する（循環防止のため最大 8 段まで）
 function v2_expand_alias(t,    guard) {
   guard = 0
@@ -233,7 +249,8 @@ function v2_union_of(a, b,    parts, seen, n, i, out, k, result) {
 }
 
 # expected が actual を受理するか（Union `A|B` 対応・ALIAS 展開）
-function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, aparts) {
+function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, aparts, \
+                         eg, ag, egn, agn, egargs, agargs) {
   if (expected == actual)             return 1
   if (expected == "Any" || expected == "Unknown") return 1
   if (actual   == "Any" || actual   == "Unknown") return 1
@@ -242,6 +259,18 @@ function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, apart
   ea = v2_expand_alias(expected)
   aa = v2_expand_alias(actual)
   if (ea != expected || aa != actual) return v2_type_compat(ea, aa)
+
+  # 同名 generic 同士は型引数ごとに構造的に比較する（内側のエイリアスも展開される）
+  if (match(expected, /^([A-Za-z_][A-Za-z0-9_]*)<(.+)>$/, eg) && \
+      match(actual,   /^([A-Za-z_][A-Za-z0-9_]*)<(.+)>$/, ag) && eg[1] == ag[1]) {
+    egn = v2_split_generic_args(eg[2], egargs)
+    agn = v2_split_generic_args(ag[2], agargs)
+    if (egn == agn) {
+      for (i = 1; i <= egn; i++) if (!v2_type_compat(egargs[i], agargs[i])) return 0
+      return 1
+    }
+    return 0
+  }
 
   en = v2_split_union(expected, eparts)
   an = v2_split_union(actual,   aparts)
