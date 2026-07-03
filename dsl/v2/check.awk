@@ -286,6 +286,14 @@ function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, apart
   return 0
 }
 
+# Effect<T> ラッパを 1 段剥がす（docs/dsl.md:636-654）。?= と when...of は
+# Option/Result 判定の前に Effect を剥がしてから通常のルールを適用する。
+# Effect でなければそのまま返す。
+function v2_strip_effect(t,    m) {
+  if (match(t, /^Effect<(.+)>$/, m)) return m[1]
+  return t
+}
+
 # Option<T> / Result<T, E> の内側の型を取り出す（Union は各枝を合流）
 function v2_unwrap_type(t,    parts, n, i, inner, m, result) {
   n = v2_split_union(t, parts)
@@ -484,6 +492,7 @@ function v2_coalesce_type(id, typeann_id, expr_id,    ct, inner) {
   if (expr_id == 0) return
   ct = TYPEOF[expr_id]
   if (ct == "" || ct == "Unknown") return
+  ct = v2_strip_effect(ct)
   if (!v2_is_nullable(ct)) {
     v2_diag(AST[id,"line"], 1, "?= requires Option or Result, got " ct)
     return
@@ -530,7 +539,7 @@ function v2_check_when(id,    k, j, arm, pat, tag, typeann_id, \
                         covered, err_part, members, nmem, i) {
   if (AST[id,"kind"] == "WHEN") {
     target_id = AST[id,"c1"]
-    ttype = TYPEOF[target_id]
+    ttype = v2_strip_effect(TYPEOF[target_id])
     if (ttype != "" && ttype != "Unknown" && (ttype ~ /^Option</ || ttype ~ /^Result</)) {
       is_result = (ttype ~ /^Result</)
       catchall = 0
