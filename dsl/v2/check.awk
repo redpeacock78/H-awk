@@ -582,7 +582,18 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
 
   t = ""
   if (kind == "NUMLIT") {
-    t = (AST[id,"text"] ~ /\./) ? "Float" : "Int"
+    # 小数点があれば Float。指数部（1e-2 等）のみで小数点が無い場合も、
+    # 指数が負なら真値が非整数になるため Float とする（DO）。指数が非負
+    # （1e3 等）なら真値は整数なので Int のまま（CM の既存 fixture
+    # check_exponent_type と同じ判断）。
+    # v1 実測: dsl/desugar_let.awk:_ds_infer_type の Int/Float 判定正規表現は
+    # どちらも指数部付きリテラルにマッチせず、指数の符号に関係なく推論結果
+    # "" のまま型検査自体をスキップする（`let x: Int = 1e3` も
+    # `let x: Float = 1e3` も同様に無検査で通る）。v1 に Int/Float の
+    # 区別が無いため、v2 では真値が非整数になる場合に限り Float とする。
+    if (AST[id,"text"] ~ /\./)        t = "Float"
+    else if (AST[id,"text"] ~ /[eE]-/) t = "Float"
+    else                               t = "Int"
   } else if (kind == "STRLIT") {
     # 補間 #{ } 内のいずれかの式が Untrusted<...> なら結果は Untrusted<Str>
     # （docs/dsl.md:264-270。BL）。内側が Unknown の場合は誤検出防止で従来どおり Str。
