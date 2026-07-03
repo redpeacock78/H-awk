@@ -676,6 +676,26 @@ function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, t
   v2_diag(AST[call_id,"line"], 1, name " argument " argidx " expects " expected ", got " actual)
 }
 
+# PIPE ノードの規則を検査する（dsl.md:336/:338、BB+BC）。
+# - RHS（c2）は CALL でなければならない（`expr |> f(args)`）。BC。
+# - LHS（c1）の型（Effect 剥がし後）が Result</Option< なら sealed 値の直接
+#   pipe は禁止（`?=` か when...of で unwrap してから）。v1 実測文面に合わせる
+#   （dsl/desugar_pipe.awk: "pipe input is <type>"）。BB。
+function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt) {
+  lhs_id = AST[id,"c1"]
+  rhs_id = AST[id,"c2"]
+  if (AST[rhs_id,"kind"] != "CALL") {
+    v2_diag(AST[id,"line"], 1, "pipe right-hand side must be a call (`expr |> f(args)`)")
+    return
+  }
+  lt = ((lhs_id) in TYPEOF) ? TYPEOF[lhs_id] : ""
+  if (lt == "" || lt == "Unknown") return
+  lt = v2_strip_effect(lt)
+  if (lt ~ /^Result</ || lt ~ /^Option</) {
+    v2_diag(AST[id,"line"], 1, "pipe input is " lt)
+  }
+}
+
 # CALL ノードを再帰的に走査し、実引数の型を SIG["name","argN"] と照合する。
 # PIPE の RHS にある CALL は v2_check_calls と同様に extra で引数位置をずらす
 # （明示引数側）。PIPE 左辺の暗黙 arg1（c1）自体も CALL の子ではないため、
@@ -699,6 +719,7 @@ function v2_check_brand(id, extra,    k, name, arity, argidx, expected, child, c
       }
     }
   } else if (AST[id,"kind"] == "PIPE") {
+    v2_check_pipe_rules(id)
     callee = AST[id,"c2"]
     if (AST[callee,"kind"] == "CALL") {
       name = AST[callee,"text"]
