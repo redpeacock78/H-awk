@@ -853,7 +853,13 @@ function v2_check_when(id,    k, j, arm, pat, tag, typeann_id, \
       if (ng_count == 0 && !catchall) {
         v2_diag(AST[id,"line"], 1, "when...of missing ng/none/default branch")
       } else if (!catchall && is_result) {
-        err_part = v2_result_err_part(ttype)
+        # エラー型パラメータがユーザー定義エイリアス（`type Errors =
+        # AuthError|NotFoundError`）のとき、展開前の "Errors" のまま
+        # v2_split_union に渡すと nmem が 1 のままになり、union に隠れた
+        # 各エラー型への missing-arm 検査が働かない（DQ。wave 11 CZ の
+        # 「真に単一のエラー型なら nmem==1 skip は v1 互換」とは別の
+        # ケース: こちらはエイリアス未展開による誤った nmem==1）。
+        err_part = v2_expand_alias(v2_result_err_part(ttype))
         if (err_part != "") {
           nmem = v2_split_union(err_part, members)
           if (nmem > 1) {
