@@ -129,11 +129,17 @@ function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_op
 #
 # in_when  : when...end ブロックの深さ（end で閉じる）
 # in_block : DSL 関数本体 { } の深さ（} で閉じる）
-function v2_lex(src,    line, lineno, in_when, in_block, nlines, tok_start, k) {
+# pending_brace : 注釈付き関数ヘッダを検出したが、ヘッダ行に { が無い
+#   （次行以降にブレースが来る）状態。このフラグが立っている間は、
+#   ヘッダ以降の行が個別に v2_is_dsl を満たさなくても DSL 扱いにして
+#   トークン化する（BQ）。{ を含む行を処理したら解除する。
+function v2_lex(src,    line, lineno, in_when, in_block, nlines, tok_start, k, \
+                 pending_brace, header_stripped, force_line) {
   V2_NLINES = 0
   TOK["n"]  = 0
   in_when   = 0
   in_block  = 0
+  pending_brace = 0
 
   nlines = 0
   while ((getline line < src) > 0) { nlines++; V2_RAWLINE[nlines] = line }
@@ -144,7 +150,8 @@ function v2_lex(src,    line, lineno, in_when, in_block, nlines, tok_start, k) {
   for (lineno = 1; lineno <= nlines; lineno++) {
     line = V2_RAWLINE[lineno]
     V2_NLINES = lineno
-    if (in_when > 0 || in_block > 0 || v2_is_dsl(line) || (lineno in V2_FORCE_DSL)) {
+    force_line = (pending_brace && in_when == 0 && in_block == 0)
+    if (in_when > 0 || in_block > 0 || v2_is_dsl(line) || (lineno in V2_FORCE_DSL) || force_line) {
       tok_start = TOK["n"]
       v2_tok_line(line, lineno)
       V2_LINE_TEXT[lineno] = line   # 生行テキスト（RAWLINE 用）
@@ -154,11 +161,20 @@ function v2_lex(src,    line, lineno, in_when, in_block, nlines, tok_start, k) {
       for (k = tok_start + 1; k <= TOK["n"]; k++) {
         if (TOK[k,"kind"] == "KW" && TOK[k,"text"] == "when") in_when++
         if (TOK[k,"kind"] == "KW" && TOK[k,"text"] == "end")  in_when--
-        if (TOK[k,"kind"] == "LBRACE")                        in_block++
+        if (TOK[k,"kind"] == "LBRACE")                      { in_block++; pending_brace = 0 }
         if (TOK[k,"kind"] == "RBRACE")                        in_block--
       }
       if (in_when  < 0) in_when  = 0
       if (in_block < 0) in_block = 0
+      # 注釈付き関数ヘッダ（function NAME(...) -> RETTYPE）で、この行が { を
+      # 含まずに終わっていれば、次行以降のブレース待ち状態にする。
+      if (in_block == 0 && !pending_brace) {
+        header_stripped = v2_strip_for_brace_count(line)
+        if (header_stripped ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*->/ && \
+            index(header_stripped, "{") == 0) {
+          pending_brace = 1
+        }
+      }
     } else {
       PASS[lineno] = line
     }
