@@ -39,9 +39,9 @@ function v2_is_dsl(line,    s) {
   # function NAME(...) ->  シグネチャ
   if (s ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*->/) return 1
   # 名前空間付きアクセス (hawk. ctx. 等)
-  if (s ~ /(^|[^[:alnum:]_])(hawk|ctx|env|cache|safe|msg|proc)\.[[:alnum:]_]/) return 1
-  # 型注釈  : Int / : Str / : Response 等
-  if (s ~ /:[[:space:]]*(Int|Str|Bool|Num|Void|Response|List<|Dict<|Record|Result<|Option<)/) return 1
+  if (s ~ /(^|[^[:alnum:]_])(hawk|ctx|env|cache|safe|msg|proc|json|option)\.[[:alnum:]_]/) return 1
+  # 型注釈  : Int / : Str / : Response 等（docs/dsl.md:96 のサポート型一覧。BA）
+  if (s ~ /:[[:space:]]*(Int|Float|Str|Bool|NumericStr|Array|Map|Response|Untrusted<|HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr|Void|Any|List<|Dict<|Record|Result<|Option<)/) return 1
   return 0
 }
 
