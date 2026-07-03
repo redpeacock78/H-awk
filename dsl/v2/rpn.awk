@@ -459,7 +459,12 @@ function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
   if (j <= TOK["n"] && TOK[j,"kind"] == "LP") {
     j++  # skip LP
     while (j <= TOK["n"] && TOK[j,"kind"] != "RP") {
-      if (TOK[j,"kind"] == "IDENT") {
+      # 名前位置（LP 直後・カンマ直後）の TYPE トークンもパラメータ名として
+      # 受理する（DT）。lex は大文字始まり識別子を TYPE にするため、
+      # `function handler(Raw: Untrusted<Str>)` のような大文字パラメータ名
+      # が IDENT のみを見るこのループでは無視され、パラメータとして
+      # emit されずに arity スロットと注釈の両方を失っていた。
+      if (TOK[j,"kind"] == "IDENT" || TOK[j,"kind"] == "TYPE") {
         pname = TOK[j,"text"]
         v2_emit_rpn("OPERAND", pname, TOK[j,"line"], "")
         j++

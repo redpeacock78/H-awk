@@ -269,8 +269,15 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
   while (RPN[j,"kind"] == "OPERAND") {
     # 戻り値型判定: 大文字始まり、またはユーザー定義エイリアス名（`type status
     # = Int` のような小文字始まりを含む。v2_parse_let の CV と同じ判定基準
-    # に揃える。DE）。
-    if (RPN[j,"val"] ~ /^[A-Z]/ || (RPN[j,"val"] in V2_DSL_ALIAS)) {
+    # に揃える。DE）。ただし直後が `:TYPE` 注釈 OPERAND なら戻り値型では
+    # あり得ない（戻り値型は関数本体の直前に来る最後の裸 OPERAND であり、
+    # 注釈が後続することはない）ためパラメータ名と確定する（DT。lex が
+    # 大文字始まり識別子を TYPE トークンにするため、`function
+    # handler(Raw: Untrusted<Str>)` の大文字パラメータ名 `Raw` がこの
+    # ヒューリスティックだけでは戻り値型と誤判定され、パラメータとして
+    # emit されずに arity スロットと注釈の両方を失っていた）。
+    if ((RPN[j,"val"] ~ /^[A-Z]/ || (RPN[j,"val"] in V2_DSL_ALIAS)) && \
+        !(RPN[j+1,"kind"] == "OPERAND" && RPN[j+1,"val"] ~ /^:/)) {
       # 戻り値型
       typeann_id = v2_leaf("TYPEANN", RPN[j,"val"], RPN[j,"line"])
       v2_addchild(func_id, typeann_id)
