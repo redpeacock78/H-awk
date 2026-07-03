@@ -173,6 +173,11 @@ function v2_check_calls(id, extra,    k, name, min_arity, max_arity, actual, chi
         v2_diag(AST[id,"line"], 1, name " expects " min_arity " argument(s), got " actual)
       }
       TYPEOF[id] = SIG[name,"ret"]
+    } else if (name ~ /_t$/) {
+      # rpn.awk の generic 呼び出し正規化（f<T>(...) -> f_t("T", ...)）が
+      # 生成した名前のうち SIG 未登録のもの（v1 dsl/desugar_dot.awk の
+      # unknown generic dispatch と同じ扱い。BJ。v1 実測でエラーになることを確認済み）。
+      v2_diag(AST[id,"line"], 1, "unknown generic dispatch: " name)
     }
   }
 
@@ -259,6 +264,9 @@ function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, apart
   if (expected == "Any" || expected == "Unknown") return 1
   if (actual   == "Any" || actual   == "Unknown") return 1
   if (actual == "")                   return 1
+  # Array は typed collection（List</Dict<）の supertype（v1 dsl/type.awk:134-135
+  # 移植。BK）。Map は v1 accepts() 側でも特別扱いされていないため対象外。
+  if (expected == "Array" && (actual ~ /^List</ || actual ~ /^Dict</)) return 1
 
   ea = v2_expand_alias(expected)
   aa = v2_expand_alias(actual)
@@ -466,7 +474,10 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
   if (kind == "NUMLIT") {
     t = (AST[id,"text"] ~ /\./) ? "Float" : "Int"
   } else if (kind == "STRLIT") {
-    t = "Str"
+    # 補間 #{ } 内のいずれかの式が Untrusted<...> なら結果は Untrusted<Str>
+    # （docs/dsl.md:264-270。BL）。内側が Unknown の場合は誤検出防止で従来どおり Str。
+    t = (index(AST[id,"text"], "#{") > 0 && v2_strlit_has_untrusted_interp(AST[id,"text"])) ? \
+        "Untrusted<Str>" : "Str"
   } else if (kind == "REGEXLIT") {
     # v1 に Regex 型はないため Any 相当（誤検出防止。AS）。
     t = "Any"
@@ -561,7 +572,12 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
       else                                expr_id    = child
     }
     v2_coalesce_type(id, typeann_id, expr_id)
-    V2_ENV[AST[id,"text"]] = (typeann_id != 0) ? AST[typeann_id,"text"] : v2_unwrap_type(TYPEOF[expr_id])
+    # 束縛型の導出前に Effect を剥がす（BH）。cache.get 等は
+    # Effect<Result<Option<T>, E>> を返すため、strip 前の型を unwrap すると
+    # Effect<...> のまま扱われ、後続の when...of が想定と異なる家系（Result
+    # 扱い）になってしまう。
+    V2_ENV[AST[id,"text"]] = (typeann_id != 0) ? AST[typeann_id,"text"] : \
+                              v2_unwrap_type(v2_strip_effect(TYPEOF[expr_id]))
     t = ""
   } else if (kind == "RETURN") {
     if (AST[id,"nc"] >= 1) {
@@ -702,8 +718,27 @@ function v2_infer_interp_expr_type(exprtext,    m, name) {
     name = m[0]
     sub(/[[:space:]]*\($/, "", name)
     if ((name, "ret") in SIG) return SIG[name, "ret"]
+    return "Unknown"
+  }
+  # 単純 IDENT（レシーバ・呼び出しなし）は V2_ENV から引く（BL: Untrusted 伝播判定に使う）。
+  if (exprtext ~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
+    return (exprtext in V2_ENV) ? V2_ENV[exprtext] : "Unknown"
   }
   return "Unknown"
+}
+
+# STRLIT のテキスト（引用符・#{ ... } 補間を含む生テキスト）を走査し、
+# いずれかの補間式の型が Untrusted<...> なら真を返す（BL）。
+function v2_strlit_has_untrusted_interp(text,    rest, m, exprtext, t, adv) {
+  rest = text
+  while (match(rest, /#\{([^}]*)\}/, m)) {
+    adv = RSTART + RLENGTH
+    exprtext = m[1]
+    t = v2_infer_interp_expr_type(exprtext)
+    if (t ~ /^Untrusted</) return 1
+    rest = substr(rest, adv)
+  }
+  return 0
 }
 
 # safe.html.fragment の文字列引数中の #{ expr } 補間を走査し、各式の型を
