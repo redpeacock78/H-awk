@@ -909,7 +909,8 @@ function v2_split_toplevel_commas(s, out,    i, c, depth, in_str, cur, n) {
 # （"name argument N expects EXPECTED, got ACTUAL"）を診断する。
 # Task 11（補間の構造化 AST）のスコープ外のため、ここではテキストスキャンで
 # v1（dsl/desugar_strings.awk の _ds_interp_expr_type 相当）と同等の検出を行う。
-function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args, n, i, atype, expected, arity) {
+function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args, n, i, \
+                                    atype, expected, arity, max_arity) {
   exprtext = exprtext
   sub(/^[[:space:]]+/, "", exprtext)
   sub(/[[:space:]]+$/, "", exprtext)
@@ -918,9 +919,16 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
     sub(/[[:space:]]*\($/, "", name)
     argstr = substr(exprtext, length(m[0]) + 1)
     sub(/\)[[:space:]]*$/, "", argstr)
-    if (argstr != "" && (name, "arity") in SIG) {
+    if ((name, "arity") in SIG) {
       arity = SIG[name, "arity"]
       n = v2_split_toplevel_commas(argstr, args)
+      # 補間内 call は v2_check_calls の CALL ノード検査を迂回するため、
+      # ここで同じ arity 検査を行う（引数の型検査ループとは独立に、まず
+      # 個数が範囲外なら診断する。文面は v2_check_calls と同一形式。CN）。
+      max_arity = ((name, "arity_max") in SIG) ? SIG[name, "arity_max"] : arity
+      if (arity != -1 && (n < arity || n > max_arity)) {
+        v2_diag(AST[strlit_id,"line"], 1, name " expects " arity " argument(s), got " n)
+      }
       for (i = 1; i <= n; i++) {
         if ((name, "arg" i) in SIG)                    expected = SIG[name, "arg" i]
         else if (arity == -1 && (name, "arg1") in SIG)  expected = SIG[name, "arg1"]
