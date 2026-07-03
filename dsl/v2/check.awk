@@ -858,10 +858,31 @@ function v2_check_arm_order(id,    k, j, arm, pat, tag, typeann_id, catchall_see
 
 # ─── パス 5: CALL 引数の型検査（XSS ブランド型を含む、Task 9） ────────
 
+# text 中の '(' 位置 open_pos（開き括弧そのものの直後、すなわち引数列の
+# 先頭位置）に対応する閉じ ')' の位置を、深さ追跡で求める（CO/DB 共用）。
+# 対応する閉じ括弧が見つからなければ text の末尾+1（=全体を argstr とみなす）
+# を返す。呼び出し元は open_pos に「call 名 + '(' までの長さ」（m[0] の長さ）
+# を渡す想定。
+function v2_match_call_close(text, open_pos,    i, c, depth, close_pos) {
+  depth = 1
+  close_pos = 0
+  for (i = open_pos + 1; i <= length(text); i++) {
+    c = substr(text, i, 1)
+    if (c == "(") depth++
+    else if (c == ")") { depth--; if (depth == 0) { close_pos = i; break } }
+  }
+  if (close_pos == 0) close_pos = length(text) + 1
+  return close_pos
+}
+
 # 補間の実引数テキスト 1 個の型を解決する（BW）。IDENT なら V2_ENV、call 形なら
 # SIG の宣言戻り型（その call 自身の実引数は検査しない = 深さ 1 段で打ち切り。
 # 過剰検出防止）、リテラルはリテラル型、それ以外は Unknown。
-function v2_interp_atom_type(text,    m, name) {
+# call がテキスト全体を消費しない場合（call の直後に式が続く暗黙連結。CK）は
+# CO と同じ規則で末尾式を CONCAT 型付けする（DB。旧実装は call 名 prefix
+# だけを見て残りを丸ごと無視していたため、実引数内部の
+# `safe.str.trust(raw) raw` のような形で末尾の未エスケープ式が握り潰されていた）。
+function v2_interp_atom_type(text,    m, name, open_pos, close_pos, trailing, call_ret, trail_type) {
   sub(/^[[:space:]]+/, "", text)
   sub(/[[:space:]]+$/, "", text)
   if (text ~ /^"([^"\\]|\\.)*"$/)          return "Str"
@@ -872,7 +893,14 @@ function v2_interp_atom_type(text,    m, name) {
   if (match(text, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
     name = m[0]
     sub(/[[:space:]]*\($/, "", name)
-    return ((name, "ret") in SIG) ? SIG[name, "ret"] : "Unknown"
+    open_pos = length(m[0])
+    close_pos = v2_match_call_close(text, open_pos)
+    call_ret = ((name, "ret") in SIG) ? SIG[name, "ret"] : "Unknown"
+    trailing = substr(text, close_pos + 1)
+    sub(/^[[:space:]]+/, "", trailing); sub(/[[:space:]]+$/, "", trailing)
+    if (trailing == "") return call_ret
+    trail_type = v2_interp_atom_type(trailing)
+    return v2_binop_type("CONCAT", call_ret, trail_type, 0)
   }
   if (text ~ /^[A-Za-z_][A-Za-z0-9_]*$/)   return (text in V2_ENV) ? V2_ENV[text] : "Unknown"
   return "Unknown"
@@ -922,19 +950,13 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
     name = m[0]
     sub(/[[:space:]]*\($/, "", name)
     open_pos = length(m[0])
-    # 深さ追跡で対応する閉じ ")" を探す（CO）。旧実装は末尾の ")" を機械的に
+    # 深さ追跡で対応する閉じ ")" を探す（CO。v2_match_call_close に関数化して
+    # v2_interp_atom_type と共用する。DB）。旧実装は末尾の ")" を機械的に
     # 1 個切り落とすだけだったため、call の直後に暗黙連結の式が続く場合
     # （`safe.html.escape(raw) raw` 等）に境界を誤認識し、末尾の式（brand
     # 検査が必要な Untrusted<Str> の可能性がある）を丸ごと argstr に取り込んで
     # 黙って捨てていた。
-    depth = 1
-    close_pos = 0
-    for (i = open_pos + 1; i <= length(exprtext); i++) {
-      c = substr(exprtext, i, 1)
-      if (c == "(") depth++
-      else if (c == ")") { depth--; if (depth == 0) { close_pos = i; break } }
-    }
-    if (close_pos == 0) close_pos = length(exprtext) + 1
+    close_pos = v2_match_call_close(exprtext, open_pos)
     argstr = substr(exprtext, open_pos + 1, close_pos - open_pos - 1)
     trailing = substr(exprtext, close_pos + 1)
     sub(/^[[:space:]]+/, "", trailing)
