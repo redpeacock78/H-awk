@@ -953,7 +953,9 @@ function v2_find_toplevel_pipe(text,    i, c, depth, in_str) {
 # CO と同じ規則で末尾式を CONCAT 型付けする（DB。旧実装は call 名 prefix
 # だけを見て残りを丸ごと無視していたため、実引数内部の
 # `safe.str.trust(raw) raw` のような形で末尾の未エスケープ式が握り潰されていた）。
-function v2_interp_atom_type(text,    m, name, open_pos, close_pos, trailing, call_ret, trail_type) {
+function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, \
+                              expected, arity, max_arity, open_pos, close_pos, \
+                              trailing, call_ret, trail_type) {
   sub(/^[[:space:]]+/, "", text)
   sub(/[[:space:]]+$/, "", text)
   if (text ~ /^"([^"\\]|\\.)*"$/)          return "Str"
@@ -966,11 +968,33 @@ function v2_interp_atom_type(text,    m, name, open_pos, close_pos, trailing, ca
     sub(/[[:space:]]*\($/, "", name)
     open_pos = length(m[0])
     close_pos = v2_match_call_close(text, open_pos)
+    # 補間実引数がネストした CALL のとき、そのネスト call 自体の arity・
+    # 引数型検査は v2_check_calls の CALL ノード走査を経由しないため、
+    # ここで v2_infer_interp_expr_type の CALL 分岐と同じ検査を行う
+    # （DN。旧実装は宣言戻り型を返すだけでネスト呼び出しの検査を素通り
+    # させていた）。
+    argstr = substr(text, open_pos + 1, close_pos - open_pos - 1)
+    if ((name, "arity") in SIG) {
+      arity = SIG[name, "arity"]
+      n = v2_split_toplevel_commas(argstr, args)
+      max_arity = ((name, "arity_max") in SIG) ? SIG[name, "arity_max"] : arity
+      if (arity != -1 && (n < arity || n > max_arity)) {
+        v2_diag(line, 1, name " expects " arity " argument(s), got " n)
+      }
+      for (i = 1; i <= n; i++) {
+        if ((name, "arg" i) in SIG)                    expected = SIG[name, "arg" i]
+        else if (arity == -1 && (name, "arg1") in SIG)  expected = SIG[name, "arg1"]
+        else                                            continue
+        atype = v2_interp_atom_type(args[i], line)
+        if (atype == "" || atype == "Unknown" || v2_type_compat(expected, atype)) continue
+        v2_diag(line, 1, name " argument " i " expects " expected ", got " atype)
+      }
+    }
     call_ret = ((name, "ret") in SIG) ? SIG[name, "ret"] : "Unknown"
     trailing = substr(text, close_pos + 1)
     sub(/^[[:space:]]+/, "", trailing); sub(/[[:space:]]+$/, "", trailing)
     if (trailing == "") return call_ret
-    trail_type = v2_interp_atom_type(trailing)
+    trail_type = v2_interp_atom_type(trailing, line)
     return v2_binop_type("CONCAT", call_ret, trail_type, 0)
   }
   if (text ~ /^[A-Za-z_][A-Za-z0-9_]*$/)   return (text in V2_ENV) ? V2_ENV[text] : "Unknown"
@@ -1085,7 +1109,7 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
         if ((name, "arg" i) in SIG)                    expected = SIG[name, "arg" i]
         else if (arity == -1 && (name, "arg1") in SIG)  expected = SIG[name, "arg1"]
         else                                            continue
-        atype = v2_interp_atom_type(args[i])
+        atype = v2_interp_atom_type(args[i], AST[strlit_id,"line"])
         if (atype == "" || atype == "Unknown" || v2_type_compat(expected, atype)) continue
         v2_diag(AST[strlit_id,"line"], 1, name " argument " i " expects " expected ", got " atype)
       }

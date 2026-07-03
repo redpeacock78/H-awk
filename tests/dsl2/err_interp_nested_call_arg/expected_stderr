@@ -1,0 +1,1 @@
+error: safe.str.trust argument 1 expects Untrusted<Str>, got Str
