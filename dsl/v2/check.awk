@@ -308,14 +308,29 @@ function v2_strip_effect(t,    m) {
   return t
 }
 
+# Result<T, E> の内部をトップレベル "," で T/E に分割する（AN のヘルパを一般化。
+# AW）。`[^,]+` による単純分割だと T 側にネストした generic
+# （`Result<Dict<Str, Int>, ParseError>` 等）内部のカンマで誤分割するため、
+# v2_split_generic_args の深さ追跡分割を再利用する。
+# out[1]=T, out[2]=E。Result<...> でなければ 0 を返す。
+function v2_result_parts(t, out,    m, inner) {
+  if (!match(t, /^Result<(.+)>$/, m)) return 0
+  inner = m[1]
+  return v2_split_generic_args(inner, out)
+}
+
 # Option<T> / Result<T, E> の内側の型を取り出す（Union は各枝を合流）
-function v2_unwrap_type(t,    parts, n, i, inner, m, result) {
+function v2_unwrap_type(t,    parts, n, i, inner, m, result, rparts, rn) {
   n = v2_split_union(t, parts)
   result = ""
   for (i = 1; i <= n; i++) {
     inner = parts[i]
-    if (match(inner, /^Option<(.+)>$/, m))       inner = m[1]
-    else if (match(inner, /^Result<([^,]+),/, m)) inner = m[1]
+    if (match(inner, /^Option<(.+)>$/, m)) {
+      inner = m[1]
+    } else if (inner ~ /^Result</) {
+      rn = v2_result_parts(inner, rparts)
+      if (rn >= 1) inner = rparts[1]
+    }
     result = v2_union_of(result, inner)
   }
   return result
@@ -541,20 +556,10 @@ function v2_coalesce_type(id, typeann_id, expr_id,    ct, inner) {
 # トップレベル（<...> の深さ 0）のカンマで T/E を分ける。`[^,]+` による単純分割だと
 # `Result<Dict<Str, Int>, AuthError|NotFoundError>` のような T 側のネストした generic
 # 内部のカンマで誤分割してしまうため、深さを追跡してトップレベルのカンマのみを探す。
-function v2_result_err_part(t,    m, inner, depth, i, c, comma_pos, part) {
-  if (!match(t, /^Result<(.+)>$/, m)) return ""
-  inner = m[1]
-  depth = 0; comma_pos = 0
-  for (i = 1; i <= length(inner); i++) {
-    c = substr(inner, i, 1)
-    if      (c == "<") depth++
-    else if (c == ">") depth--
-    else if (c == "," && depth == 0) { comma_pos = i; break }
-  }
-  if (comma_pos == 0) return ""
-  part = substr(inner, comma_pos + 1)
-  sub(/^[[:space:]]+/, "", part)
-  return part
+function v2_result_err_part(t,    parts, n) {
+  n = v2_result_parts(t, parts)
+  if (n < 2) return ""
+  return parts[2]
 }
 
 # WHEN ノードを再帰的に走査し、腕の網羅性を検査する。
