@@ -252,6 +252,11 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
       continue
     }
 
+    # 非空 dict リテラル { key: value, ... } の構造トークンは、dict の
+    # emit（Task 10）が実装されるまでの間、診断なしで読み飛ばす。
+    # 中身の IDENT/STRLIT はそのまま operand として RPN に流れる。
+    if (t == "LBRACE" || t == "RBRACE" || t == "COLON") continue
+
     # 添字式 rows[id] / user["name"]: 直前に値（IDENT/NUM/TYPE/STR/")"/"]"）が
     # あれば非空 "[" を添字アクセスの開始として扱う（二項演算子 INDEX に還元）。
     if (t == "LBRACK") {

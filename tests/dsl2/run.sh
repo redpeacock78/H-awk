@@ -38,13 +38,33 @@ for dir in tests/dsl2/*/; do
   # 工程ダンプ fixture（存在するものだけ検査）
   for stage in lex rpn ast types; do
     [[ -f "${dir}expected.${stage}.tsv" ]] || continue
-    actual=$(gawk -v V2_DUMP=$stage -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null) || true
+    stderr_file=$(mktemp)
+    set +e
+    actual=$(gawk -v V2_DUMP=$stage -f dsl/v2/main.awk "${dir}input.awk" 2>"$stderr_file")
+    ret=$?
+    set -e
+    actual_err=$(cat "$stderr_file"); rm -f "$stderr_file"
+    if [[ $ret -ne 0 || -n "$actual_err" ]]; then
+      printf "  FAIL: %s (%s, exit=%d)\n  stderr: %s\n" "$name" "$stage" "$ret" "$actual_err"
+      FAIL=$((FAIL + 1))
+      continue
+    fi
     check "$name ($stage)" "${dir}expected.${stage}.tsv" "$actual"
   done
 
   # emit fixture
   if [[ -f "${dir}expected.awk" ]]; then
-    actual=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null) || true
+    stderr_file=$(mktemp)
+    set +e
+    actual=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>"$stderr_file")
+    ret=$?
+    set -e
+    actual_err=$(cat "$stderr_file"); rm -f "$stderr_file"
+    if [[ $ret -ne 0 || -n "$actual_err" ]]; then
+      printf "  FAIL: %s (emit, exit=%d)\n  stderr: %s\n" "$name" "$ret" "$actual_err"
+      FAIL=$((FAIL + 1))
+      continue
+    fi
     check "$name (emit)" "${dir}expected.awk" "$actual"
   fi
 done
