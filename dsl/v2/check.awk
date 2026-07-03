@@ -1304,9 +1304,27 @@ function v2_check_toplevel_let(    k, child) {
 # 全体分そろえてから（本関数は v2_collect の直後に呼ぶ）、宣言順に同じ DFS を
 # 行う。
 
+# 型文字列をトップレベル "&"（<...> の深さを尊重）で分割する（DF。交差型
+# `A & Int` の各 member を辿るため v2_split_union と対で使う）。
+function v2_split_intersection(t, out,    i, c, depth, cur, n) {
+  n = 0; depth = 0; cur = ""
+  for (i = 1; i <= length(t); i++) {
+    c = substr(t, i, 1)
+    if      (c == "<") depth++
+    else if (c == ">") depth--
+    else if (c == "&" && depth == 0) { out[++n] = cur; cur = ""; continue }
+    cur = cur c
+  }
+  if (length(cur) > 0) out[++n] = cur
+  return n
+}
+
 # name から辿って visiting に既出なら "type alias cycle detected involving
-# 'name'" を診断する（v1 実測文面と一致）。
-function v2_check_alias_cycle(name, lineno, visiting,    target, parts, n, i) {
+# 'name'" を診断する（v1 実測文面と一致）。union 分岐だけでなく交差型 "&"
+# でも分割し、各 member がエイリアス名なら再帰する（DF。`type A = B & Int`
+# + `type B = A` のように交差型に隠れたサイクルは union 分岐だけでは
+# 素通りしていた）。
+function v2_check_alias_cycle(name, lineno, visiting,    target, uparts, un, i, iparts, ni, j) {
   if (!(name in ALIAS)) return
   if (name in visiting) {
     v2_diag(lineno, 1, "type alias cycle detected involving '" name "'")
@@ -1314,9 +1332,12 @@ function v2_check_alias_cycle(name, lineno, visiting,    target, parts, n, i) {
   }
   visiting[name] = 1
   target = ALIAS[name]
-  n = v2_split_union(target, parts)
-  for (i = 1; i <= n; i++) {
-    if (parts[i] in ALIAS) v2_check_alias_cycle(parts[i], lineno, visiting)
+  un = v2_split_union(target, uparts)
+  for (i = 1; i <= un; i++) {
+    ni = v2_split_intersection(uparts[i], iparts)
+    for (j = 1; j <= ni; j++) {
+      if (iparts[j] in ALIAS) v2_check_alias_cycle(iparts[j], lineno, visiting)
+    }
   }
   delete visiting[name]
 }
