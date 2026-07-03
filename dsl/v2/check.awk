@@ -235,6 +235,15 @@ function v2_split_union(t, out,    i, c, depth, cur, n) {
   return n
 }
 
+# 型 t のいずれかの union member が Untrusted<...> なら真を返す（prefix-only
+# 判定だと `Str|Untrusted<Str>` のような union が素通りしてしまうため、
+# v2_split_union でトップレベル分割した上で member 単位に判定する。DK/DL）。
+function v2_type_has_untrusted_member(t,    parts, n, i) {
+  n = v2_split_union(t, parts)
+  for (i = 1; i <= n; i++) if (parts[i] ~ /^Untrusted</) return 1
+  return 0
+}
+
 # 型引数リストをトップレベル ","（<...> の深さを尊重）で分割する
 function v2_split_generic_args(t, out,    i, c, depth, cur, n) {
   n = 0; depth = 0; cur = ""
@@ -382,8 +391,8 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
   }
   # 文字列連結は brand 型（HtmlEscapedStr 等）を失い Str に落ちる（docs/dsl.md:264
   # の補間規則と同型: いずれかのオペランドが Untrusted<...> なら結果も
-  # Untrusted<Str> を伝播する。CK）。
-  if (op == "CONCAT") return (lt ~ /^Untrusted</ || rt ~ /^Untrusted</) ? "Untrusted<Str>" : "Str"
+  # Untrusted<Str> を伝播する。union の場合は member 単位で判定する。CK/DL）。
+  if (op == "CONCAT") return (v2_type_has_untrusted_member(lt) || v2_type_has_untrusted_member(rt)) ? "Untrusted<Str>" : "Str"
 
   is_num_op = (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "^")
   if (is_num_op) {
@@ -1093,12 +1102,32 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
 # 拒否する（BY。v1 実測: "cannot interpolate sealed <type>" と同文面。
 # dsl/desugar_strings.awk 相当。unwrap しないまま埋め込むと `?=`/`when...of` の
 # 強制 unwrap を迂回できてしまうため）。
-function v2_cache_strlit_interp_types(id, text,    rest, m, exprtext, t, adv, n, ct) {
+# 補間式テキストの終端 "}" を、引用文字列（"..."、\" エスケープ対応）内の
+# "}" を除外して探す。CO/DB の括弧深さ追跡と同じ帯: `#{...}` の中身に
+# `safe.html.raw("}")` のような文字列リテラルがあると、素朴な [^}]* 走査は
+# その中の } で早期終端してしまう（DM）。start は "#{" の直後の位置。
+# 見つからなければ 0 を返す。
+# 補間式テキストの \" は awk リテラルの `\"` エスケープそのもの（STRLIT の
+# 生テキスト再構築時に非解釈のまま残る 2 文字列。rpn.awk の INTERP_OPEN/CLOSE
+# トークン列再結合を参照）なので、汎用エスケープではなく `\"` の 2 文字を
+# 1 単位として文字列開始/終了のトグルに使う。
+function v2_find_interp_close(text, start,    i, c, in_str) {
+  in_str = 0
+  for (i = start; i <= length(text); i++) {
+    c = substr(text, i, 1)
+    if (c == "\\" && substr(text, i + 1, 1) == "\"") { in_str = !in_str; i++; continue }
+    if (!in_str && c == "}") return i
+  }
+  return 0
+}
+
+function v2_cache_strlit_interp_types(id, text,    rest, exprtext, t, n, ct, start, close_pos) {
   rest = text
   n = 0
-  while (match(rest, /#\{([^}]*)\}/, m)) {
-    adv = RSTART + RLENGTH
-    exprtext = m[1]
+  while ((start = index(rest, "#{")) > 0) {
+    close_pos = v2_find_interp_close(rest, start + 2)
+    if (close_pos == 0) break
+    exprtext = substr(rest, start + 2, close_pos - start - 2)
     t = v2_infer_interp_expr_type(id, exprtext)
     if (t != "" && t != "Unknown") {
       ct = v2_resolve_sealed(t)
@@ -1106,7 +1135,7 @@ function v2_cache_strlit_interp_types(id, text,    rest, m, exprtext, t, adv, n,
     }
     n++
     STRLIT_INTERP_TYPE[id, n] = t
-    rest = substr(rest, adv)
+    rest = substr(rest, close_pos + 1)
   }
   STRLIT_INTERP_COUNT[id] = n
 }
@@ -1116,7 +1145,7 @@ function v2_cache_strlit_interp_types(id, text,    rest, m, exprtext, t, adv, n,
 function v2_strlit_has_untrusted_interp(id,    i, n) {
   n = (id in STRLIT_INTERP_COUNT) ? STRLIT_INTERP_COUNT[id] : 0
   for (i = 1; i <= n; i++) {
-    if (STRLIT_INTERP_TYPE[id, i] ~ /^Untrusted</) return 1
+    if (v2_type_has_untrusted_member(STRLIT_INTERP_TYPE[id, i])) return 1
   }
   return 0
 }
