@@ -709,16 +709,49 @@ function v2_rpn_return(i,    line, j) {
   return j + 1
 }
 
+# 行内の "[" のうち、v2_shunt_expr の INDEX 二項演算子（BE/U）が扱えない
+# 形（直前が値でない = 配列リテラル等、または対応する "]" までにネストした
+# "[" を含む多次元添字、または行内で閉じない）が 1 つでもあれば真を返す
+# （DR。単純な一階層添字 `name[idx]` は shunting yard 側で既に構造化
+# できるため、これだけを理由に RAWLINE へ落とす必要はない）。
+function v2_line_has_unsupported_index(i, line,    j, lbrack_pos, prevkind, depth, close_pos) {
+  for (j = i; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
+    if (TOK[j,"kind"] != "LBRACK") continue
+    lbrack_pos = j
+    prevkind = (j > i) ? TOK[j-1,"kind"] : ""
+    if (!(prevkind == "IDENT" || prevkind == "NUM" || prevkind == "TYPE" || \
+          prevkind == "STR"   || prevkind == "RP"  || prevkind == "RBRACK")) return 1
+    depth = 1
+    close_pos = 0
+    j++
+    while (j <= TOK["n"] && TOK[j,"line"] == line && depth > 0) {
+      if (TOK[j,"kind"] == "LBRACK") return 1   # ネストした添字は未対応
+      if (TOK[j,"kind"] == "RBRACK") { depth--; if (depth == 0) close_pos = j }
+      j++
+    }
+    if (depth != 0) return 1   # 行内で閉じない
+    # 文頭の `name[...] =` 形は代入文（v2_index_assign_eq/CB）専用の判定
+    # 対象で、ここに来た時点で false（base 変数が V2_RPN_DSLVAR 未登録）
+    # ということは構造化不可が確定済みという意味。二重に構造化しようと
+    # せず RAWLINE のまま（wave 6 CB の DSLVAR 限定ルールと衝突しない）。
+    if (lbrack_pos == i + 1 && close_pos > 0 && \
+        TOK[close_pos + 1,"kind"] == "OP" && TOK[close_pos + 1,"text"] == "=") return 1
+    j--   # for の自動 j++ 分を差し引く
+  }
+  return 0
+}
+
 # 位置 i の行が式文として解釈不能かどうかを判定
-# (v2_shunt_expr が扱えない LBRACE/LBRACK/RBRACK/COLON/ARROW/INTERP_* を含む)
+# (v2_shunt_expr が扱えない LBRACE/COLON/ARROW/INTERP_* を含む、または
+# v2_shunt_expr の INDEX 演算子が扱えない形の "[" を含む)
 function v2_is_rawline(i,    line, j, k) {
   line = TOK[i,"line"]
   for (j = i; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
     k = TOK[j,"kind"]
-    if (k == "LBRACE"     || k == "LBRACK"      || k == "RBRACK" ||
-        k == "COLON"      || k == "ARROW"        ||
+    if (k == "LBRACE"     || k == "COLON"        || k == "ARROW"        ||
         k == "INTERP_OPEN" || k == "INTERP_CLOSE") return 1
   }
+  if (v2_line_has_unsupported_index(i, line)) return 1
   return 0
 }
 
