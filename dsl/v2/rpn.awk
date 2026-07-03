@@ -363,6 +363,11 @@ function v2_find_expr_end(start,    k, depth, t, txt, startline) {
 
     if (depth == 0 && k > start && TOK[k,"line"] != startline) return k - 1
 
+    # 深さ 0 の ';' は同一行内の文区切り（CR）。一行に複数文が並ぶ
+    # `let x: Int = 1; return x` 形で、';' 以降を次の文として独立に
+    # ディスパッチできるよう、式終端をここで確定する。
+    if (depth == 0 && t == "OP" && txt == ";") return k - 1
+
     if (t == "LP" || t == "LBRACK") { depth++; continue }
 
     if (t == "RP" || t == "RBRACK") {
@@ -412,6 +417,12 @@ function v2_is_arm_pat(i,    j) {
 
 # KW に応じてサブパーサを選択するディスパッチャ
 function v2_rpn_dispatch(i,    kw) {
+  # 深さ 0 のセミコロン文区切り（CR）: v2_find_expr_end が式終端として
+  # ';' の手前で止めるため、前の文の直後に ';' 自体が残っている。次の文の
+  # 開始トークンとして誤ってディスパッチしないよう読み飛ばす
+  # （`let x: Int = 1; return x` の一行複数文に対応）。
+  while (i <= TOK["n"] && TOK[i,"kind"] == "OP" && TOK[i,"text"] == ";") i++
+  if (i > TOK["n"]) return i
   kw = (TOK[i,"kind"] == "KW") ? TOK[i,"text"] : ""
   if      (kw == "function") return v2_rpn_func(i)
   else if (kw == "let")      return v2_rpn_let(i)
@@ -692,9 +703,34 @@ function v2_is_rawline(i,    line, j, k) {
   return 0
 }
 
-# 行頭が素の awk 文形式（print / printf 等）かどうかを判定する
+# 行頭が素の awk 文形式（print / printf / if / while / for / do / delete 等、
+# DSL 構文として構造化しない awk 制御構文・組込み文）かどうかを判定する（CS）。
+# これらは v2_shunt_expr の式文法では扱えず、誤って CALL/CONCAT に還元される
+# ため RAWLINE へ fallback させる。
 function v2_is_awk_stmt_head(i) {
-  return TOK[i,"kind"] == "IDENT" && (TOK[i,"text"] == "print" || TOK[i,"text"] == "printf")
+  return TOK[i,"kind"] == "IDENT" && \
+    (TOK[i,"text"] == "print" || TOK[i,"text"] == "printf" || \
+     TOK[i,"text"] == "if"    || TOK[i,"text"] == "while"  || \
+     TOK[i,"text"] == "for"   || TOK[i,"text"] == "do"     || \
+     TOK[i,"text"] == "delete")
+}
+
+# 素の awk 複合代入演算子（+= -= *= /= %= ^=）を検出する（CS）。lex.awk の
+# 2 文字演算子表にこれらが含まれず単文字 OP 2 つに分割されるため、
+# shunting yard がそれぞれを独立した演算子として扱い stack underflow に
+# なる（`x += 1` → OP "+" OP "="）。深さに関わらず、同一行内にこの隣接
+# ペアがあれば RAWLINE へ fallback させる対象と判定する。
+function v2_is_compound_assign(i,    line, j, k, op1) {
+  line = TOK[i,"line"]
+  for (j = i; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
+    if (TOK[j,"kind"] != "OP") continue
+    op1 = TOK[j,"text"]
+    if (op1 != "+" && op1 != "-" && op1 != "*" && op1 != "/" && op1 != "%" && op1 != "^") continue
+    k = j + 1
+    if (k <= TOK["n"] && TOK[k,"line"] == line && TOK[k,"kind"] == "OP" && TOK[k,"text"] == "=" && \
+        TOK[k,"col"] == TOK[j,"col"] + length(op1)) return 1
+  }
+  return 0
 }
 
 # その他の文（裸の式文・代入・未知トークン）
@@ -751,7 +787,7 @@ function v2_rpn_stmt(i,    j, line, eq_pos) {
   eq_pos = v2_index_assign_eq(i)
   if (eq_pos > 0) return v2_rpn_index_assign(i, eq_pos)
 
-  if (v2_is_rawline(i) || v2_is_awk_stmt_head(i)) {
+  if (v2_is_rawline(i) || v2_is_awk_stmt_head(i) || v2_is_compound_assign(i)) {
     # 解釈不能トークン列を RAWLINE マーカーで素通し
     v2_emit_rpn("MARKER",  "RAWLINE",             line, "")
     v2_emit_rpn("OPERAND", V2_LINE_TEXT[line], line, "")
