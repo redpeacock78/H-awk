@@ -45,10 +45,10 @@ function v2_strip_str_comment(line,    i, ch, out, instr) {
       continue
     }
     if (ch == "\"") { instr = 1; continue }
-    if (ch == "#") {
-      if (substr(line, i + 1, 1) == "{") { out = out "#{"; i++; continue }
-      break
-    }
+    # 文字列外の "#" は常に awk コメントの開始（CJ）。補間マーカー "#{" の保護は
+    # 文字列内（instr の分岐）に限定する — 素の awk コメントが `#{note}` や
+    # `# {foo} bar` のように "{" を含んでいても DSL 行と誤検出しない。
+    if (ch == "#") break
     if (ch == "/" && v2_regex_start_here(out)) { i = v2_skip_regex_text(line, i); continue }
     out = out ch
   }
@@ -229,8 +229,8 @@ function v2_ident_kind(tok) {
 # rest の先頭から単一トークンを切り出し、消費文字数を返す
 # rest は line の col 列目から始まる文字列
 function v2_tok_word(rest, lineno, col,    c) {
-  # 数値リテラル
-  if (match(rest, /^[0-9]+(\.[0-9]+)?/)) {
+  # 数値リテラル（指数表記 1e3 / 1.5e-2 / 1E+10 を含む。CM）
+  if (match(rest, /^[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?/)) {
     v2_push("NUM", substr(rest, 1, RLENGTH), lineno, col)
     return RLENGTH
   }
