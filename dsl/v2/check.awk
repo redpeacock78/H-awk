@@ -504,7 +504,11 @@ function v2_when_bind_type(tag, ttype, typeann_id) {
 function v2_infer_when(id,    k, j, arm, pat, blk, pc, tag, typeann_id, bind_id, \
                         bind_name, bind_type, had_saved, saved_type, ttype) {
   v2_infer(AST[id,"c1"])
-  ttype = v2_strip_effect(TYPEOF[AST[id,"c1"]])
+  # Effect 剥がしのみだとエイリアス越しの sealed 型（`type MaybeStr =
+  # Option<Str>`）の束縛導出で MaybeStr のまま残り、`-> Str` 関数の
+  # `return v` が誤って型不一致になる（DD）。v2_check_when の網羅性判定
+  # （line 801）と同じ v2_resolve_sealed で揃える。
+  ttype = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
 
   for (k = 2; k <= AST[id,"nc"]; k++) {
     arm = AST[id,"c" k]
