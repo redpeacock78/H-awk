@@ -56,6 +56,26 @@ function v2_strip_str_comment(line,    i, ch, out, instr) {
 }
 
 # DSL 構文を含む行か判定する述語
+# type NAME = ... 宣言をファイル全体から事前収集し、型注釈検出（v2_is_dsl の
+# `: TYPE` 判定）に使う代替パターンを組み立てる（CE）。組込み型集合に無い
+# ユーザー定義エイリアスだけが注釈に使われている関数（`type Status = Int|Str`
+# + `function f(x: Status) {...}`）は、この事前収集なしでは検出できず素の awk
+# 扱いのまま素通りしていた。宣言位置が使用箇所より後（前方参照）でもファイル
+# 全体を先に舐めるため拾える。
+# 誤検出リスク: エイリアス名が偶然コメント・文字列中の識別子と一致するケースは
+# 元々の固定型リストと同じ理由で許容する（v2_strip_str_comment 済みの行に対して
+# のみ判定するため文字列内は対象外）。
+function v2_collect_type_aliases(nlines,    i, s, m, names, n) {
+  names = ""; n = 0
+  for (i = 1; i <= nlines; i++) {
+    s = v2_strip_str_comment(V2_RAWLINE[i])
+    if (match(s, /(^|[^[:alnum:]_])type[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=/, m)) {
+      if (!(m[2] in V2_DSL_ALIAS)) { V2_DSL_ALIAS[m[2]] = 1; names = names (n++ ? "|" : "") m[2] }
+    }
+  }
+  V2_ALIAS_TYPEANN_RE = names
+}
+
 function v2_is_dsl(line,    s) {
   s = v2_strip_str_comment(line)
   # let / when / of / end をワード境界で検出
@@ -70,6 +90,9 @@ function v2_is_dsl(line,    s) {
   if (s ~ /(^|[^[:alnum:]_])(hawk|ctx|env|cache|safe|msg|proc|json|option)\.[[:alnum:]_]/) return 1
   # 型注釈  : Int / : Str / : Response 等（docs/dsl.md:96 のサポート型一覧。BA）
   if (s ~ /:[[:space:]]*(Int|Float|Str|Bool|NumericStr|Array|Map|Response|Untrusted<|HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr|Void|Any|List<|Dict<|Record|Result<|Option<)/) return 1
+  # ユーザー定義 type エイリアスのみによる型注釈（CE）。v2_collect_type_aliases
+  # が事前収集した名前集合と ": NAME" 形で照合する。
+  if (V2_ALIAS_TYPEANN_RE != "" && s ~ (":[[:space:]]*(" V2_ALIAS_TYPEANN_RE ")([^[:alnum:]_]|$)")) return 1
   return 0
 }
 
@@ -144,6 +167,10 @@ function v2_lex(src,    line, lineno, in_when, in_block, nlines, tok_start, k, \
   nlines = 0
   while ((getline line < src) > 0) { nlines++; V2_RAWLINE[nlines] = line }
   close(src)
+
+  delete V2_DSL_ALIAS
+  V2_ALIAS_TYPEANN_RE = ""
+  v2_collect_type_aliases(nlines)
 
   v2_mark_unannotated_func(nlines)
 
