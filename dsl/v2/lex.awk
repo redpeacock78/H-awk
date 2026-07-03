@@ -281,7 +281,45 @@ function v2_tok_line(line, lineno,    pos, rest) {
     if (rest ~ /^->/)                                       { v2_push("ARROW", "->", lineno, pos); pos += 2; continue }
     if (rest ~ /^(\?\?|\|>|\?=|==|!=|<=|>=|&&|\|\||!~)/)  { v2_push("OP", substr(rest, 1, 2), lineno, pos); pos += 2; continue }
 
+    # 正規表現リテラル（AS）: docs/dsl.md:291 は単一行 regex リテラルを明記。
+    # 直前トークンが値（IDENT/NUM/TYPE/STR/")"/"]"）でなければ除算ではなく
+    # regex リテラルの開始とみなし、対応する閉じ '/' まで単一トークン化する
+    # （標準的な曖昧性解消規則: 直前が値なら除算、それ以外なら regex）。
+    if (rest ~ /^\// && !v2_prevtok_is_value()) {
+      pos += v2_tok_regex(rest, lineno, pos)
+      continue
+    }
+
     # 数値 / 識別子 / 1 文字記号
     pos += v2_tok_word(rest, lineno, pos)
   }
+}
+
+# 直前に push されたトークンが「値」（除算の左辺になり得る）かどうかを返す
+function v2_prevtok_is_value(    k) {
+  k = TOK["n"]
+  if (k < 1) return 0
+  return (TOK[k,"kind"] == "IDENT" || TOK[k,"kind"] == "NUM" || TOK[k,"kind"] == "TYPE" || \
+          TOK[k,"kind"] == "STR"   || TOK[k,"kind"] == "RP"  || TOK[k,"kind"] == "RBRACK")
+}
+
+# 正規表現リテラル rest[1]=='/' をトークン化し、消費文字数を返す。
+# エスケープ '\/' に対応し、閉じ '/' まで（開閉スラッシュを含めて）1 トークンにする。
+function v2_tok_regex(rest, lineno, startcol,    i, ch, acc) {
+  acc = "/"
+  i = 2
+  while (i <= length(rest)) {
+    ch = substr(rest, i, 1)
+    if (ch == "\\") { acc = acc ch substr(rest, i + 1, 1); i += 2; continue }
+    if (ch == "/") {
+      acc = acc ch
+      v2_push("REGEX", acc, lineno, startcol)
+      return i
+    }
+    acc = acc ch
+    i++
+  }
+  v2_diag(lineno, startcol, "unterminated regex literal")
+  v2_push("REGEX", acc, lineno, startcol)
+  return length(rest)
 }

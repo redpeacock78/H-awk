@@ -42,6 +42,7 @@ function v2_addchild(parent, child) {
 function v2_operand_node(val, line) {
   if (val ~ /^[0-9]/) return v2_leaf("NUMLIT", val, line)
   if (val ~ /^"/)     return v2_leaf("STRLIT", val, line)
+  if (val ~ /^\//)    return v2_leaf("REGEXLIT", val, line)
   return v2_leaf("IDENT", val, line)
 }
 

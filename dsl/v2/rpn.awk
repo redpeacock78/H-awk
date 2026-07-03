@@ -206,7 +206,7 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
       }
     }
 
-    if (t == "IDENT" || t == "NUM" || t == "TYPE") {
+    if (t == "IDENT" || t == "NUM" || t == "TYPE" || t == "REGEX") {
       v2_emit_rpn("OPERAND", TOK[k,"text"], line, "")
       continue
     }
