@@ -265,7 +265,6 @@ function v2_unwrap_type(t,    parts, n, i, inner, m, result) {
     inner = parts[i]
     if (match(inner, /^Option<(.+)>$/, m))       inner = m[1]
     else if (match(inner, /^Result<([^,]+),/, m)) inner = m[1]
-    else                                          inner = "Any"
     result = v2_union_of(result, inner)
   }
   return result
