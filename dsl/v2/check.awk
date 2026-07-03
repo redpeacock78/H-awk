@@ -133,7 +133,14 @@ function v2_collect(id,    k, name, child, argn) {
   if (AST[id,"kind"] == "TYPEDECL") {
     # type NAME = TYPE_EXPR（AP）。組込み ALIAS と同じ展開経路（v2_expand_alias）
     # に乗せるだけで、既存の v2_type_compat / v2_unwrap_type 等はそのまま使える。
-    if (AST[id,"nc"] >= 1) ALIAS[AST[id,"text"]] = AST[AST[id,"c1"],"text"]
+    # 循環検出（BR）は ALIAS[] がファイル全体分そろってから別パスで行うため、
+    # ここでは宣言順・行番号だけ記録しておく。
+    if (AST[id,"nc"] >= 1) {
+      name = AST[id,"text"]
+      ALIAS[name] = AST[AST[id,"c1"],"text"]
+      ALIAS_DECL_LINE[name] = AST[id,"line"]
+      ALIAS_DECL_ORDER[++ALIAS_DECL_N] = name
+    }
   } else if (AST[id,"kind"] == "FUNC") {
     name = AST[id,"text"]
     SIG[name,"arity"] = 0
@@ -367,10 +374,27 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
 
 # INDEX（添字式 target[idx]）の要素型を決定する（BE）。
 # target が Dict<K, V> なら V、List<T> なら T、それ以外・Unknown は Unknown。
-function v2_index_type(target_type,    m) {
+# 添字式の型も検査する（docs/dsl.md:108「Only numeric indices are allowed.
+# String keys are a type error.」BN）: List は Int 添字のみ、Dict<Str, V> は
+# Str 添字のみ。添字が Unknown なら誤検出防止のため素通しする。
+function v2_index_type(id,    target_type, key_type, m) {
+  target_type = TYPEOF[AST[id,"c1"]]
+  key_type    = TYPEOF[AST[id,"c2"]]
   if (target_type == "" || target_type == "Unknown") return "Unknown"
-  if (match(target_type, /^List<(.+)>$/, m)) return m[1]
-  if (match(target_type, /^Dict<[^,]+,[[:space:]]*(.+)>$/, m)) return m[1]
+  if (match(target_type, /^List<(.+)>$/, m)) {
+    if (key_type != "" && key_type != "Unknown" && key_type != "Int") {
+      v2_diag(AST[id,"line"], 1, \
+        "List requires numeric index, got string key " AST[AST[id,"c2"],"text"])
+    }
+    return m[1]
+  }
+  if (match(target_type, /^Dict<[^,]+,[[:space:]]*(.+)>$/, m)) {
+    if (key_type != "" && key_type != "Unknown" && key_type != "Str") {
+      v2_diag(AST[id,"line"], 1, \
+        "Dict<Str, V> requires string key, got integer " AST[AST[id,"c2"],"text"])
+    }
+    return m[1]
+  }
   return "Unknown"
 }
 
@@ -444,7 +468,7 @@ V2_CUR_FUNC_RET = ""
 V2_CUR_FUNC_NAME = ""
 
 function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
-                   saved_ret, saved_name, ret_type, name, ret_sig, typearg, lhs_decl_type) {
+                   saved_ret, saved_name, ret_type, name, ret_sig, typearg, lhs_decl_type, rhs_id) {
   kind = AST[id,"kind"]
 
   if (kind == "FUNC") {
@@ -476,8 +500,17 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
   } else if (kind == "STRLIT") {
     # 補間 #{ } 内のいずれかの式が Untrusted<...> なら結果は Untrusted<Str>
     # （docs/dsl.md:264-270。BL）。内側が Unknown の場合は誤検出防止で従来どおり Str。
-    t = (index(AST[id,"text"], "#{") > 0 && v2_strlit_has_untrusted_interp(AST[id,"text"])) ? \
-        "Untrusted<Str>" : "Str"
+    # 補間式の型は、ここ（v2_infer の正順走査で V2_ENV が正しく関数スコープに
+    # なっている時点）でキャッシュしておく（BM）。v2_check_fragment_interp は
+    # 型推論後に全体を再走査する別パス（v2_check_brand）から呼ばれるため、その
+    # 時点の V2_ENV は最後に処理した関数のものに固定されてしまい、他の関数の
+    # ローカル識別子を引けない。
+    if (index(AST[id,"text"], "#{") > 0) {
+      v2_cache_strlit_interp_types(id, AST[id,"text"])
+      t = v2_strlit_has_untrusted_interp(id) ? "Untrusted<Str>" : "Str"
+    } else {
+      t = "Str"
+    }
   } else if (kind == "REGEXLIT") {
     # v1 に Regex 型はないため Any 相当（誤検出防止。AS）。
     t = "Any"
@@ -524,13 +557,27 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
       t = v2_binop_type(AST[id,"text"], lt, rt, AST[id,"line"])
     }
   } else if (kind == "COALESCE") {
+    # v1（dsl/desugar_let.awk:_ds_infer_type_with_orig）は `??` の型を
+    # union(左辺の生の型, 右辺の型) として求め、Option/Result を unwrap しない
+    # （実測: `let x: Int = option.some(1) ?? 0` は v1 で
+    # "type mismatch: cannot assign Int|Option<Any> to Int" になる。BS）。
     lt = TYPEOF[AST[id,"c1"]]
     rt = TYPEOF[AST[id,"c2"]]
-    t = v2_union_of(v2_unwrap_type(lt), rt)
+    t = v2_union_of(lt, rt)
   } else if (kind == "INDEX") {
-    t = v2_index_type(TYPEOF[AST[id,"c1"]])
+    t = v2_index_type(id)
   } else if (kind == "PIPE") {
-    t = TYPEOF[AST[id,"c2"]]
+    rhs_id = AST[id,"c2"]
+    t = TYPEOF[rhs_id]
+    # pipe RHS の CALL に明示引数が無い場合、AB の generic 戻り型特殊化が
+    # 引数から型を取れず（例: option.some の戻りが Option<Any> のまま）残る
+    # （BO）。pipe 入力（c1）の型を暗黙の第 1 引数とみなして特殊化し直す。
+    if (AST[rhs_id,"kind"] == "CALL" && AST[rhs_id,"nc"] == 0) {
+      if (AST[rhs_id,"text"] == "option.some") {
+        t = "Option<" TYPEOF[AST[id,"c1"]] ">"
+        TYPEOF[rhs_id] = t
+      }
+    }
   } else if (kind == "DOT") {
     t = v2_dot_type(id)
     TYPEOF[id] = t
@@ -703,6 +750,36 @@ function v2_check_when(id,    k, j, arm, pat, tag, typeann_id, \
   for (k = 1; k <= AST[id,"nc"]; k++) v2_check_when(AST[id,"c" k])
 }
 
+# WHEN の腕を辿り、catch-all 腕（none:/無型 ng:/default:/_:）より後に ng/none/
+# default 系の腕が続く場合を診断する（BV。v1 実測: dsl/desugar_match.awk の
+# _ds_match_catchall_order_error と同文面 "catch-all arm must be last"）。
+# v1 はこの検査を対象式の型を問わず構文レベルで行うため（typecheck 前の行走査）、
+# v2_check_when の ttype 判定（Option/Result 既知のみ）とは独立に、全 WHEN で
+# 検査する。ok/some 腕は v1 でも対象外（catchall フラグの確認・更新をしない）。
+function v2_check_arm_order(id,    k, j, arm, pat, tag, typeann_id, catchall_seen) {
+  if (AST[id,"kind"] == "WHEN") {
+    catchall_seen = 0
+    for (k = 2; k <= AST[id,"nc"]; k++) {
+      arm = AST[id,"c" k]
+      pat = AST[arm,"c1"]
+      tag = AST[pat,"text"]
+      if (tag == "ng" || tag == "none" || tag == "default" || tag == "_") {
+        if (catchall_seen) {
+          v2_diag(AST[arm,"line"], 1, "catch-all arm must be last")
+        }
+        typeann_id = 0
+        for (j = 1; j <= AST[pat,"nc"]; j++) {
+          if (AST[AST[pat,"c" j],"kind"] == "TYPEANN") typeann_id = AST[pat,"c" j]
+        }
+        if (tag == "none" || tag == "default" || tag == "_") catchall_seen = 1
+        else if (tag == "ng" && typeann_id == 0)             catchall_seen = 1
+      }
+    }
+  }
+
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_check_arm_order(AST[id,"c" k])
+}
+
 # ─── パス 5: CALL 引数の型検査（XSS ブランド型を含む、Task 9） ────────
 
 # #{ expr } 補間内の式テキストから、単純な CALL / DOT-CALL 形式（`recv.method(...)`
@@ -727,16 +804,32 @@ function v2_infer_interp_expr_type(exprtext,    m, name) {
   return "Unknown"
 }
 
-# STRLIT のテキスト（引用符・#{ ... } 補間を含む生テキスト）を走査し、
-# いずれかの補間式の型が Untrusted<...> なら真を返す（BL）。
-function v2_strlit_has_untrusted_interp(text,    rest, m, exprtext, t, adv) {
+# STRLIT の #{ } 補間式それぞれの型を id 単位でキャッシュする（BM）。
+# v2_infer の正順走査中（V2_ENV が現在の関数スコープに正しく充填された状態）
+# に一度だけ呼び出す。STRLIT_INTERP_TYPE[id, n] / STRLIT_INTERP_COUNT[id] に
+# 格納し、後段の v2_check_fragment_interp（型推論が終わった後の別パスから
+# 呼ばれ、その時点では V2_ENV が最後に処理した関数のものに固定されている）が
+# 再スキャンせずに済むようにする。
+function v2_cache_strlit_interp_types(id, text,    rest, m, exprtext, t, adv, n) {
   rest = text
+  n = 0
   while (match(rest, /#\{([^}]*)\}/, m)) {
     adv = RSTART + RLENGTH
     exprtext = m[1]
     t = v2_infer_interp_expr_type(exprtext)
-    if (t ~ /^Untrusted</) return 1
+    n++
+    STRLIT_INTERP_TYPE[id, n] = t
     rest = substr(rest, adv)
+  }
+  STRLIT_INTERP_COUNT[id] = n
+}
+
+# id（STRLIT ノード）の #{ } 補間のいずれかの型が Untrusted<...> なら真を返す
+# （BL）。v2_cache_strlit_interp_types 呼び出し後のキャッシュを読むだけ（BM）。
+function v2_strlit_has_untrusted_interp(id,    i, n) {
+  n = (id in STRLIT_INTERP_COUNT) ? STRLIT_INTERP_COUNT[id] : 0
+  for (i = 1; i <= n; i++) {
+    if (STRLIT_INTERP_TYPE[id, i] ~ /^Untrusted</) return 1
   }
   return 0
 }
@@ -744,21 +837,17 @@ function v2_strlit_has_untrusted_interp(text,    rest, m, exprtext, t, adv) {
 # safe.html.fragment の文字列引数中の #{ expr } 補間を走査し、各式の型を
 # HtmlPart（HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr）と照合する
 # （AM: dsl/desugar_strings.awk の _ds_expand_fragment_interp 互換）。
-function v2_check_fragment_interp(call_id, text,    rest, m, exprtext, t, adv) {
-  rest = text
-  while (match(rest, /#\{([^}]*)\}/, m)) {
-    # RSTART/RLENGTH は組込みグローバル変数のため、次の match（
-    # v2_infer_interp_expr_type 内部の match も含む）で上書きされる前に
-    # 前進量を確定させておく（さもないと rest が縮まらず暴走する）。
-    adv = RSTART + RLENGTH
-    exprtext = m[1]
-    t = v2_infer_interp_expr_type(exprtext)
+# strlit_id の型は v2_cache_strlit_interp_types が v2_infer 内で（正しい
+# V2_ENV スコープのもとで）キャッシュ済みのものを使う（BM）。
+function v2_check_fragment_interp(call_id, strlit_id,    i, n, t) {
+  n = (strlit_id in STRLIT_INTERP_COUNT) ? STRLIT_INTERP_COUNT[strlit_id] : 0
+  for (i = 1; i <= n; i++) {
+    t = STRLIT_INTERP_TYPE[strlit_id, i]
     if (t != "" && t != "Unknown" && \
         !v2_type_compat("HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr", t)) {
       v2_diag(AST[call_id,"line"], 1, \
         "safe.html.fragment interpolation expects HtmlPart, got " t)
     }
-    rest = substr(rest, adv)
   }
 }
 
@@ -769,7 +858,7 @@ function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, t
   if (name == "safe.html.fragment" && AST[child,"kind"] == "STRLIT") {
     text = AST[child,"text"]
     if (index(text, "#{") == 0) return
-    v2_check_fragment_interp(call_id, text)
+    v2_check_fragment_interp(call_id, child)
     return
   }
   actual = ((child) in TYPEOF) ? TYPEOF[child] : ""
@@ -844,8 +933,42 @@ function v2_check() {
   VARIANTS["Option"]  = "some" SUBSEP "none"
 
   v2_collect(1)
+  v2_check_alias_cycles()
   v2_check_calls(1, 0)
   v2_infer(1)
   v2_check_when(1)
+  v2_check_arm_order(1)
   v2_check_brand(1, 0)
+}
+
+# ─── パス 1.5: type エイリアス循環検出（BR） ─────────────────────────
+# v1（dsl/type.awk:_type_check_alias_cycle）の visited-set DFS 実測互換。
+# v1 は pass1a（forward reference 収集）で全エイリアスを集めてから、宣言順に
+# 1 件ずつ visiting セットをリセットして辿る。v2_collect も ALIAS[] をファイル
+# 全体分そろえてから（本関数は v2_collect の直後に呼ぶ）、宣言順に同じ DFS を
+# 行う。
+
+# name から辿って visiting に既出なら "type alias cycle detected involving
+# 'name'" を診断する（v1 実測文面と一致）。
+function v2_check_alias_cycle(name, lineno, visiting,    target, parts, n, i) {
+  if (!(name in ALIAS)) return
+  if (name in visiting) {
+    v2_diag(lineno, 1, "type alias cycle detected involving '" name "'")
+    return
+  }
+  visiting[name] = 1
+  target = ALIAS[name]
+  n = v2_split_union(target, parts)
+  for (i = 1; i <= n; i++) {
+    if (parts[i] in ALIAS) v2_check_alias_cycle(parts[i], lineno, visiting)
+  }
+  delete visiting[name]
+}
+
+function v2_check_alias_cycles(    i, name, visiting) {
+  for (i = 1; i <= ALIAS_DECL_N; i++) {
+    name = ALIAS_DECL_ORDER[i]
+    delete visiting
+    v2_check_alias_cycle(name, ALIAS_DECL_LINE[name], visiting)
+  }
 }
