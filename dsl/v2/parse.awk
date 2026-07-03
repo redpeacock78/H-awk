@@ -267,7 +267,10 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
   # パラメータ・戻り値型を処理
   j = i + 2
   while (RPN[j,"kind"] == "OPERAND") {
-    if (RPN[j,"val"] ~ /^[A-Z]/) {
+    # 戻り値型判定: 大文字始まり、またはユーザー定義エイリアス名（`type status
+    # = Int` のような小文字始まりを含む。v2_parse_let の CV と同じ判定基準
+    # に揃える。DE）。
+    if (RPN[j,"val"] ~ /^[A-Z]/ || (RPN[j,"val"] in V2_DSL_ALIAS)) {
       # 戻り値型
       typeann_id = v2_leaf("TYPEANN", RPN[j,"val"], RPN[j,"line"])
       v2_addchild(func_id, typeann_id)
