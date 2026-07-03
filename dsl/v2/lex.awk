@@ -78,8 +78,14 @@ function v2_collect_type_aliases(nlines,    i, s, m, names, n) {
 
 function v2_is_dsl(line,    s) {
   s = v2_strip_str_comment(line)
-  # let / when / of / end をワード境界で検出
-  if (s ~ /(^|[^[:alnum:]_])(let|when|of|end)([^[:alnum:]_]|$)/) return 1
+  # let / when をワード境界で検出
+  if (s ~ /(^|[^[:alnum:]_])(let|when)([^[:alnum:]_]|$)/) return 1
+  # end : when...end を閉じる DSL の "end" は単独行としてのみ現れる
+  # （docs/dsl.md の when...of...end 例は常にこの形）。素の awk 変数 `end` を
+  # 使う代入・参照が同じ語のせいで DSL 誤判定される事故を避ける（CQ）。
+  # 注: "of" は文法上つねに同一行の "when ... of" としてしか現れないため、
+  # 上の when 検出だけで拾える。単独の bare "of" 判定は削除した（CQ）。
+  if (s ~ /^[[:space:]]*end[[:space:]]*$/) return 1
   # type NAME = ...（型エイリアス宣言、docs/dsl.md:504-505。AP）
   if (s ~ /(^|[^[:alnum:]_])type[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/) return 1
   # ??  |>  #{  ?=  演算子
@@ -121,7 +127,7 @@ function v2_strip_for_brace_count(line,    i, ch, out, instr) {
 # 注釈なし（-> RETTYPE を持たない）DSL 関数ヘッダを検出する。
 # 本体（{ に対応する } まで）に DSL 構文が 1 行でもあれば、
 # ヘッダ行から閉じ } の行までを V2_FORCE_DSL[] に印付けする。
-function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_open, n_close, has_dsl, header) {
+function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_open, n_close, has_dsl, header, brace_line, look) {
   for (i = 1; i <= nlines; i++) {
     # ヘッダ判定はコメントを含む生行ではなく、コメント除去後の行に対して行う
     # （`function f() { # comment` のような行末コメントがあると「行末 {」判定が
@@ -129,11 +135,29 @@ function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_op
     header = v2_strip_for_brace_count(V2_RAWLINE[i])
     if (header !~ /(^|[^[:alnum:]_])function([^[:alnum:]_]|$)/) continue
     if (header ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*->/) continue
-    if (header !~ /\{[[:space:]]*$/) continue
 
-    depth   = 1
+    # ヘッダ行末に { があればその行、無ければ次行以降の最初の非空行が
+    # `{` で始まるかを見て本体開始行を決める（CP: 未注釈関数の次行ブレース。
+    # wave 7 BQ が注釈付き関数向けに実装した pending_brace と同じ検出帯）。
+    brace_line = 0
+    if (header ~ /\{[[:space:]]*$/) {
+      brace_line = i
+    } else if (header ~ /function[[:space:]]+[[:alnum:]_]+[[:space:]]*\([^)]*\)[[:space:]]*$/) {
+      for (j = i + 1; j <= nlines; j++) {
+        look = v2_strip_for_brace_count(V2_RAWLINE[j])
+        if (look ~ /^[[:space:]]*$/) continue
+        if (look ~ /^[[:space:]]*\{/) brace_line = j
+        break
+      }
+    }
+    if (!brace_line) continue
+
+    stripped = v2_strip_for_brace_count(V2_RAWLINE[brace_line])
+    tmp = stripped; n_open  = gsub(/{/, "", tmp)
+    tmp = stripped; n_close = gsub(/}/, "", tmp)
+    depth   = n_open - n_close
     has_dsl = 0
-    for (j = i + 1; j <= nlines && depth > 0; j++) {
+    for (j = brace_line + 1; j <= nlines && depth > 0; j++) {
       stripped = v2_strip_for_brace_count(V2_RAWLINE[j])
       tmp = stripped; n_open  = gsub(/{/, "", tmp)
       tmp = stripped; n_close = gsub(/}/, "", tmp)
