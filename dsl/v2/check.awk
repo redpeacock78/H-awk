@@ -336,7 +336,7 @@ V2_CUR_FUNC_RET = ""
 V2_CUR_FUNC_NAME = ""
 
 function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
-                   saved_ret, saved_name, ret_type, name, ret_sig, typearg) {
+                   saved_ret, saved_name, ret_type, name, ret_sig, typearg, lhs_decl_type) {
   kind = AST[id,"kind"]
 
   if (kind == "FUNC") {
@@ -360,8 +360,15 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     t = (AST[id,"text"] ~ /\./) ? "Float" : "Int"
   } else if (kind == "STRLIT") {
     t = "Str"
+  } else if (kind == "REGEXLIT") {
+    # v1 に Regex 型はないため Any 相当（誤検出防止。AS）。
+    t = "Any"
   } else if (kind == "IDENT") {
-    t = (AST[id,"text"] in V2_ENV) ? V2_ENV[AST[id,"text"]] : "Unknown"
+    # true/false/null はリテラルとして具象型を持つ（docs/dsl.md:143-144）。
+    # V2_ENV lookup より前に特別扱いする（Task 8 の環境実装より優先度が高い）。
+    if      (AST[id,"text"] == "true" || AST[id,"text"] == "false") t = "Bool"
+    else if (AST[id,"text"] == "null")                              t = "Null"
+    else t = (AST[id,"text"] in V2_ENV) ? V2_ENV[AST[id,"text"]] : "Unknown"
   } else if (kind == "PARAM") {
     for (k = 1; k <= AST[id,"nc"]; k++) {
       child = AST[id,"c" k]
@@ -378,7 +385,20 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
   } else if (kind == "BINOP") {
     lt = TYPEOF[AST[id,"c1"]]
     rt = TYPEOF[AST[id,"c2"]]
-    t = v2_binop_type(AST[id,"text"], lt, rt, AST[id,"line"])
+    if (AST[id,"text"] == "=") {
+      # 代入: LHS が型環境に登録済みのローカルなら RHS 型と突合する（Task 8 の
+      # V2_ENV は LET/PARAM で充填済み。未登録・Unknown 同士は誤検出防止で無視）。
+      if (AST[AST[id,"c1"],"kind"] == "IDENT" && (AST[AST[id,"c1"],"text"] in V2_ENV)) {
+        lhs_decl_type = V2_ENV[AST[AST[id,"c1"],"text"]]
+        if (rt != "" && rt != "Unknown" && lhs_decl_type != "" && lhs_decl_type != "Unknown" && \
+            !v2_type_compat(lhs_decl_type, rt)) {
+          v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " rt " to " lhs_decl_type)
+        }
+      }
+      t = rt
+    } else {
+      t = v2_binop_type(AST[id,"text"], lt, rt, AST[id,"line"])
+    }
   } else if (kind == "COALESCE") {
     lt = TYPEOF[AST[id,"c1"]]
     rt = TYPEOF[AST[id,"c2"]]
