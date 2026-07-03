@@ -322,9 +322,12 @@ function v2_parse_let(i, parent,    varname, let_id, typeann_id, j, expr_id) {
   let_id  = v2_node(RPN[i,"val"], RPN[i,"line"])   # LET または LETQ
   AST[let_id,"text"] = varname
 
-  # 型注釈: i+2 が大文字始まりの OPERAND → TYPEANN を追加
+  # 型注釈: i+2 が大文字始まりの OPERAND、またはユーザー定義エイリアス名
+  # （`type status = Int` のような小文字始まりを含む。lex の
+  # v2_collect_type_aliases が事前収集した V2_DSL_ALIAS と同じ判定基準に
+  # 揃える。CV）なら TYPEANN を追加する。
   j = i + 2
-  if (RPN[j,"kind"] == "OPERAND" && RPN[j,"val"] ~ /^[A-Z]/) {
+  if (RPN[j,"kind"] == "OPERAND" && (RPN[j,"val"] ~ /^[A-Z]/ || (RPN[j,"val"] in V2_DSL_ALIAS))) {
     typeann_id = v2_leaf("TYPEANN", RPN[j,"val"], RPN[j,"line"])
     v2_addchild(let_id, typeann_id)
     j = i + 3
