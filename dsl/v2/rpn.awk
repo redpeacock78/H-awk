@@ -420,6 +420,10 @@ function v2_rpn_func(i,    fname, line, j, typestart) {
   v2_emit_rpn("MARKER", "FUNC_OPEN", line, "")
   v2_emit_rpn("OPERAND", fname, line, "")
 
+  # 関数スコープ開始: 添字代入の構造化判定に使う DSL 変数の宣言型を初期化する
+  # （CB）。前の関数の残留を持ち込まないよう毎回クリアする。
+  delete V2_RPN_DSLVAR
+
   j = i + 2  # LP の位置
 
   # パラメータリスト ( IDENT [: TYPE] [, ...] )
@@ -544,6 +548,9 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
     for (k = typestart; k < j; k++)
       typetext = typetext ((TOK[k,"kind"] == "COMMA") ? ", " : TOK[k,"text"])
     v2_emit_rpn("OPERAND", typetext, TOK[typestart,"line"], "")
+    # List</Dict< と宣言された変数は、後続の添字代入文（xs[k] = v）を RAWLINE
+    # に吸収させず ASSIGN 系ノードとして構造化するための対象に記録する（CB）。
+    if (typetext ~ /^List</ || typetext ~ /^Dict</) V2_RPN_DSLVAR[name] = typetext
   }
 
   # 裸の let 宣言（hoist 形 `let tmp` / `let n: Int`、= も ?= もない）は
@@ -673,8 +680,58 @@ function v2_is_awk_stmt_head(i) {
 }
 
 # その他の文（裸の式文・代入・未知トークン）
-function v2_rpn_stmt(i,    j, line) {
+# 添字代入文 `name[idx] = rhs` を検出する（CB）。name が V2_RPN_DSLVAR に
+# 記録された List</Dict< 変数であり、深さ 0 の RBRACK の直後に単純な `=`
+# （`==`/`+=` 等ではない）が続く場合のみ ASSIGN 系ノードとして扱う。
+# 一致すれば `=` の RPN インデックスを返し、しなければ 0 を返す。
+# 素の awk 配列（DSL 変数でないもの）への添字代入は従来どおり RAWLINE に
+# 委ねる（既存 fixture の a[i] = 1 は V2_RPN_DSLVAR に無いため対象外のまま）。
+function v2_index_assign_eq(i,    line, j, depth) {
   line = TOK[i,"line"]
+  if (TOK[i,"kind"] != "IDENT" || !(TOK[i,"text"] in V2_RPN_DSLVAR)) return 0
+  if (TOK[i+1,"kind"] != "LBRACK") return 0
+  depth = 0
+  for (j = i + 1; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
+    if (TOK[j,"kind"] == "LBRACK") depth++
+    else if (TOK[j,"kind"] == "RBRACK") {
+      depth--
+      if (depth == 0) break
+    }
+  }
+  if (depth != 0) return 0            # 未閉の [ 、または複数階層添字は対象外
+  j++
+  if (j <= TOK["n"] && TOK[j,"line"] == line && \
+      TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=") return j
+  return 0
+}
+
+# 添字代入文を INDEX_ASSIGN として構造化発行する（CB）。
+# RPN: MARKER INDEX_ASSIGN / OPERAND name / <index 式> / MARKER INDEX_SEP /
+#      <rhs 式> / MARKER STMT_END
+function v2_rpn_index_assign(i, eq_pos,    line, name, lbrack, rbrack, j) {
+  line  = TOK[i,"line"]
+  name  = TOK[i,"text"]
+  lbrack = i + 1
+  rbrack = eq_pos - 1
+
+  v2_emit_rpn("MARKER", "INDEX_ASSIGN", line, "")
+  v2_emit_rpn("OPERAND", name, line, "")
+  if (rbrack - 1 >= lbrack + 1) v2_shunt_expr(lbrack + 1, rbrack - 1)
+  v2_emit_rpn("MARKER", "INDEX_SEP", line, "")
+
+  j = v2_find_expr_end(eq_pos + 1)
+  if (j >= eq_pos + 1) v2_shunt_expr(eq_pos + 1, j)
+  else                 j = eq_pos     # RHS なし（構文エラーに近いが最低 1 トークン進める）
+
+  v2_emit_rpn("MARKER", "STMT_END", TOK[j,"line"], "")
+  return j + 1
+}
+
+function v2_rpn_stmt(i,    j, line, eq_pos) {
+  line = TOK[i,"line"]
+
+  eq_pos = v2_index_assign_eq(i)
+  if (eq_pos > 0) return v2_rpn_index_assign(i, eq_pos)
 
   if (v2_is_rawline(i) || v2_is_awk_stmt_head(i)) {
     # 解釈不能トークン列を RAWLINE マーカーで素通し

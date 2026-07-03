@@ -128,6 +128,16 @@ function v2_parse_pat(text, line,    pat_id, parts, n, k, m) {
   } else {
     AST[pat_id,"text"] = parts[1]
   }
+  # `none` は値を持たない（Option の None ケース）ため束縛不可。
+  # `none raw:` のようにトークンが続いても束縛として登録せず拒否する（CD）。
+  # v1（dsl/desugar_match.awk）には `none NAME:` に一致するパターンが存在せず
+  # 無条件に無視される（結果、その腕は登録されず raw は未束縛のまま本体へ
+  # 素通りする）。v2 では Unknown 束縛の導入が後段のブランド検査回避に
+  # つながるため、黙って無視せず診断を出す側に倒す（判断は報告書に記載）。
+  if (AST[pat_id,"text"] == "none" && n > 1) {
+    v2_diag(line, 1, "none arm cannot bind a value")
+    return pat_id
+  }
   for (k = 2; k <= n; k++) {
     # `e<NotFoundError>` → IDENT(e) + TYPEANN(NotFoundError)
     if (match(parts[k], /^([^<]+)<([^>]+)>$/, m)) {
@@ -288,6 +298,7 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
       if (RPN[j,"val"] == "RETURN")                  { j = v2_parse_return(j, func_id); continue }
       if (RPN[j,"val"] == "WHEN")                    { j = v2_p_when(j, func_id); continue }
       if (RPN[j,"val"] == "EXPR")                    { j = v2_parse_expr_stmt(j, func_id); continue }
+      if (RPN[j,"val"] == "INDEX_ASSIGN")            { j = v2_parse_index_assign(j, func_id) + 1; continue }
       j++; continue
     }
     if (RPN[j,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[j,"val"], RPN[j,"line"])
@@ -338,6 +349,45 @@ function v2_parse_let(i, parent,    varname, let_id, typeann_id, j, expr_id) {
   }
 
   v2_addchild(parent, let_id)
+  return j   # j == STMT_END の位置
+}
+
+# ─── 添字代入文（CB） ────────────────────────────────────────────
+
+# INDEX_ASSIGN 文（i: INDEX_ASSIGN の RPN インデックス）
+# 消費: OPERAND(name) index式... MARKER INDEX_SEP rhs式... STMT_END
+# ノード: kind=INDEX_ASSIGN, text=name, c1=index 式, c2=rhs 式
+# 返す: STMT_END の RPN インデックス
+function v2_parse_index_assign(i, parent,    name, id, j, idx_id, rhs_id) {
+  name = RPN[i+1,"val"]
+  id   = v2_node("INDEX_ASSIGN", RPN[i,"line"])
+  AST[id,"text"] = name
+
+  # index 式（INDEX_SEP まで）
+  j = i + 2
+  while (j <= RPN["n"]) {
+    if (RPN[j,"kind"] == "MARKER" && RPN[j,"val"] == "INDEX_SEP") break
+    if (RPN[j,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[j,"val"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "OP")   v2_reduce_op(RPN[j,"val"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "CALL") v2_reduce_call(RPN[j,"val"], RPN[j,"arity"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "RAW")  V2_STK[++V2_SP] = v2_leaf("RAW", RPN[j,"val"], RPN[j,"line"])
+    j++
+  }
+  if (V2_SP >= 1) { idx_id = V2_STK[V2_SP--]; v2_addchild(id, idx_id) }
+  j++   # INDEX_SEP をスキップ
+
+  # rhs 式（STMT_END まで）
+  while (j <= RPN["n"]) {
+    if (RPN[j,"kind"] == "MARKER" && RPN[j,"val"] == "STMT_END") break
+    if (RPN[j,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[j,"val"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "OP")   v2_reduce_op(RPN[j,"val"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "CALL") v2_reduce_call(RPN[j,"val"], RPN[j,"arity"], RPN[j,"line"])
+    else if (RPN[j,"kind"] == "RAW")  V2_STK[++V2_SP] = v2_leaf("RAW", RPN[j,"val"], RPN[j,"line"])
+    j++
+  }
+  if (V2_SP >= 1) { rhs_id = V2_STK[V2_SP--]; v2_addchild(id, rhs_id) }
+
+  v2_addchild(parent, id)
   return j   # j == STMT_END の位置
 }
 
