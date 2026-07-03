@@ -267,19 +267,17 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
   # パラメータ・戻り値型を処理
   j = i + 2
   while (RPN[j,"kind"] == "OPERAND") {
-    # 戻り値型判定: 大文字始まり、またはユーザー定義エイリアス名（`type status
-    # = Int` のような小文字始まりを含む。v2_parse_let の CV と同じ判定基準
-    # に揃える。DE）。ただし直後が `:TYPE` 注釈 OPERAND なら戻り値型では
-    # あり得ない（戻り値型は関数本体の直前に来る最後の裸 OPERAND であり、
-    # 注釈が後続することはない）ためパラメータ名と確定する（DT。lex が
-    # 大文字始まり識別子を TYPE トークンにするため、`function
-    # handler(Raw: Untrusted<Str>)` の大文字パラメータ名 `Raw` がこの
-    # ヒューリスティックだけでは戻り値型と誤判定され、パラメータとして
-    # emit されずに arity スロットと注釈の両方を失っていた）。
-    if ((RPN[j,"val"] ~ /^[A-Z]/ || (RPN[j,"val"] in V2_DSL_ALIAS)) && \
-        !(RPN[j+1,"kind"] == "OPERAND" && RPN[j+1,"val"] ~ /^:/)) {
+    # 戻り値型判定: rpn.awk が戻り値型 OPERAND にのみ "->" を前置する
+    # （review C2）。旧実装は「大文字始まり、またはエイリアス名」という
+    # 命名ヒューリスティックで判定しており、型注釈もアローも無い大文字
+    # 始まりパラメータ（`function handler(Raw) {...}`）が戻り値型と
+    # 誤認識されて PARAM ノードごと消失していた（`:TYPE` 注釈が後続する
+    # 場合のみ除外する DT の修正では、注釈が無いこのケースを救えなかった）。
+    # "->" prefix は rpn 側で ARROW トークンを実際に見たときにしか
+    # 付かないため、命名に依存せず構造的に判定できる。
+    if (RPN[j,"val"] ~ /^->/) {
       # 戻り値型
-      typeann_id = v2_leaf("TYPEANN", RPN[j,"val"], RPN[j,"line"])
+      typeann_id = v2_leaf("TYPEANN", substr(RPN[j,"val"], 3), RPN[j,"line"])
       v2_addchild(func_id, typeann_id)
       j++
       break

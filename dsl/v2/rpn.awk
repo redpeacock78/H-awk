@@ -490,12 +490,20 @@ function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
     if (j <= TOK["n"]) j++  # skip RP
   }
 
-  # -> RETTYPE（Effect<Option<Str>> / Int | Str のような複数トークン型に対応）
-  if (j <= TOK["n"] && TOK[j,"kind"] == "ARROW") j++
-  if (j <= TOK["n"] && (TOK[j,"kind"] == "TYPE" || TOK[j,"kind"] == "IDENT")) {
-    typestart = j
-    j = v2_skip_type(j)
-    v2_emit_rpn("OPERAND", v2_read_type_text(typestart, j), TOK[typestart,"line"], "")
+  # -> RETTYPE（Effect<Option<Str>> / Int | Str のような複数トークン型に対応）。
+  # 戻り値型 OPERAND には "->" を前置して、パラメータ名 OPERAND（大文字
+  # 始まりの識別子が TYPE トークンになる関係で見た目が同じになりうる）と
+  # 位置ではなくテキストで区別できるようにする（review C2。parse.awk が
+  # 「大文字始まりなら戻り値型」という命名ヒューリスティックに頼っていたため、
+  # 型注釈もアローも無い大文字始まりパラメータ（`function handler(Raw) {...}`）
+  # が戻り値型と誤認識され PARAM ノードごと消失していた）。
+  if (j <= TOK["n"] && TOK[j,"kind"] == "ARROW") {
+    j++
+    if (j <= TOK["n"] && (TOK[j,"kind"] == "TYPE" || TOK[j,"kind"] == "IDENT")) {
+      typestart = j
+      j = v2_skip_type(j)
+      v2_emit_rpn("OPERAND", "->" v2_read_type_text(typestart, j), TOK[typestart,"line"], "")
+    }
   }
 
   # { BODY }
