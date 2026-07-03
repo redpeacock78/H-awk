@@ -254,7 +254,7 @@ function v2_union_of(a, b,    parts, seen, n, i, out, k, result) {
 
 # expected が actual を受理するか（Union `A|B` 対応・ALIAS 展開）
 function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, aparts, \
-                         eg, ag, egn, agn, egargs, agargs) {
+                         eg, ag, egn, agn, egargs, agargs, matched) {
   if (expected == actual)             return 1
   if (expected == "Any" || expected == "Unknown") return 1
   if (actual   == "Any" || actual   == "Unknown") return 1
@@ -279,6 +279,16 @@ function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, apart
   en = v2_split_union(expected, eparts)
   an = v2_split_union(actual,   aparts)
 
+  if (en > 1 && an > 1) {
+    # 両側 union: 実際の各メンバーが期待のいずれかのメンバーに受容されることを
+    # 要求する（順序違いの等価 union を受理する。AX）。
+    for (j = 1; j <= an; j++) {
+      matched = 0
+      for (i = 1; i <= en; i++) if (v2_type_compat(eparts[i], aparts[j])) { matched = 1; break }
+      if (!matched) return 0
+    }
+    return 1
+  }
   if (en > 1) {
     for (i = 1; i <= en; i++) if (v2_type_compat(eparts[i], actual)) return 1
     return 0
