@@ -107,6 +107,11 @@ function v2_is_dsl(line,    s) {
 # 補間の閉じ } まで対称に残さないと、文字列内の "#{" だけが LBRACE として
 # カウントされて深さが過大になり、本体終端 } の探索がファイル末尾まで暴走する
 # （実際に無注釈関数の本体に補間文字列があるケースで発生した回帰）。
+# regex リテラル（`/}/` 等）の中身も除去する（CX）。文字列・コメントしか
+# 除去していなかったため、素の awk 行の regex リテラル内のブレースを数えて
+# しまい、後続の DSL 本体検出が早期終了扱いになる誤検出があった
+# （wave 6 BG が v2_strip_str_comment 向けに実装した v2_regex_start_here /
+# v2_skip_regex_text の判定をここでも再利用する）。
 function v2_strip_for_brace_count(line,    i, ch, out, instr) {
   out   = ""
   instr = 0
@@ -119,6 +124,7 @@ function v2_strip_for_brace_count(line,    i, ch, out, instr) {
     }
     if (ch == "\"") { instr = 1; continue }
     if (ch == "#") break
+    if (ch == "/" && v2_regex_start_here(out)) { i = v2_skip_regex_text(line, i); continue }
     out = out ch
   }
   return out
