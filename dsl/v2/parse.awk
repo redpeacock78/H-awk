@@ -172,9 +172,19 @@ function v2_stmt_dispatch(marker, i, parent) {
   if (marker == "RETURN")             return v2_parse_return(i, parent)
   if (marker == "WHEN")               return v2_p_when(i, parent)
   if (marker == "EXPR")               return v2_parse_expr_stmt(i, parent)
-  # RAWLINE はスキップ（marker + operand の 2 トークン）
-  if (marker == "RAWLINE")            return i + 1
+  if (marker == "RAWLINE")            return v2_parse_rawline(i, parent)
   return i
+}
+
+# ─── 素の awk 行（passthrough） ───────────────────────────────────
+
+# RAWLINE 文（i: RAWLINE の RPN インデックス）
+# 消費: marker + operand（元行テキスト）の 2 トークン
+# emit（Task 10-11）が passthrough するために元行テキストを AST に保持する。
+function v2_parse_rawline(i, parent,    id) {
+  id = v2_leaf("RAWLINE", RPN[i+1,"val"], RPN[i,"line"])
+  v2_addchild(parent, id)
+  return i + 1
 }
 
 # ─── 裸の式文 ────────────────────────────────────────────────────
@@ -251,7 +261,7 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
       if (RPN[j,"val"] == "FUNC_CLOSE")              break
       if (RPN[j,"val"] == "LET" || \
           RPN[j,"val"] == "LETQ")                    { j = v2_parse_let(j, func_id); continue }
-      if (RPN[j,"val"] == "RAWLINE")                 { j++; j++; continue }   # marker + operand
+      if (RPN[j,"val"] == "RAWLINE")                 { j = v2_parse_rawline(j, func_id) + 1; continue }
       if (RPN[j,"val"] == "RETURN")                  { j = v2_parse_return(j, func_id); continue }
       if (RPN[j,"val"] == "WHEN")                    { j = v2_p_when(j, func_id); continue }
       if (RPN[j,"val"] == "EXPR")                    { j = v2_parse_expr_stmt(j, func_id); continue }
