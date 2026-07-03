@@ -750,14 +750,20 @@ function v2_line_has_unsupported_index(i, line,    j, lbrack_pos, prevkind, dept
 }
 
 # 位置 i の行が式文として解釈不能かどうかを判定
-# (v2_shunt_expr が扱えない LBRACE/COLON/ARROW/INTERP_* を含む、または
+# (v2_shunt_expr が扱えない LBRACE/COLON/ARROW を含む、または
 # v2_shunt_expr の INDEX 演算子が扱えない形の "[" を含む)
+#
+# INTERP_OPEN/INTERP_CLOSE は判定条件から除外している（review EC）。
+# let/return 経路は同じ v2_shunt_expr で STR/INTERP_* を既に構造化できて
+# いるのに、式文だけこのゲートで一律 RAWLINE に落ちていた。旧実装だと
+# `ctx.res.html(safe.html.raw("#{raw}"))` のような裸の式文が生テキストの
+# まま保存され、brand/XSS 検査（v2_check_fragment_interp 等）を素通りして
+# いた。
 function v2_is_rawline(i,    line, j, k) {
   line = TOK[i,"line"]
   for (j = i; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
     k = TOK[j,"kind"]
-    if (k == "LBRACE"     || k == "COLON"        || k == "ARROW"        ||
-        k == "INTERP_OPEN" || k == "INTERP_CLOSE") return 1
+    if (k == "LBRACE" || k == "COLON" || k == "ARROW") return 1
   }
   if (v2_line_has_unsupported_index(i, line)) return 1
   return 0
@@ -800,22 +806,35 @@ function v2_is_compound_assign(i,    line, j, k, op1) {
 # 一致すれば `=` の RPN インデックスを返し、しなければ 0 を返す。
 # 素の awk 配列（DSL 変数でないもの）への添字代入は従来どおり RAWLINE に
 # 委ねる（既存 fixture の a[i] = 1 は V2_RPN_DSLVAR に無いため対象外のまま）。
-function v2_index_assign_eq(i,    line, j, depth) {
+function v2_index_assign_eq(i,    line, j, depth, has_comma) {
   line = TOK[i,"line"]
   if (TOK[i,"kind"] != "IDENT" || !(TOK[i,"text"] in V2_RPN_DSLVAR)) return 0
   if (TOK[i+1,"kind"] != "LBRACK") return 0
   depth = 0
+  has_comma = 0
   for (j = i + 1; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
     if (TOK[j,"kind"] == "LBRACK") depth++
     else if (TOK[j,"kind"] == "RBRACK") {
       depth--
       if (depth == 0) break
+    } else if (TOK[j,"kind"] == "COMMA" && depth == 1) {
+      # 添字ブラケット直下（深さ 1）のトップレベルカンマは多次元 subscript
+      # （`xs["bad", 0]`）とみなす。v2 は多次元 subscript 非対応なので診断で
+      # 拒否する（review EB。旧実装は index 式全体を v2_shunt_expr に渡す
+      # だけで、スタックトップ以外の成分が黙って落ちて代入が通っていた）。
+      has_comma = 1
     }
   }
   if (depth != 0) return 0            # 未閉の [ 、または複数階層添字は対象外
   j++
   if (j <= TOK["n"] && TOK[j,"line"] == line && \
-      TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=") return j
+      TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=") {
+    if (has_comma) {
+      v2_diag(line, 1, "multi-dimensional subscript is not supported")
+      return 0
+    }
+    return j
+  }
   return 0
 }
 
