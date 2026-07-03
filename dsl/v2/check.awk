@@ -377,6 +377,60 @@ function v2_dot_type(id,    recv, callnode, name) {
   return "Unknown"
 }
 
+# WHEN の腕パターンが導入する束縛変数の型を決定する（AV）。
+# tag=ok/some: 対象型の成功部（v2_unwrap_type と同じ Option<T>/Result<T,E> の T）。
+# tag=ng/default: 型付き（`ng e<X>:`）なら X、無型（`ng e:`/`default e:`）なら
+# 対象の Result のエラー部全体（v1 desugar_match.awk の _ds_result_err_type 相当）。
+# それ以外（none/_ 等、通常は無束縛）は Unknown。
+function v2_when_bind_type(tag, ttype, typeann_id) {
+  if (tag == "ok" || tag == "some") return v2_unwrap_type(ttype)
+  if (tag == "ng" || tag == "default") {
+    if (typeann_id != 0) return AST[typeann_id,"text"]
+    return v2_result_err_part(ttype)
+  }
+  return "Unknown"
+}
+
+# WHEN ノードの型推論: 対象式を先に推論し、各腕のパターン束縛を（本体を検査する
+# 前に）V2_ENV に登録してから腕本体を推論する（AV）。腕を抜けたら v1
+# （dsl/desugar_match.awk の register/unregister）に合わせて束縛前の値へ戻す
+# （シャドーがなければ削除）。
+function v2_infer_when(id,    k, j, arm, pat, blk, pc, tag, typeann_id, bind_id, \
+                        bind_name, bind_type, had_saved, saved_type, ttype) {
+  v2_infer(AST[id,"c1"])
+  ttype = v2_strip_effect(TYPEOF[AST[id,"c1"]])
+
+  for (k = 2; k <= AST[id,"nc"]; k++) {
+    arm = AST[id,"c" k]
+    pat = AST[arm,"c1"]
+    blk = AST[arm,"c2"]
+    tag = AST[pat,"text"]
+
+    bind_id = 0; typeann_id = 0
+    for (j = 1; j <= AST[pat,"nc"]; j++) {
+      pc = AST[pat,"c" j]
+      if      (AST[pc,"kind"] == "IDENT")   bind_id = pc
+      else if (AST[pc,"kind"] == "TYPEANN") typeann_id = pc
+    }
+
+    had_saved = 0
+    if (bind_id != 0) {
+      bind_name = AST[bind_id,"text"]
+      bind_type = (ttype != "" && ttype != "Unknown") ? \
+                  v2_when_bind_type(tag, ttype, typeann_id) : "Unknown"
+      if (bind_name in V2_ENV) { had_saved = 1; saved_type = V2_ENV[bind_name] }
+      V2_ENV[bind_name] = (bind_type != "") ? bind_type : "Unknown"
+    }
+
+    v2_infer(blk)
+
+    if (bind_id != 0) {
+      if (had_saved) V2_ENV[bind_name] = saved_type
+      else           delete V2_ENV[bind_name]
+    }
+  }
+}
+
 # 現在走査中の関数の宣言戻り値型・名前（RETURN 文の検査に使う）
 V2_CUR_FUNC_RET = ""
 V2_CUR_FUNC_NAME = ""
@@ -396,6 +450,13 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     for (k = 1; k <= AST[id,"nc"]; k++) v2_infer(AST[id,"c" k])
     V2_CUR_FUNC_RET  = saved_ret
     V2_CUR_FUNC_NAME = saved_name
+    return ""
+  }
+
+  if (kind == "WHEN") {
+    # 腕本体（ARM の BLOCK）を検査する前にパターン束縛を V2_ENV に登録する
+    # 必要があるため、通常の子優先後順走査ではなく専用関数で処理する（AV）。
+    v2_infer_when(id)
     return ""
   }
 

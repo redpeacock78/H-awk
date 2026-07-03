@@ -1,5 +1,2 @@
 13	Str
 14	Result<Str, AuthError|NotFoundError>
-17	Unknown
-22	Unknown
-28	Unknown
