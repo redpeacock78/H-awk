@@ -1,0 +1,9 @@
+6	Unknown
+8	Str
+12	Str
+13	Result<Untrusted<Str>, ParseError>
+15	Untrusted<Str>
+16	Str
+17	Str
+18	HtmlEscapedStr
+19	Response

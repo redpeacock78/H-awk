@@ -157,6 +157,14 @@ function v2_collect(id,    k, name, child, argn) {
         }
       } else if (AST[child,"kind"] == "TYPEANN") {
         SIG[name,"ret"] = AST[child,"text"]
+      } else if (AST[child,"kind"] == "RAWLINE" && \
+                 AST[child,"text"] ~ /^[[:space:]]*classify:[[:space:]]*(transform|validator|sanitizer|sink)[[:space:]]*$/) {
+        # `classify: transform|validator|sanitizer|sink` 注釈（CA。
+        # dsl/desugar.awk の pass1 classify 収集と同じ 4 値）。DSL 文として
+        # トークナイズされないため関数本体では RAWLINE として現れる。
+        SIG[name,"classify"] = AST[child,"text"]
+        sub(/^[[:space:]]*classify:[[:space:]]*/, "", SIG[name,"classify"])
+        sub(/[[:space:]]*$/, "", SIG[name,"classify"])
       }
     }
     SIG[name,"arity"] = argn
@@ -323,6 +331,20 @@ function v2_strip_effect(t,    m) {
   return t
 }
 
+# Effect 剥がしと type エイリアス展開を交互に適用し、`type R = Result<...>` の
+# ような別名越しの sealed 型も実体まで解決する（BZ+CC。v1 実測: pipe/`?=`
+# いずれもエイリアス展開後の実体型で sealed 判定する）。
+function v2_resolve_sealed(t,    guard, prev) {
+  guard = 0
+  do {
+    prev = t
+    t = v2_strip_effect(t)
+    t = v2_expand_alias(t)
+    guard++
+  } while (t != prev && guard < 8)
+  return t
+}
+
 # Result<T, E> の内部をトップレベル "," で T/E に分割する（AN のヘルパを一般化。
 # AW）。`[^,]+` による単純分割だと T 側にネストした generic
 # （`Result<Dict<Str, Int>, ParseError>` 等）内部のカンマで誤分割するため、
@@ -396,6 +418,41 @@ function v2_index_type(id,    target_type, key_type, m) {
     return m[1]
   }
   return "Unknown"
+}
+
+# INDEX_ASSIGN（`name[idx] = rhs`）を検査する（CB）。
+# キー型検査は v1 実測文面に合わせる（dsl/typecheck.awk:_ds_check_collection_assign
+# 互換: "name: List requires numeric index, got string key IDX" /
+# "name: Dict<Str, V> requires string key, got integer IDX"）。
+# 代入値と要素型の互換検査は v1 に対応する検査が無い（v1 は
+# _ds_check_collection_assign でキー型しか見ない）v2 独自の追加厳格化であり、
+# List<Int> の要素型検査を有効にするという CB の目的そのもの。
+function v2_check_index_assign(id,    name, idx_id, rhs_id, target_type, key_type, rhs_type, m) {
+  name        = AST[id,"text"]
+  idx_id      = AST[id,"c1"]
+  rhs_id      = AST[id,"c2"]
+  target_type = (name in V2_ENV) ? V2_ENV[name] : "Unknown"
+  if (target_type == "" || target_type == "Unknown") return
+  key_type = (idx_id != 0 && (idx_id in TYPEOF)) ? TYPEOF[idx_id] : ""
+  rhs_type = (rhs_id != 0 && (rhs_id in TYPEOF)) ? TYPEOF[rhs_id] : ""
+
+  if (match(target_type, /^List<(.+)>$/, m)) {
+    if (key_type != "" && key_type != "Unknown" && key_type != "Int") {
+      v2_diag(AST[id,"line"], 1, \
+        name ": List requires numeric index, got string key " AST[idx_id,"text"])
+    }
+    if (rhs_type != "" && rhs_type != "Unknown" && !v2_type_compat(m[1], rhs_type)) {
+      v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " rhs_type " to " m[1])
+    }
+  } else if (match(target_type, /^Dict<[^,]+,[[:space:]]*(.+)>$/, m)) {
+    if (key_type != "" && key_type != "Unknown" && key_type != "Str") {
+      v2_diag(AST[id,"line"], 1, \
+        name ": Dict<Str, V> requires string key, got integer " AST[idx_id,"text"])
+    }
+    if (rhs_type != "" && rhs_type != "Unknown" && !v2_type_compat(m[1], rhs_type)) {
+      v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " rhs_type " to " m[1])
+    }
+  }
 }
 
 # DOT（レシーバ.メソッド(...) 呼び出し）の戻り型を決定する
@@ -566,6 +623,9 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     t = v2_union_of(lt, rt)
   } else if (kind == "INDEX") {
     t = v2_index_type(id)
+  } else if (kind == "INDEX_ASSIGN") {
+    v2_check_index_assign(id)
+    t = ""
   } else if (kind == "PIPE") {
     rhs_id = AST[id,"c2"]
     t = TYPEOF[rhs_id]
@@ -624,7 +684,7 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     # Effect<...> のまま扱われ、後続の when...of が想定と異なる家系（Result
     # 扱い）になってしまう。
     V2_ENV[AST[id,"text"]] = (typeann_id != 0) ? AST[typeann_id,"text"] : \
-                              v2_unwrap_type(v2_strip_effect(TYPEOF[expr_id]))
+                              v2_unwrap_type(v2_resolve_sealed(TYPEOF[expr_id]))
     t = ""
   } else if (kind == "RETURN") {
     if (AST[id,"nc"] >= 1) {
@@ -662,7 +722,10 @@ function v2_coalesce_type(id, typeann_id, expr_id,    ct, inner) {
   if (expr_id == 0) return
   ct = TYPEOF[expr_id]
   if (ct == "" || ct == "Unknown") return
-  ct = v2_strip_effect(ct)
+  # `type MaybeStr = Option<Str>` のようなエイリアス越しの nullable も判定でき
+  # るよう、Effect 剥がしとエイリアス展開を往復してから判定する（CC。v1 実測:
+  # `let x ?= get()`（get(): MaybeStr）は誤 reject せず通る）。
+  ct = v2_resolve_sealed(ct)
   if (!v2_is_nullable(ct)) {
     v2_diag(AST[id,"line"], 1, "?= requires Option or Result, got " ct)
     return
@@ -782,18 +845,81 @@ function v2_check_arm_order(id,    k, j, arm, pat, tag, typeann_id, catchall_see
 
 # ─── パス 5: CALL 引数の型検査（XSS ブランド型を含む、Task 9） ────────
 
+# 補間の実引数テキスト 1 個の型を解決する（BW）。IDENT なら V2_ENV、call 形なら
+# SIG の宣言戻り型（その call 自身の実引数は検査しない = 深さ 1 段で打ち切り。
+# 過剰検出防止）、リテラルはリテラル型、それ以外は Unknown。
+function v2_interp_atom_type(text,    m, name) {
+  sub(/^[[:space:]]+/, "", text)
+  sub(/[[:space:]]+$/, "", text)
+  if (text ~ /^"([^"\\]|\\.)*"$/)          return "Str"
+  if (text ~ /^-?[0-9]+\.[0-9]+$/)         return "Float"
+  if (text ~ /^-?[0-9]+$/)                 return "Int"
+  if (text == "true" || text == "false")   return "Bool"
+  if (text == "null")                      return "Null"
+  if (match(text, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
+    name = m[0]
+    sub(/[[:space:]]*\($/, "", name)
+    return ((name, "ret") in SIG) ? SIG[name, "ret"] : "Unknown"
+  }
+  if (text ~ /^[A-Za-z_][A-Za-z0-9_]*$/)   return (text in V2_ENV) ? V2_ENV[text] : "Unknown"
+  return "Unknown"
+}
+
+# 文字列 s をトップレベル（丸括弧の深さ 0、ダブルクォート文字列の外）のカンマで
+# 分割する（補間内 call 形の実引数リスト分割用。BW）。
+function v2_split_toplevel_commas(s, out,    i, c, depth, in_str, cur, n) {
+  n = 0; depth = 0; in_str = 0; cur = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (in_str) {
+      cur = cur c
+      if (c == "\\" && i < length(s)) { i++; cur = cur substr(s, i, 1) }
+      else if (c == "\"") in_str = 0
+      continue
+    }
+    if      (c == "\"") { in_str = 1; cur = cur c }
+    else if (c == "(")  { depth++; cur = cur c }
+    else if (c == ")")  { depth--; cur = cur c }
+    else if (c == "," && depth == 0) { out[++n] = cur; cur = "" }
+    else cur = cur c
+  }
+  sub(/^[[:space:]]+/, "", cur); sub(/[[:space:]]+$/, "", cur)
+  if (cur != "") out[++n] = cur
+  for (i = 1; i <= n; i++) { sub(/^[[:space:]]+/, "", out[i]); sub(/[[:space:]]+$/, "", out[i]) }
+  return n
+}
+
 # #{ expr } 補間内の式テキストから、単純な CALL / DOT-CALL 形式（`recv.method(...)`
 # または `fn(...)`）の戻り型を SIG[] から引く。判別できなければ Unknown を返す
 # （v2_check_fragment_interp 側で Unknown は誤検出防止のため検査しない）。
+# call 形の場合は実引数テキストも SIG の宣言引数型と照合する（BW）。補間テキスト
+# は AST 子ノードにならず通常の CALL 引数検査（v2_check_brand）が届かないため
+# （`safe.html.fragment("<p>#{safe.html.raw(raw)}</p>")` で内側の
+# `safe.html.raw(raw)` の実引数が素通りしていた）、ここで同じ文面
+# （"name argument N expects EXPECTED, got ACTUAL"）を診断する。
 # Task 11（補間の構造化 AST）のスコープ外のため、ここではテキストスキャンで
 # v1（dsl/desugar_strings.awk の _ds_interp_expr_type 相当）と同等の検出を行う。
-function v2_infer_interp_expr_type(exprtext,    m, name) {
+function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args, n, i, atype, expected, arity) {
   exprtext = exprtext
   sub(/^[[:space:]]+/, "", exprtext)
   sub(/[[:space:]]+$/, "", exprtext)
   if (match(exprtext, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
     name = m[0]
     sub(/[[:space:]]*\($/, "", name)
+    argstr = substr(exprtext, length(m[0]) + 1)
+    sub(/\)[[:space:]]*$/, "", argstr)
+    if (argstr != "" && (name, "arity") in SIG) {
+      arity = SIG[name, "arity"]
+      n = v2_split_toplevel_commas(argstr, args)
+      for (i = 1; i <= n; i++) {
+        if ((name, "arg" i) in SIG)                    expected = SIG[name, "arg" i]
+        else if (arity == -1 && (name, "arg1") in SIG)  expected = SIG[name, "arg1"]
+        else                                            continue
+        atype = v2_interp_atom_type(args[i])
+        if (atype == "" || atype == "Unknown" || v2_type_compat(expected, atype)) continue
+        v2_diag(AST[strlit_id,"line"], 1, name " argument " i " expects " expected ", got " atype)
+      }
+    }
     if ((name, "ret") in SIG) return SIG[name, "ret"]
     return "Unknown"
   }
@@ -810,13 +936,21 @@ function v2_infer_interp_expr_type(exprtext,    m, name) {
 # 格納し、後段の v2_check_fragment_interp（型推論が終わった後の別パスから
 # 呼ばれ、その時点では V2_ENV が最後に処理した関数のものに固定されている）が
 # 再スキャンせずに済むようにする。
-function v2_cache_strlit_interp_types(id, text,    rest, m, exprtext, t, adv, n) {
+# 各補間式の型（Effect 剥がし後）が Option</Result< なら sealed 値の補間として
+# 拒否する（BY。v1 実測: "cannot interpolate sealed <type>" と同文面。
+# dsl/desugar_strings.awk 相当。unwrap しないまま埋め込むと `?=`/`when...of` の
+# 強制 unwrap を迂回できてしまうため）。
+function v2_cache_strlit_interp_types(id, text,    rest, m, exprtext, t, adv, n, ct) {
   rest = text
   n = 0
   while (match(rest, /#\{([^}]*)\}/, m)) {
     adv = RSTART + RLENGTH
     exprtext = m[1]
-    t = v2_infer_interp_expr_type(exprtext)
+    t = v2_infer_interp_expr_type(id, exprtext)
+    if (t != "" && t != "Unknown") {
+      ct = v2_resolve_sealed(t)
+      if (v2_is_nullable(ct)) v2_diag(AST[id,"line"], 1, "cannot interpolate sealed " ct)
+    }
     n++
     STRLIT_INTERP_TYPE[id, n] = t
     rest = substr(rest, adv)
@@ -854,7 +988,7 @@ function v2_check_fragment_interp(call_id, strlit_id,    i, n, t) {
 # CALL の 1 引数を SIG["name","argN"] と照合し、不一致なら診断する。
 # safe.html.fragment への文字列リテラル引数は静的 HTML として常に許容するが、
 # 補間 #{ } を含む場合は動的 HTML なので免除せず、埋め込み式を検査する（AM）。
-function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, text) {
+function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, text, cls, inner) {
   if (name == "safe.html.fragment" && AST[child,"kind"] == "STRLIT") {
     text = AST[child,"text"]
     if (index(text, "#{") == 0) return
@@ -863,14 +997,27 @@ function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, t
   }
   actual = ((child) in TYPEOF) ? TYPEOF[child] : ""
   if (actual == "" || v2_type_compat(expected, actual)) return
+  # classify: transform/validator/sanitizer は docs/dsl.md の規定どおり
+  # Untrusted<T> 入力を受容する（CA）。宣言引数型そのものは素の T のままでよく、
+  # 呼び出し側の Untrusted<T> 実引数だけを classify で免除する。
+  if (actual ~ /^Untrusted</ && (name, "classify") in SIG) {
+    cls = SIG[name, "classify"]
+    if (cls == "transform" || cls == "validator" || cls == "sanitizer") {
+      inner = actual
+      sub(/^Untrusted</, "", inner); sub(/>$/, "", inner)
+      if (v2_type_compat(expected, inner)) return
+    }
+  }
   v2_diag(AST[call_id,"line"], 1, name " argument " argidx " expects " expected ", got " actual)
 }
 
 # PIPE ノードの規則を検査する（dsl.md:336/:338、BB+BC）。
 # - RHS（c2）は CALL でなければならない（`expr |> f(args)`）。BC。
-# - LHS（c1）の型（Effect 剥がし後）が Result</Option< なら sealed 値の直接
-#   pipe は禁止（`?=` か when...of で unwrap してから）。v1 実測文面に合わせる
-#   （dsl/desugar_pipe.awk: "pipe input is <type>"）。BB。
+# - LHS（c1）の型（Effect 剥がし・エイリアス展開後）が Result</Option< なら
+#   sealed 値の直接 pipe は禁止（`?=` か when...of で unwrap してから）。
+#   v1 実測文面に合わせる（dsl/desugar_pipe.awk: "pipe input is <type>"）。BB。
+#   `type R = Result<...>` のようなエイリアス越しの sealed 値も同様に拒否する
+#   （BZ。エイリアス展開前の literal prefix しか見ていないと素通りしていた）。
 function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt) {
   lhs_id = AST[id,"c1"]
   rhs_id = AST[id,"c2"]
@@ -880,7 +1027,7 @@ function v2_check_pipe_rules(id,    lhs_id, rhs_id, lt) {
   }
   lt = ((lhs_id) in TYPEOF) ? TYPEOF[lhs_id] : ""
   if (lt == "" || lt == "Unknown") return
-  lt = v2_strip_effect(lt)
+  lt = v2_resolve_sealed(lt)
   if (lt ~ /^Result</ || lt ~ /^Option</) {
     v2_diag(AST[id,"line"], 1, "pipe input is " lt)
   }
@@ -934,11 +1081,26 @@ function v2_check() {
 
   v2_collect(1)
   v2_check_alias_cycles()
+  v2_check_toplevel_let()
   v2_check_calls(1, 0)
   v2_infer(1)
   v2_check_when(1)
   v2_check_arm_order(1)
   v2_check_brand(1, 0)
+}
+
+# 関数外（PROGRAM 直下）の LET/LETQ を拒否する（CF。v1 実測:
+# dsl/typecheck.awk・libexec/hawk-check で top-level `let x: Int = 1` /
+# `let x ?= ...` いずれも "'let' outside function body" で reject）。
+# PROGRAM の直接の子だけを見ればよい（FUNC 内の LET は FUNC の子として現れ、
+# PROGRAM の子には出てこない）。
+function v2_check_toplevel_let(    k, child) {
+  for (k = 1; k <= AST[1,"nc"]; k++) {
+    child = AST[1,"c" k]
+    if (AST[child,"kind"] == "LET" || AST[child,"kind"] == "LETQ") {
+      v2_diag(AST[child,"line"], 1, "'let' outside function body")
+    }
+  }
 }
 
 # ─── パス 1.5: type エイリアス循環検出（BR） ─────────────────────────
