@@ -597,6 +597,16 @@ function v2_rpn_when(i,    line, j, end_idx, depth, k, pat_text, arm_line) {
   while (i < end_idx) {
     # 腕パターン: COLON まで収集してパターン文字列を生成
     arm_line = TOK[i,"line"]
+    # 腕タグは ok/ng/some/none/default のみを許容する（BP）。それ以外の
+    # identifier + colon（例: `foo x:`）は v1 実測（dsl/desugar_match.awk）で
+    # 「腕ヘッダとして認識されず本体行扱いになる」ため
+    # "when...of body line before any arm" になる。v2 は既にこれを腕として
+    # 構造化してしまう（rpn/parse の都合）ため、診断だけ同文面で出す。
+    if (!((TOK[i,"kind"] == "KW" && TOK[i,"text"] == "default") || \
+          (TOK[i,"kind"] == "IDENT" && (TOK[i,"text"] == "ok" || TOK[i,"text"] == "ng" || \
+                                         TOK[i,"text"] == "some" || TOK[i,"text"] == "none")))) {
+      v2_diag(arm_line, 1, "when...of body line before any arm")
+    }
     pat_text = ""
     k = i
     while (k < end_idx && TOK[k,"kind"] != "COLON") {
