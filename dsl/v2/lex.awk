@@ -170,6 +170,11 @@ function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_op
     tmp = stripped; n_close = gsub(/}/, "", tmp)
     depth   = n_open - n_close
     has_dsl = 0
+    # ブレース行自体に 1 行ボディがある形（`{ let x: Int = 1 }`）を見逃さない
+    # よう、DSL 判定のスキャンをブレース行自体からも行う（review ED。
+    # 旧実装は brace_line + 1 からしか走査せず、次行ブレース関数の
+    # ブレース行同居ボディが未検査のまま RAWLINE になっていた）。
+    if (v2_is_dsl(V2_RAWLINE[brace_line])) has_dsl = 1
     for (j = brace_line + 1; j <= nlines && depth > 0; j++) {
       stripped = v2_strip_for_brace_count(V2_RAWLINE[j])
       tmp = stripped; n_open  = gsub(/{/, "", tmp)
