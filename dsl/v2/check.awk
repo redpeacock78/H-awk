@@ -354,6 +354,8 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     lt = TYPEOF[AST[id,"c1"]]
     rt = TYPEOF[AST[id,"c2"]]
     t = v2_union_of(v2_unwrap_type(lt), rt)
+  } else if (kind == "PIPE") {
+    t = TYPEOF[AST[id,"c2"]]
   } else if (kind == "DOT") {
     t = v2_dot_type(id)
     TYPEOF[id] = t
