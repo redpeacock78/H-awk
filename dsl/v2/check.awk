@@ -592,11 +592,54 @@ function v2_check_when(id,    k, j, arm, pat, tag, typeann_id, \
 
 # ─── パス 5: CALL 引数の型検査（XSS ブランド型を含む、Task 9） ────────
 
+# #{ expr } 補間内の式テキストから、単純な CALL / DOT-CALL 形式（`recv.method(...)`
+# または `fn(...)`）の戻り型を SIG[] から引く。判別できなければ Unknown を返す
+# （v2_check_fragment_interp 側で Unknown は誤検出防止のため検査しない）。
+# Task 11（補間の構造化 AST）のスコープ外のため、ここではテキストスキャンで
+# v1（dsl/desugar_strings.awk の _ds_interp_expr_type 相当）と同等の検出を行う。
+function v2_infer_interp_expr_type(exprtext,    m, name) {
+  exprtext = exprtext
+  sub(/^[[:space:]]+/, "", exprtext)
+  sub(/[[:space:]]+$/, "", exprtext)
+  if (match(exprtext, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
+    name = m[0]
+    sub(/[[:space:]]*\($/, "", name)
+    if ((name, "ret") in SIG) return SIG[name, "ret"]
+  }
+  return "Unknown"
+}
+
+# safe.html.fragment の文字列引数中の #{ expr } 補間を走査し、各式の型を
+# HtmlPart（HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr）と照合する
+# （AM: dsl/desugar_strings.awk の _ds_expand_fragment_interp 互換）。
+function v2_check_fragment_interp(call_id, text,    rest, m, exprtext, t, adv) {
+  rest = text
+  while (match(rest, /#\{([^}]*)\}/, m)) {
+    # RSTART/RLENGTH は組込みグローバル変数のため、次の match（
+    # v2_infer_interp_expr_type 内部の match も含む）で上書きされる前に
+    # 前進量を確定させておく（さもないと rest が縮まらず暴走する）。
+    adv = RSTART + RLENGTH
+    exprtext = m[1]
+    t = v2_infer_interp_expr_type(exprtext)
+    if (t != "" && t != "Unknown" && \
+        !v2_type_compat("HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr", t)) {
+      v2_diag(AST[call_id,"line"], 1, \
+        "safe.html.fragment interpolation expects HtmlPart, got " t)
+    }
+    rest = substr(rest, adv)
+  }
+}
+
 # CALL の 1 引数を SIG["name","argN"] と照合し、不一致なら診断する。
-# safe.html.fragment への文字列リテラル引数は静的 HTML として常に許容する
-# （dsl/typecheck.awk の同名の特例に合わせる）。
-function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual) {
-  if (name == "safe.html.fragment" && AST[child,"kind"] == "STRLIT") return
+# safe.html.fragment への文字列リテラル引数は静的 HTML として常に許容するが、
+# 補間 #{ } を含む場合は動的 HTML なので免除せず、埋め込み式を検査する（AM）。
+function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, text) {
+  if (name == "safe.html.fragment" && AST[child,"kind"] == "STRLIT") {
+    text = AST[child,"text"]
+    if (index(text, "#{") == 0) return
+    v2_check_fragment_interp(call_id, text)
+    return
+  }
   actual = ((child) in TYPEOF) ? TYPEOF[child] : ""
   if (actual == "" || v2_type_compat(expected, actual)) return
   v2_diag(AST[call_id,"line"], 1, name " argument " argidx " expects " expected ", got " actual)
