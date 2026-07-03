@@ -399,8 +399,8 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
 # 添字式の型も検査する（docs/dsl.md:108「Only numeric indices are allowed.
 # String keys are a type error.」BN）: List は Int 添字のみ、Dict<Str, V> は
 # Str 添字のみ。添字が Unknown なら誤検出防止のため素通しする。
-function v2_index_type(id,    target_type, key_type, m) {
-  target_type = TYPEOF[AST[id,"c1"]]
+function v2_index_type(id,    target_type, key_type, m, dn, dparts) {
+  target_type = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
   key_type    = TYPEOF[AST[id,"c2"]]
   if (target_type == "" || target_type == "Unknown") return "Unknown"
   if (match(target_type, /^List<(.+)>$/, m)) {
@@ -410,12 +410,14 @@ function v2_index_type(id,    target_type, key_type, m) {
     }
     return m[1]
   }
-  if (match(target_type, /^Dict<[^,]+,[[:space:]]*(.+)>$/, m)) {
+  if (match(target_type, /^Dict<(.+)>$/, m)) {
+    dn = v2_split_generic_args(m[1], dparts)
+    if (dn < 2) return "Unknown"
     if (key_type != "" && key_type != "Unknown" && key_type != "Str") {
       v2_diag(AST[id,"line"], 1, \
         "Dict<Str, V> requires string key, got integer " AST[AST[id,"c2"],"text"])
     }
-    return m[1]
+    return dparts[2]
   }
   return "Unknown"
 }
@@ -762,7 +764,7 @@ function v2_check_when(id,    k, j, arm, pat, tag, typeann_id, \
                         covered, err_part, members, nmem, i) {
   if (AST[id,"kind"] == "WHEN") {
     target_id = AST[id,"c1"]
-    ttype = v2_strip_effect(TYPEOF[target_id])
+    ttype = v2_resolve_sealed(TYPEOF[target_id])
     if (ttype != "" && ttype != "Unknown" && (ttype ~ /^Option</ || ttype ~ /^Result</)) {
       is_result = (ttype ~ /^Result</)
       catchall = 0
