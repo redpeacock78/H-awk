@@ -943,7 +943,11 @@ function v2_dataflow_ret(name, input_type, decl_ret,    cls, ret) {
   if (cls == "validator" && ret ~ /^Untrusted</) {
     sub(/^Untrusted</, "", ret); sub(/>$/, "", ret)
   }
-  if (cls == "transform" && input_type ~ /^Untrusted</) return "Untrusted<" ret ">"
+  # input_type がエイリアス（`type U = Untrusted<Str>` 等、union 展開結果を
+  # 含む）だと未展開テキストへの prefix 照合が一致せず、transform を経由
+  # した Untrusted 伝播が握り潰される（review C1 / XSS バイパス）。DW の
+  # member 再分割ヘルパで展開後の Untrusted<...> を探してから判定する。
+  if (cls == "transform" && v2_find_sealed_member(input_type, "^Untrusted<", 0) != "") return "Untrusted<" ret ">"
   return ret
 }
 
@@ -1169,13 +1173,21 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
         expected1 = SIG[rname, "arg1"]
         ok = v2_type_compat(expected1, lhs_type)
         # classify: transform/validator/sanitizer は Untrusted<T> 入力を
-        # 受容する（CA と同じ規則。v2_check_brand_arg 相当）。
-        if (!ok && lhs_type ~ /^Untrusted</ && (rname, "classify") in SIG) {
-          cls = SIG[rname, "classify"]
-          if (cls == "transform" || cls == "validator" || cls == "sanitizer") {
-            inner = lhs_type
-            sub(/^Untrusted</, "", inner); sub(/>$/, "", inner)
-            if (v2_type_compat(expected1, inner)) ok = 1
+        # 受容する（CA と同じ規則。v2_check_brand_arg 相当）。lhs_type が
+        # エイリアス（union 展開結果を含む）の場合は未展開テキストへの
+        # prefix 照合が一致せず免除されない非対称があったため、EE と同じ
+        # v2_find_sealed_member で展開後の Untrusted<...> を探してから
+        # 判定する（review I1。v2_check_brand_arg 側は EE で対応済みだが、
+        # 補間 pipe のこの call site は独立実装のため同じ穴が残っていた）。
+        if (!ok && (rname, "classify") in SIG) {
+          mt = v2_find_sealed_member(lhs_type, "^Untrusted<", 0)
+          if (mt != "") {
+            cls = SIG[rname, "classify"]
+            if (cls == "transform" || cls == "validator" || cls == "sanitizer") {
+              inner = mt
+              sub(/^Untrusted</, "", inner); sub(/>$/, "", inner)
+              if (v2_type_compat(expected1, inner)) ok = 1
+            }
           }
         }
         if (!ok) v2_diag(AST[strlit_id,"line"], 1, rname " argument 1 expects " expected1 ", got " lhs_type)
