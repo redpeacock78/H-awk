@@ -875,6 +875,25 @@ function v2_match_call_close(text, open_pos,    i, c, depth, close_pos) {
   return close_pos
 }
 
+# text 中の先頭の、丸括弧の深さ 0・文字列リテラル外にある "|>" の位置
+# （'|' の位置）を返す（CT。補間式内の pipe 検出用）。見つからなければ 0。
+function v2_find_toplevel_pipe(text,    i, c, depth, in_str) {
+  depth = 0; in_str = 0
+  for (i = 1; i <= length(text); i++) {
+    c = substr(text, i, 1)
+    if (in_str) {
+      if (c == "\\") { i++; continue }
+      if (c == "\"") in_str = 0
+      continue
+    }
+    if (c == "\"") { in_str = 1; continue }
+    else if (c == "(") depth++
+    else if (c == ")") depth--
+    else if (c == "|" && depth == 0 && substr(text, i + 1, 1) == ">") return i
+  }
+  return 0
+}
+
 # 補間の実引数テキスト 1 個の型を解決する（BW）。IDENT なら V2_ENV、call 形なら
 # SIG の宣言戻り型（その call 自身の実引数は検査しない = 深さ 1 段で打ち切り。
 # 過剰検出防止）、リテラルはリテラル型、それ以外は Unknown。
@@ -942,10 +961,50 @@ function v2_split_toplevel_commas(s, out,    i, c, depth, in_str, cur, n) {
 # v1（dsl/desugar_strings.awk の _ds_interp_expr_type 相当）と同等の検出を行う。
 function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args, n, i, \
                                     atype, expected, arity, max_arity, open_pos, close_pos, \
-                                    depth, c, trailing, call_ret, trail_type) {
+                                    depth, c, trailing, call_ret, trail_type, \
+                                    pipe_pos, lhs_text, rhs_text, lhs_type, rname, r_argstr, \
+                                    expected1, ok, cls, inner) {
   exprtext = exprtext
   sub(/^[[:space:]]+/, "", exprtext)
   sub(/[[:space:]]+$/, "", exprtext)
+  # `expr |> callee(args)` 形式（CT）。#{ } 補間内でも pipe 経由の sanitizer
+  # 迂回を検出できるよう、既存の AST 側 PIPE 検査（AK/BB/BC）と同じ規則
+  # （LHS 型を callee の arg1 として照合し、結果は callee 戻り型）を
+  # テキストスキャンで適用する。安全側で単一段の pipe のみ対応する
+  # （複数段連鎖 `a |> f() |> g()` は最初の |> で分割されるため、rhs_text
+  # 側に残った次段の |> は callee 呼び出しの CALL 判定にマッチせず
+  # Unknown 扱いになる。Task 11 の補間構造化 AST 移行までのスコープ外）。
+  pipe_pos = v2_find_toplevel_pipe(exprtext)
+  if (pipe_pos > 0) {
+    lhs_text = substr(exprtext, 1, pipe_pos - 1)
+    rhs_text = substr(exprtext, pipe_pos + 2)
+    sub(/[[:space:]]+$/, "", lhs_text)
+    sub(/^[[:space:]]+/, "", rhs_text)
+    lhs_type = v2_infer_interp_expr_type(strlit_id, lhs_text)
+    if (match(rhs_text, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
+      rname = m[0]
+      sub(/[[:space:]]*\($/, "", rname)
+      close_pos = v2_match_call_close(rhs_text, length(m[0]))
+      r_argstr = substr(rhs_text, length(m[0]) + 1, close_pos - length(m[0]) - 1)
+      if ((rname, "arg1") in SIG && lhs_type != "" && lhs_type != "Unknown") {
+        expected1 = SIG[rname, "arg1"]
+        ok = v2_type_compat(expected1, lhs_type)
+        # classify: transform/validator/sanitizer は Untrusted<T> 入力を
+        # 受容する（CA と同じ規則。v2_check_brand_arg 相当）。
+        if (!ok && lhs_type ~ /^Untrusted</ && (rname, "classify") in SIG) {
+          cls = SIG[rname, "classify"]
+          if (cls == "transform" || cls == "validator" || cls == "sanitizer") {
+            inner = lhs_type
+            sub(/^Untrusted</, "", inner); sub(/>$/, "", inner)
+            if (v2_type_compat(expected1, inner)) ok = 1
+          }
+        }
+        if (!ok) v2_diag(AST[strlit_id,"line"], 1, rname " argument 1 expects " expected1 ", got " lhs_type)
+      }
+      return ((rname, "ret") in SIG) ? SIG[rname, "ret"] : "Unknown"
+    }
+    return "Unknown"
+  }
   if (match(exprtext, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
     name = m[0]
     sub(/[[:space:]]*\($/, "", name)
