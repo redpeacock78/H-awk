@@ -927,6 +927,50 @@ function v2_match_call_close(text, open_pos,    i, c, depth, close_pos) {
   return close_pos
 }
 
+# text[pos] を '<' として、深さを追跡して対応する '>' まで走査する（DU）。
+# V2_INTERP_GENERIC_ARG に中身を格納し、'>' の次の位置を返す。閉じなければ
+# 0 を返し、呼び出し側で generic ではない（比較演算子の '<'）とみなす。
+function v2_interp_scan_generic(text, pos,    i, c, depth, start) {
+  start = pos + 1
+  depth = 1
+  for (i = start; i <= length(text); i++) {
+    c = substr(text, i, 1)
+    if (c == "<") depth++
+    else if (c == ">") {
+      depth--
+      if (depth == 0) { V2_INTERP_GENERIC_ARG = substr(text, start, i - start); return i + 1 }
+    }
+  }
+  V2_INTERP_GENERIC_ARG = ""
+  return 0
+}
+
+# text の先頭が `name(...)` / `name<T>(...)`（dotted 名も可）のいずれかの
+# call 形かどうかを判定する（DU: 補間内 call 認識に generic 形を追加。
+# 非 generic 判定（CN/DB）と同じ「先頭一致 + 深さ追跡」の型に揃える）。
+# 一致すれば 1 を返し、以下のグローバルに結果を格納する:
+#   V2_INTERP_CALL_NAME    SIG 照合名（generic なら "_t" 接尾。rpn.awk の
+#                          f<T>(...) -> f_t("T", ...) 正規化と同じ規約）
+#   V2_INTERP_CALL_GENERIC generic 型引数のテキスト（generic でなければ ""）
+#   V2_INTERP_CALL_OPEN    "(" の位置（v2_match_call_close にそのまま渡せる）
+function v2_interp_match_call_head(text,    name, pos) {
+  if (!match(text, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*/)) return 0
+  name = substr(text, RSTART, RLENGTH)
+  pos = RSTART + RLENGTH
+  V2_INTERP_CALL_GENERIC = ""
+  if (substr(text, pos, 1) == "<") {
+    pos = v2_interp_scan_generic(text, pos)
+    if (pos == 0) return 0
+    name = name "_t"
+    V2_INTERP_CALL_GENERIC = V2_INTERP_GENERIC_ARG
+  }
+  while (substr(text, pos, 1) ~ /[[:space:]]/) pos++
+  if (substr(text, pos, 1) != "(") return 0
+  V2_INTERP_CALL_NAME = name
+  V2_INTERP_CALL_OPEN = pos
+  return 1
+}
+
 # text 中の先頭の、丸括弧の深さ 0・文字列リテラル外にある "|>" の位置
 # （'|' の位置）を返す（CT。補間式内の pipe 検出用）。見つからなければ 0。
 function v2_find_toplevel_pipe(text,    i, c, depth, in_str) {
@@ -1039,7 +1083,7 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
                                     atype, expected, arity, max_arity, open_pos, close_pos, \
                                     depth, c, trailing, call_ret, trail_type, \
                                     pipe_pos, lhs_text, rhs_text, lhs_type, rname, r_argstr, \
-                                    expected1, ok, cls, inner) {
+                                    expected1, ok, cls, inner, genarg, uref) {
   exprtext = exprtext
   sub(/^[[:space:]]+/, "", exprtext)
   sub(/[[:space:]]+$/, "", exprtext)
@@ -1057,11 +1101,10 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
     sub(/[[:space:]]+$/, "", lhs_text)
     sub(/^[[:space:]]+/, "", rhs_text)
     lhs_type = v2_infer_interp_expr_type(strlit_id, lhs_text)
-    if (match(rhs_text, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
-      rname = m[0]
-      sub(/[[:space:]]*\($/, "", rname)
-      close_pos = v2_match_call_close(rhs_text, length(m[0]))
-      r_argstr = substr(rhs_text, length(m[0]) + 1, close_pos - length(m[0]) - 1)
+    if (v2_interp_match_call_head(rhs_text)) {
+      rname     = V2_INTERP_CALL_NAME
+      close_pos = v2_match_call_close(rhs_text, V2_INTERP_CALL_OPEN)
+      r_argstr  = substr(rhs_text, V2_INTERP_CALL_OPEN + 1, close_pos - V2_INTERP_CALL_OPEN - 1)
       if ((rname, "arg1") in SIG && lhs_type != "" && lhs_type != "Unknown") {
         expected1 = SIG[rname, "arg1"]
         ok = v2_type_compat(expected1, lhs_type)
@@ -1077,27 +1120,53 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
         }
         if (!ok) v2_diag(AST[strlit_id,"line"], 1, rname " argument 1 expects " expected1 ", got " lhs_type)
       }
+      # RHS の明示引数（LHS を arg1 として数えた実効 arity）も検査する
+      # （既存 AST 側 PIPE 検査 = V と同じ規則・同じ文面。DP。旧実装は
+      # LHS の arg1 照合だけで、RHS 側の明示引数の個数・型を一切見て
+      # いなかった）。
+      if ((rname, "arity") in SIG) {
+        arity = SIG[rname, "arity"]
+        max_arity = ((rname, "arity_max") in SIG) ? SIG[rname, "arity_max"] : arity
+        n = v2_split_toplevel_commas(r_argstr, args) + 1   # LHS 分を +1
+        if (arity != -1 && (n < arity || n > max_arity)) {
+          v2_diag(AST[strlit_id,"line"], 1, rname " expects " arity " argument(s), got " n)
+        }
+        for (i = 1; i <= n - 1; i++) {
+          if (!((rname, "arg" (i + 1)) in SIG)) continue
+          expected = SIG[rname, "arg" (i + 1)]
+          atype = v2_interp_atom_type(args[i], AST[strlit_id,"line"])
+          if (atype == "" || atype == "Unknown" || v2_type_compat(expected, atype)) continue
+          v2_diag(AST[strlit_id,"line"], 1, rname " argument " (i + 1) " expects " expected ", got " atype)
+        }
+      }
       return ((rname, "ret") in SIG) ? SIG[rname, "ret"] : "Unknown"
     }
     return "Unknown"
   }
-  if (match(exprtext, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
-    name = m[0]
-    sub(/[[:space:]]*\($/, "", name)
-    open_pos = length(m[0])
+  if (v2_interp_match_call_head(exprtext)) {
+    name    = V2_INTERP_CALL_NAME
+    genarg  = V2_INTERP_CALL_GENERIC
     # 深さ追跡で対応する閉じ ")" を探す（CO。v2_match_call_close に関数化して
     # v2_interp_atom_type と共用する。DB）。旧実装は末尾の ")" を機械的に
     # 1 個切り落とすだけだったため、call の直後に暗黙連結の式が続く場合
     # （`safe.html.escape(raw) raw` 等）に境界を誤認識し、末尾の式（brand
     # 検査が必要な Untrusted<Str> の可能性がある）を丸ごと argstr に取り込んで
     # 黙って捨てていた。
-    close_pos = v2_match_call_close(exprtext, open_pos)
-    argstr = substr(exprtext, open_pos + 1, close_pos - open_pos - 1)
+    close_pos = v2_match_call_close(exprtext, V2_INTERP_CALL_OPEN)
+    argstr = substr(exprtext, V2_INTERP_CALL_OPEN + 1, close_pos - V2_INTERP_CALL_OPEN - 1)
     trailing = substr(exprtext, close_pos + 1)
     sub(/^[[:space:]]+/, "", trailing)
     if ((name, "arity") in SIG) {
       arity = SIG[name, "arity"]
       n = v2_split_toplevel_commas(argstr, args)
+      # generic call（DU）は rpn.awk の f<T>(...) -> f_t("T", ...) 正規化と
+      # 同じく、型引数を第 1 引数の文字列として先頭に注入してから既存の
+      # arity・引数型検査に乗せる。
+      if (genarg != "") {
+        for (i = n; i >= 1; i--) args[i + 1] = args[i]
+        args[1] = "\"" genarg "\""
+        n++
+      }
       # 補間内 call は v2_check_calls の CALL ノード検査を迂回するため、
       # ここで同じ arity 検査を行う（引数の型検査ループとは独立に、まず
       # 個数が範囲外なら診断する。文面は v2_check_calls と同一形式。CN）。
@@ -1113,8 +1182,16 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
         if (atype == "" || atype == "Unknown" || v2_type_compat(expected, atype)) continue
         v2_diag(AST[strlit_id,"line"], 1, name " argument " i " expects " expected ", got " atype)
       }
+    } else if (name ~ /_t$/) {
+      # SIG 未登録の generic dispatch（v1 dsl/desugar_dot.awk の unknown
+      # generic dispatch と同じ扱い。BJ 相当）。
+      v2_diag(AST[strlit_id,"line"], 1, "unknown generic dispatch: " name)
+      return "Unknown"
     }
     call_ret = ((name, "ret") in SIG) ? SIG[name, "ret"] : "Unknown"
+    # generic 戻り型の T プレースホルダを実際の型引数で置換する（AE と同じ
+    # 規則をテキストスキャンにも適用する。DU）。
+    if (genarg != "" && call_ret ~ /\<T\>/) gsub(/\<T\>/, genarg, call_ret)
     if (trailing == "") return call_ret
     # call の後ろに式が続く場合は awk の暗黙連結（CK）とみなし、同じ CONCAT
     # 型付け規則（brand 喪失 / Untrusted 伝播）を適用する。
@@ -1125,7 +1202,31 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
   if (exprtext ~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
     return (exprtext in V2_ENV) ? V2_ENV[exprtext] : "Unknown"
   }
+  # 裸 IDENT・call・pipe のいずれの既知形にもマッチしない補間式（丸括弧
+  # 包み `(raw)` や `raw ""` のような暗黙連結の一部でない裸の並びなど）は
+  # 従来 Unknown を返すだけで、文字列リテラルキャッシュ側が Unknown を
+  # 安全な Str と同一視していた。式テキスト中に Untrusted な変数への
+  # 参照が含まれる場合はそれを見逃さず Untrusted<Str> を返す（DV。
+  # 誤検出側に倒す必要はないが、untrusted 参照の見逃し側には倒さない）。
+  uref = v2_interp_text_has_untrusted_ref(exprtext)
+  if (uref != "") return uref
   return "Unknown"
+}
+
+# exprtext 中に現れる識別子のうち、V2_ENV で Untrusted<...>（union member
+# 含む = DK の v2_type_has_untrusted_member を再利用）と分かっているものが
+# 1 つでもあれば、その型を返す。無ければ "" を返す（DV）。既知形にマッチ
+# しない補間式の安全側フォールバックとして使う。
+function v2_interp_text_has_untrusted_ref(exprtext,    rest, m, ident, t) {
+  rest = exprtext
+  while (match(rest, /[A-Za-z_][A-Za-z0-9_]*/)) {
+    ident = substr(rest, RSTART, RLENGTH)
+    rest = substr(rest, RSTART + RLENGTH)
+    if (!(ident in V2_ENV)) continue
+    t = V2_ENV[ident]
+    if (v2_type_has_untrusted_member(t)) return t
+  }
+  return ""
 }
 
 # STRLIT の #{ } 補間式それぞれの型を id 単位でキャッシュする（BM）。
