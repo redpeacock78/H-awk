@@ -173,7 +173,25 @@ function v2_stmt_dispatch(marker, i, parent) {
   if (marker == "WHEN")               return v2_p_when(i, parent)
   if (marker == "EXPR")               return v2_parse_expr_stmt(i, parent)
   if (marker == "RAWLINE")            return v2_parse_rawline(i, parent)
+  if (marker == "TYPEDECL")           return v2_parse_typedecl(i, parent)
   return i
+}
+
+# ─── type NAME = TYPE_EXPR 文（AP） ───────────────────────────────
+
+# 消費: MARKER(name) + OPERAND(typetext) + STMT_END
+# 返す: STMT_END の RPN インデックス
+function v2_parse_typedecl(i, parent,    name, typetext, id, typeann_id) {
+  name     = RPN[i+1,"val"]
+  typetext = RPN[i+2,"val"]
+  id = v2_node("TYPEDECL", RPN[i,"line"])
+  AST[id,"text"] = name
+  if (typetext != "") {
+    typeann_id = v2_leaf("TYPEANN", typetext, RPN[i,"line"])
+    v2_addchild(id, typeann_id)
+  }
+  v2_addchild(parent, id)
+  return i + 3   # STMT_END の位置
 }
 
 # ─── 素の awk 行（passthrough） ───────────────────────────────────

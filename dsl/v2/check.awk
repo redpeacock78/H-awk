@@ -130,7 +130,11 @@ function v2_init_builtins() {
 # AST を再帰的に走査し、FUNC ノードから SIG[] を充填する。
 # 前方参照（定義前の呼び出し）に対応するため、arity 検査より先に全体を走査する。
 function v2_collect(id,    k, name, child, argn) {
-  if (AST[id,"kind"] == "FUNC") {
+  if (AST[id,"kind"] == "TYPEDECL") {
+    # type NAME = TYPE_EXPR（AP）。組込み ALIAS と同じ展開経路（v2_expand_alias）
+    # に乗せるだけで、既存の v2_type_compat / v2_unwrap_type 等はそのまま使える。
+    if (AST[id,"nc"] >= 1) ALIAS[AST[id,"text"]] = AST[AST[id,"c1"],"text"]
+  } else if (AST[id,"kind"] == "FUNC") {
     name = AST[id,"text"]
     SIG[name,"arity"] = 0
     SIG[name,"ret"]   = "Unknown"

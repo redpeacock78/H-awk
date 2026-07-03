@@ -32,6 +32,8 @@ function v2_is_dsl(line,    s) {
   s = v2_strip_str_comment(line)
   # let / when / of / end をワード境界で検出
   if (s ~ /(^|[^[:alnum:]_])(let|when|of|end)([^[:alnum:]_]|$)/) return 1
+  # type NAME = ...（型エイリアス宣言、docs/dsl.md:504-505。AP）
+  if (s ~ /(^|[^[:alnum:]_])type[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/) return 1
   # ??  |>  #{  ?=  演算子
   if (s ~ /\?\?|\|>|#\{|\?=/) return 1
   # function NAME(...) ->  シグネチャ
@@ -148,7 +150,7 @@ function v2_push(kind, text, line, col) {
 
 # 識別子文字列から トークン種別を返す（KW / TYPE / IDENT）
 function v2_ident_kind(tok) {
-  if (tok ~ /^(function|let|when|of|end|return|rec|default)$/) return "KW"
+  if (tok ~ /^(function|let|when|of|end|return|rec|default|type)$/) return "KW"
   if (tok ~ /^[A-Z]/) return "TYPE"
   return "IDENT"
 }

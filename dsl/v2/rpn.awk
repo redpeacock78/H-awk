@@ -363,7 +363,7 @@ function v2_find_expr_end(start,    k, depth, t, txt, startline) {
 
     if (depth == 0 && t == "KW" &&
         (txt == "let" || txt == "function" || txt == "when" ||
-         txt == "end" || txt == "return")) {
+         txt == "end" || txt == "return" || txt == "type")) {
       return k - 1
     }
   }
@@ -399,6 +399,7 @@ function v2_rpn_dispatch(i,    kw) {
   else if (kw == "let")      return v2_rpn_let(i)
   else if (kw == "when")     return v2_rpn_when(i)
   else if (kw == "return")   return v2_rpn_return(i)
+  else if (kw == "type")     return v2_rpn_typedecl(i)
   else                        return v2_rpn_stmt(i)
 }
 
@@ -484,6 +485,8 @@ function v2_skip_type(j,    startline, depth) {
       depth--; j++; continue
     }
     if (TOK[j,"kind"] == "OP" && TOK[j,"text"] == "|") { j++; continue }
+    # Intersection 型エイリアス（docs/dsl.md:506: `Int & Str`）にも対応（AP）
+    if (TOK[j,"kind"] == "OP" && TOK[j,"text"] == "&") { j++; continue }
     if (TOK[j,"kind"] == "COMMA") {
       if (depth == 0) break
       j++; continue
@@ -491,6 +494,30 @@ function v2_skip_type(j,    startline, depth) {
     if (TOK[j,"kind"] == "TYPE" || TOK[j,"kind"] == "IDENT") { j++; continue }
     break
   }
+  return j
+}
+
+# type NAME = TYPE_EXPR（型エイリアス宣言、docs/dsl.md:504-506。AP）
+# Union（|）/ Intersection（&）の単一行形のみ対応する。record 形
+# （`type Todo = { ... }` docs/dsl.md:123）は Task 10/11（emit）と合わせて
+# 別途対応が必要なスコープのため、ここでは扱わない（報告書に明記）。
+function v2_rpn_typedecl(i,    line, name, j, typestart, typetext) {
+  line = TOK[i,"line"]
+  name = TOK[i+1,"text"]
+
+  v2_emit_rpn("MARKER", "TYPEDECL", line, "")
+  v2_emit_rpn("OPERAND", name, line, "")
+
+  j = i + 2
+  typetext = ""
+  if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=") {
+    j++
+    typestart = j
+    j = v2_skip_type(j)
+    typetext = v2_read_type_text(typestart, j)
+  }
+  v2_emit_rpn("OPERAND", typetext, line, "")
+  v2_emit_rpn("MARKER", "STMT_END", line, "")
   return j
 }
 
