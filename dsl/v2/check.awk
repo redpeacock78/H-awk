@@ -437,6 +437,9 @@ function v2_check_index_assign(id,    name, idx_id, rhs_id, target_type, key_typ
   idx_id      = AST[id,"c1"]
   rhs_id      = AST[id,"c2"]
   target_type = (name in V2_ENV) ? V2_ENV[name] : "Unknown"
+  # `type Ints = List<Int>` のようなエイリアス越しの宣言も List</Dict<
+  # パターンに合わせて検査できるよう、判定前に 1 段以上展開する（CU/CY）。
+  target_type = v2_expand_alias(target_type)
   if (target_type == "" || target_type == "Unknown") return
   key_type = (idx_id != 0 && (idx_id in TYPEOF)) ? TYPEOF[idx_id] : ""
   rhs_type = (rhs_id != 0 && (rhs_id in TYPEOF)) ? TYPEOF[rhs_id] : ""

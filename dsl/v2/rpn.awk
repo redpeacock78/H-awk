@@ -442,7 +442,7 @@ function v2_read_type_text(typestart, end,    k, typetext) {
 }
 
 # function NAME( PARAMS ) -> RETTYPE { BODY }
-function v2_rpn_func(i,    fname, line, j, typestart) {
+function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
   line  = TOK[i,"line"]
   fname = TOK[i+1,"text"]
 
@@ -460,7 +460,8 @@ function v2_rpn_func(i,    fname, line, j, typestart) {
     j++  # skip LP
     while (j <= TOK["n"] && TOK[j,"kind"] != "RP") {
       if (TOK[j,"kind"] == "IDENT") {
-        v2_emit_rpn("OPERAND", TOK[j,"text"], TOK[j,"line"], "")
+        pname = TOK[j,"text"]
+        v2_emit_rpn("OPERAND", pname, TOK[j,"line"], "")
         j++
         # 型注釈 [: TYPE] → `:TYPE...` として出力（Union/Generic の
         # 複数トークン型に対応。let の型スキャンと同じ v2_skip_type を使う）
@@ -469,7 +470,13 @@ function v2_rpn_func(i,    fname, line, j, typestart) {
           j++  # skip :
           typestart = j
           j = v2_skip_type(j)
-          v2_emit_rpn("OPERAND", ":" v2_read_type_text(typestart, j), TOK[typestart,"line"], "")
+          paramtype = v2_read_type_text(typestart, j)
+          v2_emit_rpn("OPERAND", ":" paramtype, TOK[typestart,"line"], "")
+          # let のコレクション型注釈（CB）と同じ理由で、関数引数の
+          # List<T>/Dict<K,V> 注釈（エイリアス越しを含む。CY）も
+          # V2_RPN_DSLVAR に記録し、添字代入の構造化対象にする。
+          if (v2_rpn_expand_alias(paramtype) ~ /^List</ || v2_rpn_expand_alias(paramtype) ~ /^Dict</) \
+            V2_RPN_DSLVAR[pname] = paramtype
         }
       } else {
         j++
@@ -551,6 +558,9 @@ function v2_rpn_typedecl(i,    line, name, j, typestart, typetext) {
   }
   v2_emit_rpn("OPERAND", typetext, line, "")
   v2_emit_rpn("MARKER", "STMT_END", line, "")
+  # 後続の let 型注釈・関数引数注釈が同名エイリアスを参照したとき
+  # List</Dict< 判定に展開して使えるよう記録する（CU/CY）。
+  V2_RPN_ALIAS[name] = typetext
   return j
 }
 
@@ -579,7 +589,11 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
     v2_emit_rpn("OPERAND", typetext, TOK[typestart,"line"], "")
     # List</Dict< と宣言された変数は、後続の添字代入文（xs[k] = v）を RAWLINE
     # に吸収させず ASSIGN 系ノードとして構造化するための対象に記録する（CB）。
-    if (typetext ~ /^List</ || typetext ~ /^Dict</) V2_RPN_DSLVAR[name] = typetext
+    # `type Ints = List<Int>` のようなエイリアス越しの宣言は typetext が
+    # literal "List<"/"Dict<" prefix にならず記録漏れになっていたため、
+    # 判定前にエイリアス展開する（CU）。
+    if (v2_rpn_expand_alias(typetext) ~ /^List</ || v2_rpn_expand_alias(typetext) ~ /^Dict</) \
+      V2_RPN_DSLVAR[name] = typetext
   }
 
   # 裸の let 宣言（hoist 形 `let tmp` / `let n: Int`、= も ?= もない）は
@@ -815,9 +829,28 @@ function v2_rpn(    i) {
   RPN["n"]  = 0
   v2_os_sp  = 0
   v2_ops_init()
+  # type NAME = TYPE_EXPR のエイリアス表（CU/CY）。v2_rpn_typedecl が
+  # ファイル先頭から順に埋める。プログラム全体で 1 つの表（関数スコープでは
+  # クリアしない）。
+  delete V2_RPN_ALIAS
 
   i = 1
   while (i <= TOK["n"]) {
     i = v2_rpn_dispatch(i)
   }
+}
+
+# V2_RPN_DSLVAR 記録判定用に型テキスト t をエイリアス越しに展開する（CU/CY）。
+# check.awk の v2_expand_alias（パス 1 完了後の ALIAS[] を使う）とは別に、
+# rpn は自身のトップダウン走査中に集めた V2_RPN_ALIAS（type 宣言が使用箇所
+# より前にある場合のみ解決可能）を参照する。展開先も別名の場合に備えて数段
+# 展開するが、循環定義は guard で打ち切る（BR の循環検出は check 側の役割
+# のためここでは検出しない、単に無限ループを防ぐだけ）。
+function v2_rpn_expand_alias(t,    guard) {
+  guard = 0
+  while ((t in V2_RPN_ALIAS) && guard < 20) {
+    t = V2_RPN_ALIAS[t]
+    guard++
+  }
+  return t
 }
