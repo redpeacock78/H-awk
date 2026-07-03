@@ -240,7 +240,11 @@ function v2_split_union(t, out,    i, c, depth, cur, n) {
 # v2_split_union でトップレベル分割した上で member 単位に判定する。DK/DL）。
 function v2_type_has_untrusted_member(t,    parts, n, i) {
   n = v2_split_union(t, parts)
-  for (i = 1; i <= n; i++) if (parts[i] ~ /^Untrusted</) return 1
+  # member 自体が Untrusted<...> への型エイリアス（`type U = Untrusted<Str>`）
+  # だと、展開前の生テキストでは prefix が一致せず判定をすり抜ける（review C1）。
+  # DS の sealed 判定と同じく、比較前に v2_resolve_sealed でエイリアスを
+  # 展開してから prefix 照合する。
+  for (i = 1; i <= n; i++) if (v2_resolve_sealed(parts[i]) ~ /^Untrusted</) return 1
   return 0
 }
 
@@ -391,7 +395,7 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
   }
   # 文字列連結は brand 型（HtmlEscapedStr 等）を失い Str に落ちる（docs/dsl.md:264
   # の補間規則と同型: いずれかのオペランドが Untrusted<...> なら結果も
-  # Untrusted<Str> を伝播する。union の場合は member 単位で判定する。CK/DL）。
+  # Untrusted<Str> を伝播する。union の場合は member 単位で判定する。DK/DL）。
   if (op == "CONCAT") return (v2_type_has_untrusted_member(lt) || v2_type_has_untrusted_member(rt)) ? "Untrusted<Str>" : "Str"
 
   is_num_op = (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "^")
