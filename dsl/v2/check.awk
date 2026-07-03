@@ -380,7 +380,10 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
       op == "&&" || op == "||") {
     return "Bool"
   }
-  if (op == "CONCAT") return "Str"
+  # 文字列連結は brand 型（HtmlEscapedStr 等）を失い Str に落ちる（docs/dsl.md:264
+  # の補間規則と同型: いずれかのオペランドが Untrusted<...> なら結果も
+  # Untrusted<Str> を伝播する。CK）。
+  if (op == "CONCAT") return (lt ~ /^Untrusted</ || rt ~ /^Untrusted</) ? "Untrusted<Str>" : "Str"
 
   is_num_op = (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "^")
   if (is_num_op) {

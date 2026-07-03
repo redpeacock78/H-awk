@@ -174,6 +174,24 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
     t    = TOK[k,"kind"]
     line = TOK[k,"line"]
 
+    # 隣接オペランドの暗黙 CONCAT（awk の juxtaposition 連結。CK）:
+    # 直前トークンが値で終わっており（IDENT/NUM/TYPE/STR/REGEX/")"/"]"）、
+    # 現在のトークンが新しい値の開始（IDENT/NUM/TYPE/REGEX/STR/補間開始/"("/
+    # 空リテラル [] {}）なら、両者の間に演算子トークンが無い awk の暗黙連結と
+    # みなし、CONCAT 演算子を挿入する（二項演算子と同じ pop_ge → push 手順）。
+    # 添字アクセス rows[id] の "[" は別枝（260 行目以降）で処理するためここでは
+    # 対象外。
+    prevkind = (k > i) ? TOK[k-1,"kind"] : ""
+    if ((prevkind == "IDENT" || prevkind == "NUM" || prevkind == "TYPE" || \
+         prevkind == "STR" || prevkind == "REGEX" || prevkind == "RP" || prevkind == "RBRACK") && \
+        (t == "IDENT" || t == "NUM" || t == "TYPE" || t == "REGEX" || \
+         t == "STR" || t == "INTERP_OPEN" || t == "LP" || \
+         (t == "LBRACK" && TOK[k+1,"kind"] == "RBRACK") || \
+         (t == "LBRACE" && TOK[k+1,"kind"] == "RBRACE"))) {
+      v2_pop_ge("CONCAT", line)
+      v2_os_push("CONCAT")
+    }
+
     # 呼び出し可能な callee の走査: 単純 IDENT、dotted (a.b.c)、
     # generic (f<T>) のいずれも FN: を push する前に callee 全体を収集する。
     # dotted の組込みシグネチャは "ctx.res.text" のようにフルネームで
