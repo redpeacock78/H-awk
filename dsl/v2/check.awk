@@ -396,6 +396,12 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
 
   is_num_op = (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "^")
   if (is_num_op) {
+    # オペランドがエイリアス越し（`type Count = Int`）だと literal Int/Float
+    # と直接比較しても一致せず誤 reject するため、展開してから比較する（DI）。
+    # オペランドがエイリアス越し（`type Count = Int`）だと literal Int/Float
+    # と直接比較しても一致せず誤 reject するため、展開してから比較する（DI）。
+    lt = v2_expand_alias(lt)
+    rt = v2_expand_alias(rt)
     if (lt == "Unknown" || rt == "Unknown") return "Unknown"
     if (lt == "Int" && rt == "Int") return "Int"
     if ((lt == "Int" || lt == "Float") && (rt == "Int" || rt == "Float")) return "Float"
@@ -413,7 +419,9 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
 # Str 添字のみ。添字が Unknown なら誤検出防止のため素通しする。
 function v2_index_type(id,    target_type, key_type, m, dn, dparts) {
   target_type = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
-  key_type    = TYPEOF[AST[id,"c2"]]
+  # キー型もエイリアス越し（`type Key = Int`）だと literal Int/Str と直接
+  # 比較しても一致せず誤 reject するため、展開してから比較する（DH）。
+  key_type    = v2_resolve_sealed(TYPEOF[AST[id,"c2"]])
   if (target_type == "" || target_type == "Unknown") return "Unknown"
   if (match(target_type, /^List<(.+)>$/, m)) {
     if (key_type != "" && key_type != "Unknown" && key_type != "Int") {
