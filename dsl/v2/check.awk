@@ -332,6 +332,15 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
   return "Unknown"
 }
 
+# INDEX（添字式 target[idx]）の要素型を決定する（BE）。
+# target が Dict<K, V> なら V、List<T> なら T、それ以外・Unknown は Unknown。
+function v2_index_type(target_type,    m) {
+  if (target_type == "" || target_type == "Unknown") return "Unknown"
+  if (match(target_type, /^List<(.+)>$/, m)) return m[1]
+  if (match(target_type, /^Dict<[^,]+,[[:space:]]*(.+)>$/, m)) return m[1]
+  return "Unknown"
+}
+
 # DOT（レシーバ.メソッド(...) 呼び出し）の戻り型を決定する
 # receiver が単純 IDENT でメソッドが CALL の場合のみ "receiver.method" で SIG[] を引く。
 function v2_dot_type(id,    recv, callnode, name) {
@@ -421,6 +430,8 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     lt = TYPEOF[AST[id,"c1"]]
     rt = TYPEOF[AST[id,"c2"]]
     t = v2_union_of(v2_unwrap_type(lt), rt)
+  } else if (kind == "INDEX") {
+    t = v2_index_type(TYPEOF[AST[id,"c1"]])
   } else if (kind == "PIPE") {
     t = TYPEOF[AST[id,"c2"]]
   } else if (kind == "DOT") {
