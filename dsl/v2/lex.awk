@@ -364,6 +364,12 @@ function v2_tok_str(rest, lineno, startcol,    i, ch, ch2, acc, acc_col, consume
         closed_interp = 0
         while (i <= length(rest)) {
           ch = substr(rest, i, 1)
+          # ネストした文字列リテラル（内側の } を補間終端と誤認しないよう先に処理）
+          if (ch == "\"") {
+            consumed = v2_tok_str(substr(rest, i), lineno, startcol + i - 1)
+            i += consumed
+            continue
+          }
           # 補間終端
           if (ch == "}") {
             v2_push("INTERP_CLOSE", "}", lineno, startcol + i - 1)

@@ -245,7 +245,13 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
           text = text "#{"
           k++
           while (k <= j && TOK[k,"kind"] != "INTERP_CLOSE") {
-            text = text TOK[k,"text"]
+            # 補間内のネストした文字列リテラル（review ES で lex.awk が STR
+            # トークンとして認識するようになった）は、check.awk 側の
+            # v2_find_interp_close が \" エスケープ対でしか文字列境界を
+            # 認識しないため、引用符を落とさず \" で再ラップして渡す
+            # （落とすと内部の } が補間終端と誤認される）。
+            if (TOK[k,"kind"] == "STR") text = text "\\\"" TOK[k,"text"] "\\\""
+            else                        text = text TOK[k,"text"]
             k++
           }
           text = text "}"
