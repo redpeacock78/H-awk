@@ -452,6 +452,9 @@ function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
   # 関数スコープ開始: 添字代入の構造化判定に使う DSL 変数の宣言型を初期化する
   # （CB）。前の関数の残留を持ち込まないよう毎回クリアする。
   delete V2_RPN_DSLVAR
+  # 生 awk ブレースブロック（`if (x) { ... }` 等）の未閉鎖 `{` の深さ
+  # （review EJ）。0 にリセットしてから本体走査を始める。
+  V2_RPN_RAWBRACE_DEPTH = 0
 
   j = i + 2  # LP の位置
 
@@ -512,6 +515,17 @@ function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
   # 本体トークン列を文ディスパッチで処理
   while (j <= TOK["n"]) {
     if (TOK[j,"kind"] == "RBRACE") {
+      # 生 awk ブレースブロックの開き `{` は RAWLINE の一部としてスキップ
+      # されるが、閉じ `}` は単独行トークンとしてここに現れるため、素朴に
+      # 「RBRACE を見たら関数終端」と判定すると生ブロックの閉じ括弧を関数
+      # 終端と誤認識し、以降の文がトップレベル化していた（review EJ）。
+      # RAWLINE 消化時に数えた未閉鎖 `{` の深さが残っている間は、この
+      # RBRACE を生ブロックの閉じ括弧として消費するだけに留める。
+      if (V2_RPN_RAWBRACE_DEPTH > 0) {
+        V2_RPN_RAWBRACE_DEPTH--
+        j++
+        continue
+      }
       v2_emit_rpn("MARKER", "FUNC_CLOSE", TOK[j,"line"], "")
       return j + 1
     }
@@ -871,7 +885,15 @@ function v2_rpn_stmt(i,    j, line, eq_pos) {
     v2_emit_rpn("MARKER",  "RAWLINE",             line, "")
     v2_emit_rpn("OPERAND", V2_LINE_TEXT[line], line, "")
     j = i
-    while (j <= TOK["n"] && TOK[j,"line"] == line) j++
+    # この行に含まれる `{`/`}` の収支を数え、関数 body 走査側の未閉鎖
+    # ブレース深さに反映する（review EJ）。`if (x) { ... }` のように開き
+    # `{` のみで終わる行は深さ +1 になり、この行に閉じ `}` が見つかるまで
+    # v2_rpn_func 側の単独 RBRACE を関数終端と誤認識しないようにする。
+    while (j <= TOK["n"] && TOK[j,"line"] == line) {
+      if      (TOK[j,"kind"] == "LBRACE") V2_RPN_RAWBRACE_DEPTH++
+      else if (TOK[j,"kind"] == "RBRACE") V2_RPN_RAWBRACE_DEPTH--
+      j++
+    }
     return j
   }
 
