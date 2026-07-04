@@ -83,6 +83,23 @@ function v2_collect_type_aliases(nlines,    i, s, m, names, n) {
   V2_ALIAS_TYPEANN_RE = names
 }
 
+# 戻り値型注釈（`-> RETTYPE`）を持つユーザー定義関数名をファイル全体から
+# 事前収集する（review EQ）。DSL マーカーを一切持たない関数本体
+# （`function handler() { normalize(123) }`）でも、本体が既知の注釈付き
+# 関数を呼び出しているだけなら v1 は引数型検査を行う。v2 は関数ヘッダに
+# DSL 構文が無いと本体全体を素通し（RAWLINE）扱いにするため、この呼び出し
+# だけが v2_check_calls の CALL 検査を経由せず引数型不一致を見逃していた。
+function v2_collect_annotated_funcs(nlines,    i, s, m, names, n) {
+  names = ""; n = 0
+  for (i = 1; i <= nlines; i++) {
+    s = v2_strip_str_comment(V2_RAWLINE[i])
+    if (match(s, /function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\([^)]*\)[[:space:]]*->/, m)) {
+      if (!(m[1] in V2_DSL_FUNCNAME)) { V2_DSL_FUNCNAME[m[1]] = 1; names = names (n++ ? "|" : "") m[1] }
+    }
+  }
+  V2_FUNCNAME_CALL_RE = names
+}
+
 function v2_is_dsl(line,    s) {
   s = v2_strip_str_comment(line)
   # let / when をワード境界で検出
@@ -102,10 +119,20 @@ function v2_is_dsl(line,    s) {
   # 名前空間付きアクセス (hawk. ctx. 等)
   if (s ~ /(^|[^[:alnum:]_])(hawk|ctx|env|cache|safe|msg|proc|json|option)\.[[:alnum:]_]/) return 1
   # 型注釈  : Int / : Str / : Response 等（docs/dsl.md:96 のサポート型一覧。BA）
-  if (s ~ /:[[:space:]]*(Int|Float|Str|Bool|NumericStr|Array|Map|Response|Untrusted<|HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr|Void|Any|List<|Dict<|Record|Result<|Option<)/) return 1
+  # 組込みエイリアス（check.awk の v2_init_builtins の ALIAS[] と同じ一覧。
+  # review EM。旧実装は Port/JsonValue/JsonObject/HtmlPart 等の組込み
+  # エイリアスのみを型注釈に使う関数 `function f(x: JsonValue) { ... }` を
+  # DSL として検出できず、注釈が生のまま awk に渡り構文エラーになっていた）。
+  if (s ~ /:[[:space:]]*(Int|Float|Str|Bool|NumericStr|Array|Map|Response|Untrusted<|HtmlEscapedStr|HtmlFragment|HtmlAttrEscapedStr|Void|Any|List<|Dict<|Record|Result<|Option<|Port|HandlerName|HtmlPart|JsonScalar|JsonValue|JsonObject|JsonError)/) return 1
   # ユーザー定義 type エイリアスのみによる型注釈（CE）。v2_collect_type_aliases
   # が事前収集した名前集合と ": NAME" 形で照合する。
   if (V2_ALIAS_TYPEANN_RE != "" && s ~ (":[[:space:]]*(" V2_ALIAS_TYPEANN_RE ")([^[:alnum:]_]|$)")) return 1
+  # 既知の注釈付きユーザー関数の呼び出し（review EQ）。v2_collect_annotated_funcs
+  # が事前収集した関数名集合と "NAME(" 形で照合する。DSL マーカーを一切
+  # 持たない未注釈関数本体（`function handler() { normalize(123) }`）でも、
+  # 呼び出し先が引数型検査対象の関数なら DSL 扱いにする。v1 は関数境界に
+  # 関係なく行単位で引数型を検査するため、この呼び出しを見逃さない。
+  if (V2_FUNCNAME_CALL_RE != "" && s ~ ("(^|[^[:alnum:]_])(" V2_FUNCNAME_CALL_RE ")[[:space:]]*\\(")) return 1
   return 0
 }
 
@@ -213,6 +240,10 @@ function v2_lex(src,    line, lineno, in_when, in_block, nlines, tok_start, k, \
   delete V2_DSL_ALIAS
   V2_ALIAS_TYPEANN_RE = ""
   v2_collect_type_aliases(nlines)
+
+  delete V2_DSL_FUNCNAME
+  V2_FUNCNAME_CALL_RE = ""
+  v2_collect_annotated_funcs(nlines)
 
   v2_mark_unannotated_func(nlines)
 
