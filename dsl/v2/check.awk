@@ -243,13 +243,21 @@ function v2_split_union(t, out,    i, c, depth, cur, n) {
 # Str|Untrusted<Str>` 等）で prefix 照合が先頭 member しか見ず後続 member の
 # Untrusted</Result</Option< を見逃す問題への対応（review DW）。展開結果が
 # 元と同じ（＝エイリアスでない、または循環で解決不能）場合のみ従来どおり
-# prefix 照合する。depth は循環防止のガード（最大 16）。
-function v2_find_sealed_member(t, pat, depth,    parts, n, i, resolved, found) {
+# prefix 照合する。展開結果が intersection（`&`）を含む場合は
+# v2_split_intersection で分割し各 member を再帰判定する（`type X = Tag &
+# Untrusted<Str>` のように intersection 越しに隠れた sealed 型を見逃していた
+# 問題への対応。review EG）。depth は循環防止のガード（最大 16）。
+function v2_find_sealed_member(t, pat, depth,    parts, n, i, resolved, found, iparts, ni, j) {
   if (depth >= 16) return ""
   n = v2_split_union(t, parts)
   for (i = 1; i <= n; i++) {
     resolved = v2_resolve_sealed(parts[i])
-    if (resolved == parts[i]) {
+    ni = v2_split_intersection(resolved, iparts)
+    if (ni > 1) {
+      for (j = 1; j <= ni; j++) {
+        if ((found = v2_find_sealed_member(iparts[j], pat, depth + 1)) != "") return found
+      }
+    } else if (resolved == parts[i]) {
       if (resolved ~ pat) return resolved
     } else if ((found = v2_find_sealed_member(resolved, pat, depth + 1)) != "") {
       return found
@@ -303,7 +311,7 @@ function v2_union_of(a, b,    parts, seen, n, i, out, k, result) {
 
 # expected が actual を受理するか（Union `A|B` 対応・ALIAS 展開）
 function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, aparts, \
-                         eg, ag, egn, agn, egargs, agargs, matched) {
+                         eg, ag, egn, agn, egargs, agargs, matched, ein, eiparts) {
   if (expected == actual)             return 1
   if (expected == "Any" || expected == "Unknown") return 1
   if (actual   == "Any" || actual   == "Unknown") return 1
@@ -315,6 +323,15 @@ function v2_type_compat(expected, actual,    ea, aa, en, an, i, j, eparts, apart
   ea = v2_expand_alias(expected)
   aa = v2_expand_alias(actual)
   if (ea != expected || aa != actual) return v2_type_compat(ea, aa)
+
+  # 期待型が intersection（`&`）なら、全 member を actual が満たすことを
+  # 要求する（review ER。旧実装は `Str & Any` のような intersection を
+  # 不透明な 1 個の文字列として比較し、Str の代入すら誤 reject していた）。
+  ein = v2_split_intersection(expected, eiparts)
+  if (ein > 1) {
+    for (i = 1; i <= ein; i++) if (!v2_type_compat(eiparts[i], actual)) return 0
+    return 1
+  }
 
   # 同名 generic 同士は型引数ごとに構造的に比較する（内側のエイリアスも展開される）
   if (match(expected, /^([A-Za-z_][A-Za-z0-9_]*)<(.+)>$/, eg) && \
@@ -783,12 +800,18 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
 
 # ─── パス 3 補助: LETQ（?=）の型規則（Task 9） ───────────────────────
 
-# t の Union 各要素が Option<...> / Result<...> のいずれかであれば真
-function v2_is_nullable(t,    parts, n, i) {
+# t の Union 各要素が Option<...> / Result<...> のいずれかであれば真。
+# member 自体がエイリアス（`type O = Option<Str>` 等）の場合は
+# v2_resolve_sealed で展開してから判定する（review EO。旧実装は未展開の
+# エイリアス名をそのまま prefix 照合していたため、`type O = Option<Str>` +
+# `type R = Result<Str, E>` の union `O|R` を `?= requires Option or
+# Result` で誤 reject していた）。
+function v2_is_nullable(t,    parts, n, i, resolved) {
   n = v2_split_union(t, parts)
   if (n < 1) return 0
   for (i = 1; i <= n; i++) {
-    if (parts[i] !~ /^Option</ && parts[i] !~ /^Result</) return 0
+    resolved = v2_resolve_sealed(parts[i])
+    if (resolved !~ /^Option</ && resolved !~ /^Result</) return 0
   }
   return 1
 }
@@ -1040,7 +1063,7 @@ function v2_find_toplevel_pipe(text,    i, c, depth, in_str) {
 # `safe.str.trust(raw) raw` のような形で末尾の未エスケープ式が握り潰されていた）。
 function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, \
                               expected, arity, max_arity, open_pos, close_pos, \
-                              trailing, call_ret, trail_type, uref) {
+                              trailing, call_ret, trail_type, uref, genarg) {
   sub(/^[[:space:]]+/, "", text)
   sub(/[[:space:]]+$/, "", text)
   if (text ~ /^"([^"\\]|\\.)*"$/)          return "Str"
@@ -1048,10 +1071,15 @@ function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, 
   if (text ~ /^-?[0-9]+$/)                 return "Int"
   if (text == "true" || text == "false")   return "Bool"
   if (text == "null")                      return "Null"
-  if (match(text, /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*[[:space:]]*\(/, m)) {
-    name = m[0]
-    sub(/[[:space:]]*\($/, "", name)
-    open_pos = length(m[0])
+  # トップレベル補間スキャナ（v2_interp_match_call_head）と同じ「name(...)
+  # / name<T>(...)」判定を使う（review EK。旧実装は独自の非 generic 専用
+  # 正規表現を持っていたため、`json.decode<Int>(body)` のようなネスト引数中
+  # の generic call を認識できず、sealed 戻り型（Result 等）が Unknown に
+  # 落ちて後続の sealed 検査を素通りしていた）。
+  if (v2_interp_match_call_head(text)) {
+    name    = V2_INTERP_CALL_NAME
+    genarg  = V2_INTERP_CALL_GENERIC
+    open_pos = V2_INTERP_CALL_OPEN
     close_pos = v2_match_call_close(text, open_pos)
     # 補間実引数がネストした CALL のとき、そのネスト call 自体の arity・
     # 引数型検査は v2_check_calls の CALL ノード走査を経由しないため、
@@ -1062,6 +1090,13 @@ function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, 
     if ((name, "arity") in SIG) {
       arity = SIG[name, "arity"]
       n = v2_split_toplevel_commas(argstr, args)
+      # generic call（DU と同じ規則）は型引数を第 1 引数の文字列として
+      # 先頭に注入してから既存の arity・引数型検査に乗せる。
+      if (genarg != "") {
+        for (i = n; i >= 1; i--) args[i + 1] = args[i]
+        args[1] = "\"" genarg "\""
+        n++
+      }
       max_arity = ((name, "arity_max") in SIG) ? SIG[name, "arity_max"] : arity
       if (arity != -1 && (n < arity || n > max_arity)) {
         v2_diag(line, 1, name " expects " arity " argument(s), got " n)
@@ -1074,8 +1109,13 @@ function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, 
         if (atype == "" || atype == "Unknown" || v2_type_compat(expected, atype)) continue
         v2_diag(line, 1, name " argument " i " expects " expected ", got " atype)
       }
+    } else if (name ~ /_t$/) {
+      # SIG 未登録の generic dispatch（トップレベル分岐と同じ扱い。BJ 相当）。
+      v2_diag(line, 1, "unknown generic dispatch: " name)
+      return "Unknown"
     }
     call_ret = ((name, "ret") in SIG) ? SIG[name, "ret"] : "Unknown"
+    if (genarg != "" && call_ret ~ /\<T\>/) gsub(/\<T\>/, genarg, call_ret)
     trailing = substr(text, close_pos + 1)
     sub(/^[[:space:]]+/, "", trailing); sub(/[[:space:]]+$/, "", trailing)
     if (trailing == "") return call_ret
@@ -1217,7 +1257,16 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
       # 宣言戻り型をそのまま返しており、transform に Untrusted 入力を
       # 通しても戻り値の Untrusted<...> が保存されなかった）。
       if ((rname, "classify") in SIG) call_ret = v2_dataflow_ret(rname, lhs_type, call_ret)
-      return call_ret
+      # RHS call の閉じ括弧より後に残るテキストを非 pipe call 経路（下の
+      # v2_interp_match_call_head 分岐）と同じ CONCAT 規則で検査する
+      # （review EN。旧実装は call を型付けして即 return するだけで、
+      # `"#{raw |> safe.html.escape() raw}"` のように後続の暗黙連結が
+      # 未エスケープの Untrusted 値を持ち込むケースを見逃していた）。
+      trailing = substr(rhs_text, close_pos + 1)
+      sub(/^[[:space:]]+/, "", trailing)
+      if (trailing == "") return call_ret
+      trail_type = v2_infer_interp_expr_type(strlit_id, trailing)
+      return v2_binop_type("CONCAT", call_ret, trail_type, AST[strlit_id,"line"])
     }
     return "Unknown"
   }

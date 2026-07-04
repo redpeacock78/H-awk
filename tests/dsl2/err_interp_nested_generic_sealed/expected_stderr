@@ -1,0 +1,1 @@
+error: safe.html.raw argument 1 expects Str, got Result<Int, JsonParseError|JsonTypeError|JsonTooDeepError>
