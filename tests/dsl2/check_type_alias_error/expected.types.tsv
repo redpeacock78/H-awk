@@ -1,0 +1,2 @@
+13	Str
+14	Result<Str, AuthError|NotFoundError>

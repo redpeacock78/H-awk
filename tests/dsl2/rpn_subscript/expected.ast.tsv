@@ -1,0 +1,5 @@
+1	PROGRAM	1	1	2	
+2	LET	1	1	5	x
+3	IDENT	1	0		rows
+4	IDENT	1	0		id
+5	INDEX	1	2	3,4	

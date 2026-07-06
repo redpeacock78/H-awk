@@ -1,0 +1,27 @@
+1	PROGRAM	1	1	2	
+2	FUNC	1	2	3,4	todo_list_html
+3	TYPEANN	1	0		Response
+4	WHEN	2	3	6,7,24	
+5	STRLIT	2	0		"todos:html"
+6	CALL	2	1	5	cache.get
+7	ARM	3	2	8,10	
+8	PAT	3	1	9	ok
+9	IDENT	3	0		r
+10	BLOCK	3	1	11	
+11	WHEN	4	3	12,13,21	
+12	IDENT	4	0		r
+13	ARM	5	2	14,16	
+14	PAT	5	1	15	some
+15	IDENT	5	0		v
+16	BLOCK	5	1	17	
+17	RETURN	6	1	20	
+18	IDENT	6	0		v
+19	CALL	6	1	18	safe.html.raw
+20	CALL	6	1	19	ctx.res.html
+21	ARM	7	2	22,23	
+22	PAT	7	0		none
+23	BLOCK	7	0		
+24	ARM	10	2	25,27	
+25	PAT	10	1	26	ng
+26	IDENT	10	0		_
+27	BLOCK	10	0		

@@ -1,0 +1,1 @@
+function f() -> Int { let x: Int = 1; return x }

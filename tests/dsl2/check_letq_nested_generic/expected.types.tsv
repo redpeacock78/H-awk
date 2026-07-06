@@ -1,0 +1,3 @@
+7	Str
+8	Unknown
+9	Result<Dict<Str, Int>, JsonParseError|JsonTypeError|JsonTooDeepError>

@@ -1,0 +1,4 @@
+1	PROGRAM	1	1	2	
+2	FUNC	1	2	3,4	test
+3	TYPEANN	1	0		Void
+4	RAWLINE	2	0		  a[i] = 1

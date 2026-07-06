@@ -1,0 +1,10 @@
+1	KW	1	1	function
+2	IDENT	1	10	f
+3	LP	1	11	(
+4	RP	1	12	)
+5	ARROW	1	14	->
+6	TYPE	1	17	Float
+7	LBRACE	1	23	{
+8	KW	2	3	return
+9	NUM	2	10	.5
+10	RBRACE	3	1	}

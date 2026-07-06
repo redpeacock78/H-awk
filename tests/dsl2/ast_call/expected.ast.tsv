@@ -1,0 +1,9 @@
+1	PROGRAM	1	1	2	
+2	FUNC	1	2	3,4	run
+3	TYPEANN	1	0		Void
+4	LET	2	1	9	r
+5	IDENT	2	0		x
+6	IDENT	2	0		y
+7	NUMLIT	2	0		1
+8	BINOP	2	2	6,7	+
+9	CALL	2	2	5,8	g

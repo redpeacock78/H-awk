@@ -1,0 +1,12 @@
+1	KW	1	1	function
+2	IDENT	1	10	f
+3	LP	1	11	(
+4	RP	1	12	)
+5	LBRACE	1	14	{
+6	KW	2	1	let
+7	IDENT	2	5	x
+8	OP	2	7	=
+9	NUM	2	9	1
+10	KW	3	1	return
+11	IDENT	3	8	x
+12	RBRACE	4	1	}

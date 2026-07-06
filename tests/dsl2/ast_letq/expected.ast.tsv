@@ -1,0 +1,6 @@
+1	PROGRAM	1	1	2	
+2	FUNC	1	2	3,4	run
+3	TYPEANN	1	0		Void
+4	LETQ	2	1	6	raw_q
+5	STRLIT	2	0		"title"
+6	CALL	2	1	5	ctx.req.query
