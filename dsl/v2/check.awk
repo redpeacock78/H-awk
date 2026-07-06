@@ -449,6 +449,25 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
   return "Unknown"
 }
 
+# 補間内の暗黙 CONCAT（call 直後に続くテキストとの連結。CK/CO/EN）専用の
+# CONCAT 型付け（review ES-2）。v2_binop_type の CONCAT 規則は Untrusted
+# member しか見ておらず、Result</Option< のような sealed 型そのものが
+# concat に巻き込まれると Str に落ちて sealed 性が失われ、呼び出し元
+# v2_cache_strlit_interp_types の一元的な sealed 検査（cannot interpolate
+# sealed ...）が発火しないまま素通りしていた（レビュアー再現:
+# `#{f("x") ctx.req.form("name")}`）。lt/rt のいずれかが（エイリアス展開・
+# union member 単位で）sealed なら、Str に落とさず sealed 型自体をそのまま
+# 返し、呼び出し元の一元検査に判定を委ねる。sealed でなければ既存の
+# v2_binop_type（Untrusted 伝播）をそのまま使う。通常 AST の BINOP
+# （v2_binop_type 直接呼び出し）には影響しない。
+function v2_interp_concat_type(lt, rt, line,    ltr, rtr) {
+  ltr = v2_resolve_sealed(lt)
+  if (v2_is_nullable(ltr)) return ltr
+  rtr = v2_resolve_sealed(rt)
+  if (v2_is_nullable(rtr)) return rtr
+  return v2_binop_type("CONCAT", lt, rt, line)
+}
+
 # INDEX（添字式 target[idx]）の要素型を決定する（BE）。
 # target が Dict<K, V> なら V、List<T> なら T、それ以外・Unknown は Unknown。
 # 添字式の型も検査する（docs/dsl.md:108「Only numeric indices are allowed.
@@ -1120,7 +1139,7 @@ function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, 
     sub(/^[[:space:]]+/, "", trailing); sub(/[[:space:]]+$/, "", trailing)
     if (trailing == "") return call_ret
     trail_type = v2_interp_atom_type(trailing, line)
-    return v2_binop_type("CONCAT", call_ret, trail_type, 0)
+    return v2_interp_concat_type(call_ret, trail_type, line)
   }
   if (text ~ /^[A-Za-z_][A-Za-z0-9_]*$/)   return (text in V2_ENV) ? V2_ENV[text] : "Unknown"
   # リテラル・識別子・認識可能な call のいずれでもない形（`raw ""` の
@@ -1266,7 +1285,7 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
       sub(/^[[:space:]]+/, "", trailing)
       if (trailing == "") return call_ret
       trail_type = v2_infer_interp_expr_type(strlit_id, trailing)
-      return v2_binop_type("CONCAT", call_ret, trail_type, AST[strlit_id,"line"])
+      return v2_interp_concat_type(call_ret, trail_type, AST[strlit_id,"line"])
     }
     return "Unknown"
   }
@@ -1323,7 +1342,7 @@ function v2_infer_interp_expr_type(strlit_id, exprtext,    m, name, argstr, args
     # call の後ろに式が続く場合は awk の暗黙連結（CK）とみなし、同じ CONCAT
     # 型付け規則（brand 喪失 / Untrusted 伝播）を適用する。
     trail_type = v2_infer_interp_expr_type(strlit_id, trailing)
-    return v2_binop_type("CONCAT", call_ret, trail_type, AST[strlit_id,"line"])
+    return v2_interp_concat_type(call_ret, trail_type, AST[strlit_id,"line"])
   }
   # 単純 IDENT（レシーバ・呼び出しなし）は V2_ENV から引く（BL: Untrusted 伝播判定に使う）。
   if (exprtext ~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
