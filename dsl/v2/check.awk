@@ -1371,16 +1371,25 @@ function v2_interp_text_has_untrusted_ref(exprtext,    rest, m, ident, t) {
 # `safe.html.raw("}")` のような文字列リテラルがあると、素朴な [^}]* 走査は
 # その中の } で早期終端してしまう（DM）。start は "#{" の直後の位置。
 # 見つからなければ 0 を返す。
-# 補間式テキストの \" は awk リテラルの `\"` エスケープそのもの（STRLIT の
-# 生テキスト再構築時に非解釈のまま残る 2 文字列。rpn.awk の INTERP_OPEN/CLOSE
-# トークン列再結合を参照）なので、汎用エスケープではなく `\"` の 2 文字を
-# 1 単位として文字列開始/終了のトグルに使う。
+# 生の " を文字列開始/終了のトグルに使い、文字列内の \X は任意の 1 文字を
+# 無条件でエスケープとして読み飛ばす（v2_find_toplevel_pipe /
+# v2_split_toplevel_commas と同じ汎用エスケープ規約。review ES 対応で
+# lex.awk が補間内ネスト文字列を実際に STR トークンとして字句化するように
+# なったため、rpn.awk の再構築テキストにも生の " がそのまま現れる。旧
+# `\"` ペア規約は、STR トークン自身の内容に \" が含まれるケース
+# （f("a\"b") 等）で境界判定のパリティが崩れ、sealed/Untrusted 補間検査を
+# バイパスする不具合があった）。
 function v2_find_interp_close(text, start,    i, c, in_str) {
   in_str = 0
   for (i = start; i <= length(text); i++) {
     c = substr(text, i, 1)
-    if (c == "\\" && substr(text, i + 1, 1) == "\"") { in_str = !in_str; i++; continue }
-    if (!in_str && c == "}") return i
+    if (in_str) {
+      if (c == "\\") { i++; continue }
+      if (c == "\"") in_str = 0
+      continue
+    }
+    if (c == "\"") { in_str = 1; continue }
+    if (c == "}") return i
   }
   return 0
 }
