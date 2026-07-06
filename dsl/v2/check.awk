@@ -455,16 +455,24 @@ function v2_binop_type(op, lt, rt, line,    is_num_op) {
 # concat に巻き込まれると Str に落ちて sealed 性が失われ、呼び出し元
 # v2_cache_strlit_interp_types の一元的な sealed 検査（cannot interpolate
 # sealed ...）が発火しないまま素通りしていた（レビュアー再現:
-# `#{f("x") ctx.req.form("name")}`）。lt/rt のいずれかが（エイリアス展開・
-# union member 単位で）sealed なら、Str に落とさず sealed 型自体をそのまま
-# 返し、呼び出し元の一元検査に判定を委ねる。sealed でなければ既存の
-# v2_binop_type（Untrusted 伝播）をそのまま使う。通常 AST の BINOP
-# （v2_binop_type 直接呼び出し）には影響しない。
-function v2_interp_concat_type(lt, rt, line,    ltr, rtr) {
-  ltr = v2_resolve_sealed(lt)
-  if (v2_is_nullable(ltr)) return ltr
-  rtr = v2_resolve_sealed(rt)
-  if (v2_is_nullable(rtr)) return rtr
+# `#{f("x") ctx.req.form("name")}`）。lt/rt のいずれかが sealed member を
+# 持てば、Str に落とさず見つかった sealed 型自体をそのまま返し、呼び出し元の
+# 一元検査に判定を委ねる。sealed でなければ既存の v2_binop_type（Untrusted
+# 伝播）をそのまま使う。通常 AST の BINOP（v2_binop_type 直接呼び出し）には
+# 影響しない。
+#
+# v2_is_nullable（union の全 member が Option/Result であることを要求。
+# ?= の coalesce 判定用）ではなく v2_find_sealed_member（union の一部の
+# member だけが sealed でも検出できる、再帰的・エイリアス展開込みの走査。
+# v2_check_pipe_rules の pipe input 検査と同じ規約）を使う。混在 union
+# （`Str | Result<Untrusted<Str>, ParseError>` 等）だと v2_is_nullable は
+# 全 member 要求で 0 を返してしまい sealed member が素通りしていた
+# （review ES-2b）。
+function v2_interp_concat_type(lt, rt, line,    mt) {
+  mt = v2_find_sealed_member(lt, "^(Result|Option)<", 0)
+  if (mt != "") return mt
+  mt = v2_find_sealed_member(rt, "^(Result|Option)<", 0)
+  if (mt != "") return mt
   return v2_binop_type("CONCAT", lt, rt, line)
 }
 
