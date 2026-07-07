@@ -88,8 +88,11 @@ for dir in tests/unit/dsl/*/; do
   else
     set +e
     out=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>/dev/null); ret=$?
-    printf '%s\n' "$out" | gawk --lint -e 'BEGIN{exit 0}' -f /dev/stdin < /dev/null >/dev/null 2>&1
+    lint_tmp=$(mktemp)
+    printf '%s\n' "$out" > "$lint_tmp"
+    gawk --lint -e 'BEGIN{exit 0}' -f "$lint_tmp" < /dev/null >/dev/null 2>&1
     lint=$?
+    rm -f "$lint_tmp"
     set -e
     if [[ $ret -eq 0 && $lint -eq 0 ]]; then
       PASS=$((PASS + 1))
