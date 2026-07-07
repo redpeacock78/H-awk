@@ -9,14 +9,19 @@
 # FUNC 本体内の文は v2_e_func() が AST の子を直接たどって出力するため、
 # V2_LINEAST には登録されない（登録されるのはトップレベル文のみ）。
 
-function v2_emit(   l, id) {
+function v2_emit(   l, id, k) {
   v2_collect_hoists()
   for (l = 1; l <= V2_NLINES; l++) {
     if (l in PASS) {
       print PASS[l]
-    } else if (l in V2_LINEAST) {
-      id = V2_LINEAST[l]
-      v2_e(id, (AST[id,"kind"] == "FUNC") ? 0 : 1)
+    } else if (l in V2_LINEAST_N) {
+      # 同一行に複数のトップレベル文が並ぶ場合（parse.awk 側で
+      # V2_LINEAST[line, k] のリストとして蓄積済み。botfix wave 19）、
+      # 記録順にすべて emit する。
+      for (k = 1; k <= V2_LINEAST_N[l]; k++) {
+        id = V2_LINEAST[l, k]
+        v2_e(id, (AST[id,"kind"] == "FUNC") ? 0 : 1)
+      }
     }
   }
 }
@@ -47,6 +52,12 @@ function v2_collect_hoists() {
 
 function v2_hoist_add(func_id, name) {
   if (func_id == 0) return   # トップレベルはホイスト対象の関数が無い（素の awk グローバル変数）
+  # 仮引数と同名の let/when 束縛・一時変数はホイストしない（Codex review
+  # 指摘, botfix wave 19）。重複してホイストすると `function f(x,    x)`
+  # のような仮引数重複になり gawk が構文エラーで拒否する。同名再利用は
+  # 仮引数のスロットをそのまま使い回す（v1 も同じ変数名を再代入するだけで
+  # 別スロットを持たないため、この扱いで挙動は一致する）。
+  if ((func_id, name) in FUNC_PARAM_SEEN) return
   if ((func_id, name) in HOIST_SEEN) return
   HOIST_SEEN[func_id, name] = 1
   HOIST[func_id] = (func_id in HOIST) ? HOIST[func_id] ", " name : name
@@ -55,6 +66,13 @@ function v2_hoist_add(func_id, name) {
 function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, child, resolved, tmpvar) {
   kind = AST[id,"kind"]
   next_func = (kind == "FUNC") ? id : func_id
+
+  if (kind == "FUNC") {
+    for (k = 1; k <= AST[id,"nc"]; k++) {
+      child = AST[id,"c" k]
+      if (AST[child,"kind"] == "PARAM") FUNC_PARAM_SEEN[id, AST[child,"text"]] = 1
+    }
+  }
 
   if (kind == "LET" || kind == "LETQ")
     v2_hoist_add(next_func, AST[id,"text"])
@@ -299,6 +317,26 @@ function v2_e_when(id, depth,    tmp, ttype, is_option, k, j, arm, pat, blk, \
 
 # ─── 式 emit ────────────────────────────────────────────────────
 
+# BINOP の子ノード child_id を emit し、必要なら丸括弧で包む。
+# parent_op: 親 BINOP の演算子テキスト（"CONCAT" 含む）。is_right: child が
+# 右オペランドなら 1。子が BINOP でない、または優先順位表
+# （rpn.awk の V2_OP_PREC/V2_OP_ASSOC、グローバル共有）に無い演算子
+# （生成できないはず）なら素通しする。子の優先順位が親より低い場合、または
+# 同順位で親が左結合かつ子が右オペランドの場合（`a - (b - c)` を
+# `a - b - c` に潰さないため）に括弧を付ける（Codex review 指摘,
+# botfix wave 19）。
+function v2_e_binop_child(child_id, parent_op, is_right,    s, ctext, cprec, pprec, s2) {
+  s = v2_e_expr(child_id)
+  if (AST[child_id,"kind"] != "BINOP") return s
+  ctext = AST[child_id,"text"]
+  cprec = V2_OP_PREC[ctext]
+  pprec = V2_OP_PREC[parent_op]
+  if (cprec == "" || pprec == "") return s
+  if (cprec + 0 < pprec + 0) return "(" s ")"
+  if (cprec + 0 == pprec + 0 && is_right && V2_OP_ASSOC[parent_op] == "L") return "(" s ")"
+  return s
+}
+
 function v2_e_expr(id,    kind, s, k) {
   kind = AST[id,"kind"]
   if (kind == "NUMLIT" || kind == "IDENT" || kind == "REGEXLIT" || kind == "RAW")
@@ -312,12 +350,23 @@ function v2_e_expr(id,    kind, s, k) {
     # であり、awk 上の実演算子ではない。"CONCAT" という語をそのまま出力すると
     # 生成コードが構文エラーになるため、演算子テキストを出さずに空白区切りで
     # 連結する（v1 の暗黙連結出力と同じ見た目。app.awk 実測で発覚）。
+    #
+    # 子が BINOP のときは演算子の優先順位を比較し、ソース側の丸括弧で
+    # 意図されたグルーピングを保つ（Codex review 指摘, botfix wave 19。
+    # 従来は子の優先順位を無視して常にフラットに出力しており、
+    # `(a + b) * c` が `a + b * c` に化けて意味が変わっていた）。
     if (AST[id,"text"] == "CONCAT")
-      return v2_e_expr(AST[id,"c1"]) " " v2_e_expr(AST[id,"c2"])
-    return v2_e_expr(AST[id,"c1"]) " " AST[id,"text"] " " v2_e_expr(AST[id,"c2"])
+      return v2_e_binop_child(AST[id,"c1"], "CONCAT", 0) " " v2_e_binop_child(AST[id,"c2"], "CONCAT", 1)
+    return v2_e_binop_child(AST[id,"c1"], AST[id,"text"], 0) " " AST[id,"text"] " " v2_e_binop_child(AST[id,"c2"], AST[id,"text"], 1)
   }
-  if (kind == "UNOP")
-    return AST[id,"text"] v2_e_expr(AST[id,"c1"])
+  if (kind == "UNOP") {
+    # rpn.awk は単項 -/! を内部マーカー "NEG"/"NOT" として演算子スタックに
+    # 積む（v2_shunt_expr）。AST の text にはこのマーカー文字列がそのまま
+    # 残るため、実際の awk 演算子へ写像してから出力する（さもないと
+    # `return -a` が `return NEGa` という無関係の識別子参照になる。
+    # Codex review 指摘, botfix wave 19）。
+    return (AST[id,"text"] == "NEG" ? "-" : "!") v2_e_expr(AST[id,"c1"])
+  }
   if (kind == "INDEX")
     return v2_e_expr(AST[id,"c1"]) "[" v2_e_expr(AST[id,"c2"]) "]"
   if (kind == "PIPE")     return v2_e_pipe(id)
@@ -340,28 +389,52 @@ function v2_e_expr(id,    kind, s, k) {
 # 代入・return 等を組み立てる）。名前解決は v2_e_dispatch と同じ規則
 # （ドット呼び出しは ns::dispatch、option.some/none は直呼び出し）だが、
 # LHS を第 1 引数として注入する点だけが異なる。
-function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, s, k, tmpvar, call_expr) {
+# pipe RHS の実引数リストを組み立てる。generic dispatch（rpn.awk が
+# `f<T>(...)` を `f_t("T", ...)` へ正規化した名前。SIG の規約上 arg1 が
+# 型引数文字列で arg2 以降が実引数）は、その型引数（rhs_id の c1）を
+# 常に先頭に残し、pipe の LHS はその直後（実引数の先頭）に挿入する
+# （Codex review 指摘, botfix wave 19。旧実装は generic 判定をせず LHS を
+# 無条件に全引数の前へ差し込んでいたため、`raw |> json.decode<T>()` が
+# `json::dispatch("decode_t", raw, "T")` という型引数と入力が入れ替わった
+# 呼び出しになっていた）。
+function v2_e_pipe_args(rhs_id, lhs_out, is_generic,    k, n, s) {
+  n = AST[rhs_id,"nc"]
+  if (is_generic && n >= 1) {
+    s = v2_e_expr(AST[rhs_id,"c1"]) ", " lhs_out
+    for (k = 2; k <= n; k++) s = s ", " v2_e_expr(AST[rhs_id,"c" k])
+  } else {
+    s = lhs_out
+    for (k = 1; k <= n; k++) s = s ", " v2_e_expr(AST[rhs_id,"c" k])
+  }
+  return s
+}
+
+function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, is_generic, tmpvar, call_expr) {
   lhs_id = AST[id,"c1"]
   rhs_id = AST[id,"c2"]
   lhs_out = v2_e_expr(lhs_id)
   name = AST[rhs_id,"text"]
+  # check.awk の未登録 generic dispatch 判定（BJ）と同じ規約: 名前が "_t"
+  # で終わるものだけを generic 呼び出しとみなす。
+  is_generic = (name ~ /_t$/)
 
   if (name == "option.some") {
-    s = "option_some_make(" lhs_out
-    for (k = 1; k <= AST[rhs_id,"nc"]; k++) s = s ", " v2_e_expr(AST[rhs_id,"c" k])
-    call_expr = s ")"
+    call_expr = "option_some_make(" v2_e_pipe_args(rhs_id, lhs_out, 0) ")"
+  } else if (name == "ctx.res.redirect" && AST[rhs_id,"nc"] == 0) {
+    # ctx.res.redirect(url) の直呼び特例（status 302 既定付与）を pipe
+    # 経路にも適用する（Codex review 指摘, botfix wave 19。旧実装は
+    # v2_e_dispatch の直呼び経路にしかこの分岐が無く、`url |> ctx.res.redirect()`
+    # は status 引数無しで dispatch され、ctx が arity 2 で登録している
+    # res.redirect の実引数が 1 個足りなくなっていた）。
+    call_expr = "ctx::dispatch(\"res.redirect\", " lhs_out ", 302)"
   } else {
     dot = index(name, ".")
     if (dot > 0) {
       ns   = substr(name, 1, dot - 1)
       path = substr(name, dot + 1)
-      s = ns "::dispatch(\"" path "\", " lhs_out
-      for (k = 1; k <= AST[rhs_id,"nc"]; k++) s = s ", " v2_e_expr(AST[rhs_id,"c" k])
-      call_expr = s ")"
+      call_expr = ns "::dispatch(\"" path "\", " v2_e_pipe_args(rhs_id, lhs_out, is_generic) ")"
     } else {
-      s = name "(" lhs_out
-      for (k = 1; k <= AST[rhs_id,"nc"]; k++) s = s ", " v2_e_expr(AST[rhs_id,"c" k])
-      call_expr = s ")"
+      call_expr = name "(" v2_e_pipe_args(rhs_id, lhs_out, is_generic) ")"
     }
   }
 
@@ -375,10 +448,36 @@ function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, s, k, tm
 # 対応表の移植元: dsl/desugar_nullcoalesce.awk, docs/dsl.md 480-497 行。
 # `lhs ?? rhs` を一時変数 _ds_tc_N = lhs として直前に出力し、式としては
 # `(tmp != "" ? tmp : rhs)` の三項式テキストを返す。
+# AST 部分木 id が PIPE/COALESCE を含むか（評価時に一時変数への代入行を
+# 無条件 print する副作用を持つか）を再帰的に調べる。
+function v2_expr_has_side_effect(id,    k) {
+  if (AST[id,"kind"] == "PIPE" || AST[id,"kind"] == "COALESCE") return 1
+  for (k = 1; k <= AST[id,"nc"]; k++)
+    if (v2_expr_has_side_effect(AST[id,"c" k])) return 1
+  return 0
+}
+
 function v2_e_coalesce(id,    tmp, lhs_out, rhs_out) {
   tmp = TC_TMPVAR[id]
   lhs_out = v2_e_expr(AST[id,"c1"])
   print v2_indent(V2_CUR_DEPTH) tmp " = " lhs_out
+  # RHS が PIPE/COALESCE を含む場合、それらの evaluate（v2_e_expr）は自身の
+  # 一時変数代入行を print という副作用で先出しする。単純な三項式のテキスト
+  # に埋め込むと、その print は LHS が非空でも無条件に実行されてしまい
+  # `??` の短絡評価（LHS 非空なら RHS を評価しない）に反する（Codex review
+  # 指摘, botfix wave 19）。RHS にこの副作用がある場合だけ、tmp が空のとき
+  # のみ実行する if ブロックへ評価を遅延させる。副作用の無い通常の RHS
+  # （リテラル・単純な CALL 等）は従来どおり三項式のまま出力する
+  # （awk の `? :` 自体は短絡評価のため、単純な CALL は元々問題ない）。
+  if (v2_expr_has_side_effect(AST[id,"c2"])) {
+    print v2_indent(V2_CUR_DEPTH) "if (" tmp " == \"\") {"
+    V2_CUR_DEPTH++
+    rhs_out = v2_e_expr(AST[id,"c2"])
+    print v2_indent(V2_CUR_DEPTH) tmp " = " rhs_out
+    V2_CUR_DEPTH--
+    print v2_indent(V2_CUR_DEPTH) "}"
+    return tmp
+  }
   rhs_out = v2_e_expr(AST[id,"c2"])
   return "(" tmp " != \"\" ? " tmp " : " rhs_out ")"
 }
