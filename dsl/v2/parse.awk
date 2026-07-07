@@ -196,6 +196,12 @@ function v2_stmt_dispatch(marker, i, parent, toplevel,    id, ret) {
   else if (marker == "EXPR")          ret = v2_parse_expr_stmt(i, parent)
   else if (marker == "RAWLINE")       ret = v2_parse_rawline(i, parent)
   else if (marker == "TYPEDECL")      ret = v2_parse_typedecl(i, parent)
+  # INDEX_ASSIGN（添字代入文）は v2_parse_func 本体ループにも同じ分岐が
+  # あるが、when アーム本体（v2_p_block 経由）やトップレベル（v2_parse 本体
+  # ループ経由）はいずれも v2_stmt_dispatch だけを通るため、ここに分岐が
+  # 無いと "else return i" に落ちて文全体が無診断で消える（Task 11 で
+  # `row["id"] = "#{...}"` が when アーム内で消失する不具合として発覚）。
+  else if (marker == "INDEX_ASSIGN")  ret = v2_parse_index_assign(i, parent)
   else return i
   if (toplevel) V2_LINEAST[AST[id,"line"]] = id
   return ret
