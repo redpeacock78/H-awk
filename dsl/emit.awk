@@ -333,6 +333,19 @@ function v2_e_when(id, depth,    tmp, ttype, is_option, k, arm, pat, tag, ok_k) 
   ttype = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
   is_option = (ttype ~ /^Option</)
 
+  # 対象式の型が未解決（未注釈関数呼び出しなど）だと ttype は Unknown/Any の
+  # ままで is_option が常に 0（Result 扱い）に落ちる。腕タグに some/none が
+  # あれば Option 対象と確定できるので、型が解決できない場合のみ腕タグに
+  # フォールバックする（when_triple_nested で発覚した誤 result_ok emit の修正）。
+  if (ttype !~ /^(Option|Result)</) {
+    for (k = 2; k <= AST[id,"nc"]; k++) {
+      arm = AST[id,"c" k]
+      pat = AST[arm,"c1"]
+      tag = AST[pat,"text"]
+      if (tag == "some" || tag == "none") { is_option = 1; break }
+    }
+  }
+
   # ok/some 腕は常に最初の条件として emit する（Codex review 4642730010
   # 指摘 + v1 実測: dsl/desugar_match.awk は ok/some を専用スロット
   # （_DS_match_ok_var/_DS_match_branch）に保持し、ng 腕の登録配列とは
