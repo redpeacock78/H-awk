@@ -218,7 +218,11 @@ function v2_e_let(id, depth,    varname, k, c, expr_id, ekind, typeann_id) {
     # _ds_desugar_let_init。Dict は v1 でもマーカーを立てないため対称に
     # しない。型注釈なしの `let rows = []` は v1 実測でもマーカーを
     # 立てないため区別する。Codex review 4643328293 指摘）。
-    if (ekind == "LISTLIT" && typeann_id != 0 && AST[typeann_id,"text"] ~ /^List</)
+    # 判定は annotation の生テキスト前方一致ではなく、alias 展開後の
+    # 解決型で行う（F3 対応。旧実装は `type L = List<Int>; let xs: L = []`
+    # のような alias 越しの List で "List<" 前方一致が外れ、checker は
+    # alias 済み List を受理しているのに marker だけ欠落していた）。
+    if (ekind == "LISTLIT" && typeann_id != 0 && v2_resolve_sealed(AST[typeann_id,"text"]) ~ /^List</)
       print v2_indent(depth) varname "[\"__json_type\"] = \"array\""
   } else {
     print v2_indent(depth) varname " = " v2_e_expr(expr_id)
@@ -385,13 +389,19 @@ function v2_e_when(id, depth,    tmp, ttype, is_option, k, arm, pat, tag, ok_k) 
 
 # BINOP の子ノード child_id を emit し、必要なら丸括弧で包む。
 # parent_op: 親 BINOP の演算子テキスト（"CONCAT" 含む）。is_right: child が
-# 右オペランドなら 1。子が BINOP でない、または優先順位表
-# （rpn.awk の V2_OP_PREC/V2_OP_ASSOC、グローバル共有）に無い演算子
-# （生成できないはず）なら素通しする。子の優先順位が親より低い場合、または
-# 同順位で親が左結合かつ子が右オペランドの場合（`a - (b - c)` を
+# 右オペランドなら 1。子が BINOP でも UNOP（NEG/NOT）でもない、または
+# 優先順位表（rpn.awk の V2_OP_PREC/V2_OP_ASSOC、グローバル共有）に無い
+# 演算子（生成できないはず）なら素通しする。子の優先順位が親より低い場合、
+# または同順位で親が左結合かつ子が右オペランドの場合（`a - (b - c)` を
 # `a - b - c` に潰さないため）に括弧を付ける（Codex review 指摘,
 # botfix wave 19）。
-function v2_e_binop_child(child_id, parent_op, is_right,    s, ctext, cprec, pprec, assoc) {
+# 子が UNOP（NEG/NOT）の場合も同じ優先順位比較を適用する（F1 (b) 対応:
+# NEG/NOT を awk 準拠の優先順位（`*`/`/`より高く`^`より低い）に変更した
+# ため、`(-a) ^ 2` のように明示括弧で NEG を先に確定させた AST
+# （BINOP ^ の子が UNOP NEG）を無条件に "-a^2" と素通しすると、awk 側は
+# `^` が NEG より高優先度と解釈して `-(a^2)` に化けてしまう。旧実装は
+# BINOP 子しか判定しておらず UNOP 子は無条件素通しだった）。
+function v2_e_binop_child(child_id, parent_op, is_right,    s, ctext, cprec, pprec, assoc, ckind) {
   s = v2_e_expr(child_id)
   # 親が単項 NEG/NOT で、生成された子テキストが同じ演算子文字で始まる場合
   # （`-(-a)` の子が UNOP NEG で `-a` を返す、またはリテラル畳み込みで
@@ -404,7 +414,8 @@ function v2_e_binop_child(child_id, parent_op, is_right,    s, ctext, cprec, ppr
       (parent_op == "NOT" && substr(s, 1, 1) == "!")) {
     return "(" s ")"
   }
-  if (AST[child_id,"kind"] != "BINOP") return s
+  ckind = AST[child_id,"kind"]
+  if (ckind != "BINOP" && ckind != "UNOP") return s
   ctext = AST[child_id,"text"]
   cprec = V2_OP_PREC[ctext]
   pprec = V2_OP_PREC[parent_op]
@@ -452,11 +463,13 @@ function v2_e_expr(id,    kind, s, k) {
     # Codex review 指摘, botfix wave 19）。
     #
     # オペランドが BINOP のときは v2_e_binop_child で括弧要否を判定する
-    # （rev-pre12 review Critical 1）。NEG/NOT は演算子表で優先順位 90
-    # （全 BINOP より高い）に登録されているため、BINOP オペランドは
-    # 常に括弧が付く。旧実装はここを無条件 v2_e_expr にしていたため
-    # `!(a && b)` が `!a && b` に、`-(a + b)` が `-a + b` になり、
-    # 無診断で意味が変わっていた。
+    # （rev-pre12 review Critical 1）。NEG/NOT は演算子表で優先順位 75
+    # （`^`=80 より低く `*`/`/`=70 より高い、awk 準拠。F1 (b) 対応）に
+    # 登録されているため、`*`/`/`/`+`/`-`/`||`/`&&` 等の低優先度 BINOP
+    # オペランドには常に括弧が付き、`^` オペランドには付かない（awk
+    # 自身が `-a^2` を `-(a^2)` と解釈するのと一致させるため）。旧実装は
+    # ここを無条件 v2_e_expr にしていたため `!(a && b)` が `!a && b` に、
+    # `-(a + b)` が `-a + b` になり、無診断で意味が変わっていた。
     return (AST[id,"text"] == "NEG" ? "-" : "!") v2_e_binop_child(AST[id,"c1"], AST[id,"text"], 0)
   }
   if (kind == "INDEX")
@@ -512,11 +525,13 @@ function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, is_gener
 
   if (name == "option.some") {
     call_expr = "option_some_make(" v2_e_pipe_args(rhs_id, lhs_out, 0) ")"
-  } else if (name == "ctx.res.json" && AST[rhs_id,"nc"] == 0 && TYPEOF[lhs_id] ~ /^(Dict|List)</) {
+  } else if (name == "ctx.res.json" && AST[rhs_id,"nc"] == 0 && v2_resolve_sealed(TYPEOF[lhs_id]) ~ /^(Dict|List)</) {
     # ctx.res.json(dictOrList) の Dict/List 短絡を pipe 経路にも適用する
     # （coderabbit review 4642730010 指摘。旧実装は v2_e_dispatch の直呼び
     # 経路にしかこの分岐が無く、`x |> ctx.res.json()` だけ json(res, x) では
     # なく ctx::dispatch("res.json", x) に落ちて出力形式がずれていた）。
+    # TYPEOF は alias 展開前の生テキスト（`type L = List<Int>` の "L" 等）を
+    # 保持し得るため v2_resolve_sealed で展開してから判定する（F3 対応）。
     call_expr = "json(res, " lhs_out ")"
   } else if (name == "ctx.res.redirect" && AST[rhs_id,"nc"] == 0) {
     # ctx.res.redirect(url) の直呼び特例（status 302 既定付与）を pipe
@@ -597,7 +612,11 @@ function v2_e_dispatch(id,    name, dot, ns, path, s, k, arg1type) {
   path = substr(name, dot + 1)
 
   if (name == "ctx.res.json" && AST[id,"nc"] == 1) {
-    arg1type = TYPEOF[AST[id,"c1"]]
+    # alias 展開後の解決型で判定する（F3 対応。`type L = List<Int>; let
+    # xs: L = []` の xs は TYPEOF が未展開の "L" のままのため、生テキスト
+    # 前方一致では通らず、直接 `List<Int>` と書いた場合とだけ lowering
+    # 分岐が変わっていた）。
+    arg1type = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
     if (arg1type ~ /^(Dict|List)</) return "json(res, " v2_e_expr(AST[id,"c1"]) ")"
   }
 
@@ -659,9 +678,9 @@ function v2_e_interp_build(content, line,    parts, np, j, fmt, args, litpart, e
 # parts[奇数] = リテラル、parts[偶数] = 式テキスト。返り値は常に奇数。
 # n はローカル変数なので再帰（ネスト補間展開）から呼んでも他フレームの
 # parts[] を汚さない。
-function v2_e_split_interp(content, parts,    i, c, len, cur, depth, n, in_str) {
+function v2_e_split_interp(content, parts,    i, c, len, cur, depth, n, in_str, in_regex, prevc) {
   len = length(content)
-  cur = ""; depth = 0; n = 0; in_str = 0
+  cur = ""; depth = 0; n = 0; in_str = 0; in_regex = 0
   for (i = 1; i <= len; i++) {
     c = substr(content, i, 1)
     if (depth == 0) {
@@ -679,12 +698,26 @@ function v2_e_split_interp(content, parts,    i, c, len, cur, depth, n, in_str) 
       # 終端記号として誤カウントされると、式が途中で切れてしまう。
       # v2_e_expand_nested_str 側の生の `"` トグル・`\X` 2 文字エスケープ
       # 規約に合わせ、ここでも同じ規約でスキップする）。
+      # 正規表現リテラル（`#{x ~ /[}]/}` 等）も同じ理由で深度計算から除外
+      # する（F2 対応。旧実装は文字列リテラルしか除外しておらず、正規表現
+      # 内の `}` が補間の終端記号として誤カウントされ、式が途中で切れて
+      # 壊れた awk を無診断で出力していた）。判定は v2_e_interp_scan_calls
+      # と同じ「直前の非空白文字が値で終わっていなければ `/` は正規表現の
+      # 開始」ヒューリスティック（v2_e_interp_prev_nonspace）を使う。
       if (in_str) {
         cur = cur c
         if (c == "\\" && i < len) { cur = cur substr(content, i + 1, 1); i++ }
         else if (c == "\"") in_str = 0
+      } else if (in_regex) {
+        cur = cur c
+        if (c == "\\" && i < len) { cur = cur substr(content, i + 1, 1); i++ }
+        else if (c == "/") in_regex = 0
       } else if (c == "\"") {
         in_str = 1
+        cur = cur c
+      } else if (c == "/") {
+        prevc = v2_e_interp_prev_nonspace(content, i)
+        if (prevc !~ /[A-Za-z0-9_)\]"]/) in_regex = 1
         cur = cur c
       } else if (c == "{") { depth++; cur = cur c }
       else if (c == "}") {
