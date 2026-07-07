@@ -128,9 +128,25 @@ function v2_e(id, depth,    kind) {
   else if (kind == "INDEX_ASSIGN") v2_e_index_assign(id, depth)
   else if (kind == "WHEN")         v2_e_when(id, depth)
   else if (kind == "EXPR")         print v2_indent(depth) v2_e_expr(AST[id,"c1"])
-  else if (kind == "RAWLINE")      print AST[id,"text"]
+  else if (kind == "RAWLINE")      v2_e_rawline(id)
   else if (kind == "TYPEDECL")     return   # コンパイル時の型情報のみ、実行コードは生成しない
   else v2_diag(AST[id,"line"], 1, "emit: unsupported node kind: " kind)
+}
+
+# classify: transform|validator|sanitizer|sink は Pass 1（check.awk の
+# SIG[name,"classify"] 収集）で情報を吸収済みの関数注釈行であり、実行コード
+# ではない。dsl/desugar.awk:202 と同じ正規表現でこの行だけ出力をスキップ
+# する（v1 も同じ行を素通りさせず捨てている）。
+#
+# それ以外の RAWLINE はそのまま出力する（review C1: pipe 実装により
+# classify: 行を含む関数を pipe 経由で呼ぶ入力が、以前の
+# "unsupported node kind: PIPE" 診断という唯一のガードを失い、無診断で
+# 構文的に無効な awk を出す regression になっていた）。
+function v2_e_rawline(id,    text) {
+  text = AST[id,"text"]
+  if (text ~ /^[[:space:]]*classify:[[:space:]]*(transform|validator|sanitizer|sink)[[:space:]]*$/)
+    return
+  print text
 }
 
 function v2_e_block(blk, depth,    k) {
