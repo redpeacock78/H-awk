@@ -720,6 +720,17 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
       }
       t = rt
     } else {
+      # `&&` / `||` の RHS が pipe/coalesce hoisting を要する形（PIPE や
+      # COALESCE を子孫に含む）だと、emit 側は一時変数への代入 print を
+      # 式評価順に無条件で発行するため、短絡評価で本来スキップされるはずの
+      # 副作用（pred(b) 等）が LHS の真偽に関係なく毎回実行されてしまう
+      # （F4 対応、fail-safe 方針 (b): 対応不能として診断し拒否する。
+      # LHS 側は元々 && / || 自体でも常に評価されるため対象外）。
+      if ((AST[id,"text"] == "&&" || AST[id,"text"] == "||") && \
+          v2_expr_has_side_effect(AST[id,"c2"])) {
+        v2_diag(AST[id,"line"], 1, \
+          "'" AST[id,"text"] "' right-hand side must not require pipe/coalesce hoisting (short-circuit would be broken)")
+      }
       t = v2_binop_type(AST[id,"text"], lt, rt, AST[id,"line"])
     }
   } else if (kind == "COALESCE") {
@@ -1014,12 +1025,25 @@ function v2_dataflow_ret(name, input_type, decl_ret,    cls, ret) {
 # 対応する閉じ括弧が見つからなければ text の末尾+1（=全体を argstr とみなす）
 # を返す。呼び出し元は open_pos に「call 名 + '(' までの長さ」（m[0] の長さ）
 # を渡す想定。
-function v2_match_call_close(text, open_pos,    i, c, depth, close_pos) {
+# 文字列リテラル内の '(' / ')' は括弧の深さ計算から除外する（F6 対応。
+# 旧実装は引用符を認識せず、`safe.html.raw("(")` のような引数中の生の
+# '(' も深さにカウントしてしまい、対応する ')' を1個手前で確定させて
+# 閉じ探索が実際の呼び出し末尾を突き抜けていた。呼び出し元が argstr を
+# `substr(text, open_pos+1, close_pos-open_pos-1)` で切り出す際に余分な
+# ')' が argstr の外へ漏れ、出力に ')' が1個過剰になる）。
+function v2_match_call_close(text, open_pos,    i, c, depth, close_pos, in_str) {
   depth = 1
   close_pos = 0
+  in_str = 0
   for (i = open_pos + 1; i <= length(text); i++) {
     c = substr(text, i, 1)
-    if (c == "(") depth++
+    if (in_str) {
+      if (c == "\\" && i < length(text)) { i++; continue }
+      if (c == "\"") in_str = 0
+      continue
+    }
+    if (c == "\"") in_str = 1
+    else if (c == "(") depth++
     else if (c == ")") { depth--; if (depth == 0) { close_pos = i; break } }
   }
   if (close_pos == 0) close_pos = length(text) + 1
@@ -1186,7 +1210,7 @@ function v2_interp_atom_type(text, line,    m, name, argstr, args, n, i, atype, 
 
 # 文字列 s をトップレベル（丸括弧の深さ 0、ダブルクォート文字列の外）のカンマで
 # 分割する（補間内 call 形の実引数リスト分割用。BW）。
-function v2_split_toplevel_commas(s, out,    i, c, depth, in_str, cur, n) {
+function v2_split_toplevel_commas(s, out,    i, c, depth, in_str, cur, n, sub_i, glen) {
   n = 0; depth = 0; in_str = 0; cur = ""
   for (i = 1; i <= length(s); i++) {
     c = substr(s, i, 1)
@@ -1195,6 +1219,23 @@ function v2_split_toplevel_commas(s, out,    i, c, depth, in_str, cur, n) {
       if (c == "\\" && i < length(s)) { i++; cur = cur substr(s, i, 1) }
       else if (c == "\"") in_str = 0
       continue
+    }
+    # ジェネリクス呼び出し `name<Dict<Str,Int>>(...)` の `<...>` 部分は
+    # 丸括弧の深さを増やさないため、素朴な深さ追跡だと内側のカンマ
+    # （`Dict<Str,Int>` の `,`）を実引数の区切りと誤認する（F5 対応）。
+    # `<` は比較演算子とも共有されるトークンのため、既存のジェネリクス
+    # call ヘッダ判定（v2_interp_match_call_head、rpn.awk 側の判定と同じ
+    # 規約）を流用し、実際に `name<T>(` の形として認識できたときだけ
+    # `name<T>` 全体を 1 チャンクとして cur に取り込んで読み飛ばす
+    # （続く `(` は次の反復で通常どおり depth++ される）。
+    if (c ~ /[A-Za-z_]/) {
+      sub_i = substr(s, i)
+      if (v2_interp_match_call_head(sub_i) && V2_INTERP_CALL_GENERIC != "") {
+        glen = V2_INTERP_CALL_OPEN - 1
+        cur = cur substr(s, i, glen)
+        i += glen - 1
+        continue
+      }
     }
     if      (c == "\"") { in_str = 1; cur = cur c }
     else if (c == "(")  { depth++; cur = cur c }
