@@ -1049,16 +1049,31 @@ function v2_rpn_index_assign(i, eq_pos,    line, name, lbrack, rbrack, j) {
   return j + 1
 }
 
-function v2_rpn_stmt(i,    j, line, eq_pos) {
+function v2_rpn_stmt(i,    j, line, eq_pos, prefix) {
   line = TOK[i,"line"]
 
   eq_pos = v2_index_assign_eq(i)
   if (eq_pos > 0) return v2_rpn_index_assign(i, eq_pos)
 
   if (v2_is_rawline(i) || v2_is_awk_stmt_head(i) || v2_is_compound_assign(i)) {
-    # 解釈不能トークン列を RAWLINE マーカーで素通し
-    v2_emit_rpn("MARKER",  "RAWLINE",             line, "")
-    v2_emit_rpn("OPERAND", V2_LINE_TEXT[line], line, "")
+    # 解釈不能トークン列を RAWLINE マーカーで素通しする。ただし、トークン i
+    # より前にこの物理行の非空白コンテンツ（DSL 構文。典型例:
+    # `function f(x: Int) -> Int { if (x) {...} return 2 }` の関数ヘッダ）
+    # がある場合、V2_LINE_TEXT[line] をそのまま使うとヘッダごと再出力され
+    # 構文エラーになる（Codex review 4642730010 指摘）。かといって i の
+    # 列以降だけを切り出すと、この行の末尾が同時に関数の閉じ `}` を
+    # 兼ねているケースで v2_rpn_func 側の FUNC_CLOSE 検出と二重化し
+    # ブレース収支が壊れる（safe な行分割の一般解が無い）。fail-safe
+    # 原則に従い、テキスト再構成を試みず診断を出して安全側に倒す。
+    prefix = substr(V2_LINE_TEXT[line], 1, TOK[i,"col"] - 1)
+    if (prefix !~ /^[ \t]*$/) {
+      v2_diag(line, TOK[i,"col"], "raw awk statement sharing a source line with a DSL construct is not supported; move it to its own line")
+      v2_emit_rpn("MARKER",  "RAWLINE", line, "")
+      v2_emit_rpn("OPERAND", "", line, "")
+    } else {
+      v2_emit_rpn("MARKER",  "RAWLINE",             line, "")
+      v2_emit_rpn("OPERAND", V2_LINE_TEXT[line], line, "")
+    }
     j = i
     # この行に含まれる `{`/`}` の収支を数え、関数 body 走査側の未閉鎖
     # ブレース深さに反映する（review EJ）。`if (x) { ... }` のように開き

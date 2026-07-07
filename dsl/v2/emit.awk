@@ -684,7 +684,15 @@ function v2_e_interp_expr(text, line,    text2, pos, lhs, rhs, lhs_out, name, \
     lhs_out = v2_e_interp_expr(lhs, line)
 
     matched = v2_interp_match_call_head(rhs)
-    if (!matched) return lhs_out " |> " v2_e_interp_expr(rhs, line)
+    if (!matched) {
+      # 補間内 pipe の RHS が呼び出し形式でない場合（`"#{x |> y}"`）、
+      # AST 経路の v2_check_pipe_rules と同じ規則で診断する（Codex review
+      # 4642730010 指摘。旧実装はここで DSL の `|>` をそのまま出力に
+      # 素通ししており、コンパイルは成功するのに gawk が構文解析できない
+      # awk が生成されていた）。
+      v2_diag(line, 1, "pipe right-hand side must be a call (`expr |> f(args)`)")
+      return lhs_out
+    }
 
     name     = V2_INTERP_CALL_NAME
     genarg   = V2_INTERP_CALL_GENERIC
@@ -704,13 +712,30 @@ function v2_e_interp_expr(text, line,    text2, pos, lhs, rhs, lhs_out, name, \
   return v2_e_interp_scan_calls(text2, line)
 }
 
+# text 中の位置 pos より前で最初に見つかる非空白文字を返す（無ければ ""）。
+# v2_e_interp_scan_calls の正規表現リテラル判定ヒューリスティックが使う。
+function v2_e_interp_prev_nonspace(text, pos,    j, c) {
+  for (j = pos - 1; j >= 1; j--) {
+    c = substr(text, j, 1)
+    if (c !~ /[ \t]/) return c
+  }
+  return ""
+}
+
 # text（#{ } の直接ネストを既に展開済み）を左から走査し、識別子で始まる
 # call 形（ドット連結・generic を含む）を見つけたら都度ディスパッチ変換に
-# 置き換える。文字列リテラル内部はスキップする（誤検出防止）。
-function v2_e_interp_scan_calls(text, line,    out, i, n, c, in_str, chunk_start, \
+# 置き換える。文字列リテラル内部はスキップする（誤検出防止）。正規表現
+# リテラル内部もスキップする（Codex review 4642730010 指摘: `x ~
+# /safe.html.raw()/` のようなパターン中の呼び出し風テキストを書き換えると
+# 正規表現の中身が変わってしまう）。awk の `/` は直前トークンが値
+# （識別子・数字・`)`・`]`・文字列末尾の `"`）で終わる場合は除算、それ以外
+# （演算子・開き括弧・行頭など）の直後は正規表現の開始という構文的な曖昧さが
+# あるため、直前の非空白文字で判定する保守的なヒューリスティックを使う
+# （完全な bracket 式 `[...]` 内の `/` 対応までは行わない）。
+function v2_e_interp_scan_calls(text, line,    out, i, n, c, in_str, in_regex, prevc, chunk_start, \
                                  sub_i, name, genarg, open_rel, close_rel, abs_close, \
                                  argstr, cargs, ncargs, k, call_out) {
-  out = ""; n = length(text); i = 1; in_str = 0; chunk_start = 1
+  out = ""; n = length(text); i = 1; in_str = 0; in_regex = 0; chunk_start = 1
   while (i <= n) {
     c = substr(text, i, 1)
     if (in_str) {
@@ -719,7 +744,17 @@ function v2_e_interp_scan_calls(text, line,    out, i, n, c, in_str, chunk_start
       i++
       continue
     }
+    if (in_regex) {
+      if (c == "\\" && i < n) { i += 2; continue }
+      if (c == "/") in_regex = 0
+      i++
+      continue
+    }
     if (c == "\"") { in_str = 1; i++; continue }
+    if (c == "/") {
+      prevc = v2_e_interp_prev_nonspace(text, i)
+      if (prevc !~ /[A-Za-z0-9_)\]"]/) { in_regex = 1; i++; continue }
+    }
     if (c ~ /[A-Za-z_]/) {
       sub_i = substr(text, i)
       if (v2_interp_match_call_head(sub_i)) {
