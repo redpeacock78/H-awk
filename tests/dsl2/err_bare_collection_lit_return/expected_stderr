@@ -1,0 +1,1 @@
+error: empty list literal is only allowed as a 'let' initializer (e.g. 'let x: List<T> = []')
