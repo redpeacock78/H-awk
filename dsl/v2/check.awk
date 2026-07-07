@@ -1623,7 +1623,8 @@ function v2_check_bare_collection_lit(id,    k) {
   if ((AST[id,"kind"] == "LISTLIT" || AST[id,"kind"] == "DICTLIT") && !(id in V2_LET_LIT_OK)) {
     v2_diag(AST[id,"line"], 1, \
       "empty " (AST[id,"kind"] == "LISTLIT" ? "list" : "dict") \
-      " literal is only allowed as a 'let' initializer (e.g. 'let x: List<T> = []')")
+      " literal is only allowed as a 'let' initializer (e.g. " \
+      (AST[id,"kind"] == "LISTLIT" ? "'let x: List<T> = []'" : "'let x: Dict<Str, T> = {}'") ")")
   }
   for (k = 1; k <= AST[id,"nc"]; k++) v2_check_bare_collection_lit(AST[id,"c" k])
 }
