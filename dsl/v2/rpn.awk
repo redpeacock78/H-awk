@@ -173,15 +173,21 @@ function v2_scan_generic_arg(k,    idx, end) {
 # できない = v2_index_assign_eq の既存判断 review EB と同じ）。カンマが
 # 無い、またはネストした "[" を含む、または行内で閉じない場合は 0 を返す
 # （呼び出し元は通常の単純添字として v2_pop_bracket 経路に委ねる）。
-function v2_find_multidim_close(open_pos, line,    j, depth, has_comma) {
+function v2_find_multidim_close(open_pos, line,    j, depth, paren_depth, brace_depth, has_comma) {
   depth = 1
+  paren_depth = 0
+  brace_depth = 0
   has_comma = 0
   for (j = open_pos + 1; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
-    if      (TOK[j,"kind"] == "LBRACK") depth++
+    if      (TOK[j,"kind"] == "LP") paren_depth++
+    else if (TOK[j,"kind"] == "RP" && paren_depth > 0) paren_depth--
+    else if (TOK[j,"kind"] == "LBRACE") brace_depth++
+    else if (TOK[j,"kind"] == "RBRACE" && brace_depth > 0) brace_depth--
+    else if (TOK[j,"kind"] == "LBRACK") depth++
     else if (TOK[j,"kind"] == "RBRACK") {
       depth--
       if (depth == 0) return has_comma ? j : 0
-    } else if (TOK[j,"kind"] == "COMMA" && depth == 1) has_comma = 1
+    } else if (TOK[j,"kind"] == "COMMA" && depth == 1 && paren_depth == 0 && brace_depth == 0) has_comma = 1
   }
   return 0
 }
@@ -313,8 +319,13 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
             # （pre-Task12 botfix item4。coderabbit 指摘: 汎用 "unmatched
             # ')'" は偶然の一致でこのケースを保証できないため、専用文言に
             # する）。
-            if (TOK[k,"kind"] == "INTERP_OPEN")
+            if (TOK[k,"kind"] == "INTERP_OPEN") {
+              # 診断直後に走査を打ち切る（coderabbit review 4642730010 指摘:
+              # 続行すると内側の INTERP_CLOSE を外側の終端として誤消費し、
+              # 後続で無関係な "unmatched ')'" 等の連鎖診断を招く）。
               v2_diag(line, TOK[k,"col"], "nested string interpolation is not supported")
+              return
+            }
             # 補間内のネストした文字列リテラル（review ES で lex.awk が STR
             # トークンとして認識するようになった）は、引用符を落とさず生の
             # " で再ラップして渡す（落とすと内部の } が補間終端と誤認される）。
@@ -368,6 +379,16 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
       if (prevkind == "IDENT" && TOK[k-2,"kind"] != "DOT") {
         multidim_close = v2_find_multidim_close(k, line)
         if (multidim_close > 0) {
+          # base が宣言済み DSL List/Dict（V2_RPN_DSLVAR）のときは、この
+          # RAW passthrough が check.awk の添字検査（要素数・キー型）を
+          # 素通りさせてしまう（RAW は Unknown 型のため代入・戻り値検査も
+          # 効かない。Codex review 4642730010 指摘）。DSL コレクションへの
+          # 多次元添字は v1 でも未定義のため、診断を出して安全側に倒す
+          # （fail-safe 原則。v1 実測: DSL 宣言された List/Dict をこの形で
+          # 添字アクセスする構文自体が存在しないため比較対象が無い）。
+          if (TOK[k-1,"text"] in V2_RPN_DSLVAR) {
+            v2_diag(line, TOK[k,"col"], "multidimensional subscript is not supported on DSL List/Dict '" TOK[k-1,"text"] "'")
+          }
           RPN[RPN["n"],"kind"] = "RAW"
           RPN[RPN["n"],"val"]  = TOK[k-1,"text"] "[" v2_read_subscript_text(k, multidim_close) "]"
           k = multidim_close
@@ -536,8 +557,20 @@ function v2_is_arm_pat(i,    j) {
 # emit 後の生成コードのブレースが不整合になっていた）。
 function v2_rpn_emit_rawbrace_close(line) {
   v2_emit_rpn("MARKER",  "RAWLINE", line, "")
-  v2_emit_rpn("OPERAND", "}",       line, "")
+  v2_emit_rpn("OPERAND", (line in V2_LINE_TEXT) ? V2_LINE_TEXT[line] : "}", line, "")
   V2_RPN_RAWBRACE_DEPTH--
+}
+
+# 位置 pos の RBRACE がその行で唯一のトークン（単独 `}` 行）かどうかを返す
+# （coderabbit review 4642730010 指摘: `} else {` のような同一行継続を
+# 単独閉じブレースと誤認識すると v2_rpn_emit_rawbrace_close が `}` だけを
+# emit し、続く `else {` 側が別途行全体を RAWLINE 化するため `}` が二重に
+# 出力されブレース収支も壊れる。単独行のときだけ専用処理へ進み、それ以外は
+# v2_rpn_stmt に委ねて行全体を 1 個の RAWLINE として扱う）。
+function v2_rpn_is_rawbrace_close_line(pos,    line, k) {
+  line = TOK[pos,"line"]
+  for (k = pos + 1; k <= TOK["n"] && TOK[k,"line"] == line; k++) return 0
+  return 1
 }
 
 # KW に応じてサブパーサを選択するディスパッチャ
@@ -555,6 +588,7 @@ function v2_rpn_dispatch(i,    kw) {
   # 独自に FUNC_CLOSE 判定を兼ねるため、この分岐より前で RBRACE を
   # 消費しておりここには到達しない）。
   if (TOK[i,"kind"] == "RBRACE" && V2_RPN_RAWBRACE_DEPTH > 0) {
+    if (!v2_rpn_is_rawbrace_close_line(i)) return v2_rpn_stmt(i)
     v2_rpn_emit_rawbrace_close(TOK[i,"line"])
     return i + 1
   }
@@ -659,6 +693,10 @@ function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
       # 自体が AST から消えて emit 後のブレースが不整合になるため、
       # RAWLINE として emit してから深さを 1 減らす（pre-Task12 botfix 3）。
       if (V2_RPN_RAWBRACE_DEPTH > 0) {
+        if (!v2_rpn_is_rawbrace_close_line(j)) {
+          j = v2_rpn_stmt(j)
+          continue
+        }
         v2_rpn_emit_rawbrace_close(TOK[j,"line"])
         j++
         continue

@@ -6,10 +6,10 @@ function handler(    _ds_mc_1, user, e) {
   if (result_ok(_ds_mc_1)) {
     user = result_val(_ds_mc_1)
     return ctx::dispatch("res.json", user)
-  } else if (result_err_type(_ds_mc_1) == "AuthError") {
+  } else if (awk::result_err_type(_ds_mc_1) == "AuthError") {
     e = result_err(_ds_mc_1)
     return ctx::dispatch("res.status", 401)
-  } else if (result_err_type(_ds_mc_1) == "NotFoundError") {
+  } else if (awk::result_err_type(_ds_mc_1) == "NotFoundError") {
     e = result_err(_ds_mc_1)
     return ctx::dispatch("res.status", 404)
   } else {

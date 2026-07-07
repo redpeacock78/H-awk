@@ -274,49 +274,72 @@ function v2_e_index_assign(id, depth) {
 #                                 して else に展開。Result 系で束縛があれば
 #                                 result_err、Option 系は束縛不可（parse 時点
 #                                 で拒否済み）。
-function v2_e_when(id, depth,    tmp, ttype, is_option, k, j, arm, pat, blk, \
-                    tag, typeann_id, bind_id, pc, bind_name, opened, cond) {
+# when の 1 腕を emit する（v2_e_when から ok/some 腕・その他腕の両方の
+# 走査で呼ばれる共通処理）。
+function v2_e_when_arm(arm, tmp, is_option, depth, opened,    pat, blk, tag, \
+                        typeann_id, bind_id, pc, j, bind_name, cond) {
+  pat = AST[arm,"c1"]
+  blk = AST[arm,"c2"]
+  tag = AST[pat,"text"]
+
+  bind_id = 0; typeann_id = 0
+  for (j = 1; j <= AST[pat,"nc"]; j++) {
+    pc = AST[pat,"c" j]
+    if      (AST[pc,"kind"] == "IDENT")   bind_id = pc
+    else if (AST[pc,"kind"] == "TYPEANN") typeann_id = pc
+  }
+  bind_name = (bind_id != 0) ? AST[bind_id,"text"] : ""
+
+  if (tag == "ok" || tag == "some") {
+    cond = (tag == "ok") ? "result_ok(" tmp ")" : "option_some(" tmp ")"
+    print v2_indent(depth) (opened ? "} else if (" : "if (") cond ") {"
+    if (bind_name != "")
+      print v2_indent(depth + 1) bind_name " = " ((tag == "ok") ? "result_val(" tmp ")" : "option_val(" tmp ")")
+    v2_e_block(blk, depth + 1)
+  } else if (tag == "ng" && typeann_id != 0) {
+    print v2_indent(depth) (opened ? "} else if (" : "if (") "awk::result_err_type(" tmp ") == \"" AST[typeann_id,"text"] "\") {"
+    if (bind_name != "") print v2_indent(depth + 1) bind_name " = result_err(" tmp ")"
+    v2_e_block(blk, depth + 1)
+  } else {
+    # catch-all（無型 ng / none / default / _）。check.awk の網羅性検査で
+    # 他の ng 腕に対しては必ず最後であることが保証されている。
+    print v2_indent(depth) (opened ? "} else {" : "if (1) {")
+    if (bind_name != "" && !is_option)
+      print v2_indent(depth + 1) bind_name " = result_err(" tmp ")"
+    v2_e_block(blk, depth + 1)
+  }
+}
+
+function v2_e_when(id, depth,    tmp, ttype, is_option, k, arm, pat, tag, ok_k) {
   tmp = WHEN_TMPVAR[id]
   print v2_indent(depth) tmp " = " v2_e_expr(AST[id,"c1"])
   ttype = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
   is_option = (ttype ~ /^Option</)
 
-  opened = 0
+  # ok/some 腕は常に最初の条件として emit する（Codex review 4642730010
+  # 指摘 + v1 実測: dsl/desugar_match.awk は ok/some を専用スロット
+  # （_DS_match_ok_var/_DS_match_branch）に保持し、ng 腕の登録配列とは
+  # 独立に扱うため、ソース上で catch-all（default:/ng e:）が ok より前に
+  # 書かれていても常に ok の成功条件を先頭で判定する。v2 が単純にソース
+  # 順で if/else if チェーンを組み立てると、catch-all の `if (1)` が
+  # 先に確定し後続の ok 腕が到達不能になっていた）。
+  ok_k = 0
   for (k = 2; k <= AST[id,"nc"]; k++) {
     arm = AST[id,"c" k]
     pat = AST[arm,"c1"]
-    blk = AST[arm,"c2"]
     tag = AST[pat,"text"]
+    if (tag == "ok" || tag == "some") { ok_k = k; break }
+  }
 
-    bind_id = 0; typeann_id = 0
-    for (j = 1; j <= AST[pat,"nc"]; j++) {
-      pc = AST[pat,"c" j]
-      if      (AST[pc,"kind"] == "IDENT")   bind_id = pc
-      else if (AST[pc,"kind"] == "TYPEANN") typeann_id = pc
+  if (ok_k != 0) {
+    v2_e_when_arm(AST[id,"c" ok_k], tmp, is_option, depth, 0)
+    for (k = 2; k <= AST[id,"nc"]; k++) {
+      if (k == ok_k) continue
+      v2_e_when_arm(AST[id,"c" k], tmp, is_option, depth, 1)
     }
-    bind_name = (bind_id != 0) ? AST[bind_id,"text"] : ""
-
-    if (tag == "ok" || tag == "some") {
-      cond = (tag == "ok") ? "result_ok(" tmp ")" : "option_some(" tmp ")"
-      print v2_indent(depth) (opened ? "} else if (" : "if (") cond ") {"
-      opened = 1
-      if (bind_name != "")
-        print v2_indent(depth + 1) bind_name " = " ((tag == "ok") ? "result_val(" tmp ")" : "option_val(" tmp ")")
-      v2_e_block(blk, depth + 1)
-    } else if (tag == "ng" && typeann_id != 0) {
-      print v2_indent(depth) (opened ? "} else if (" : "if (") "result_err_type(" tmp ") == \"" AST[typeann_id,"text"] "\") {"
-      opened = 1
-      if (bind_name != "") print v2_indent(depth + 1) bind_name " = result_err(" tmp ")"
-      v2_e_block(blk, depth + 1)
-    } else {
-      # catch-all（無型 ng / none / default / _）。check.awk の網羅性検査で
-      # 必ず最後の腕であることが保証されている。
-      print v2_indent(depth) (opened ? "} else {" : "if (1) {")
-      opened = 1
-      if (bind_name != "" && !is_option)
-        print v2_indent(depth + 1) bind_name " = result_err(" tmp ")"
-      v2_e_block(blk, depth + 1)
-    }
+  } else {
+    for (k = 2; k <= AST[id,"nc"]; k++)
+      v2_e_when_arm(AST[id,"c" k], tmp, is_option, depth, (k > 2))
   }
   print v2_indent(depth) "}"
 }
@@ -333,6 +356,17 @@ function v2_e_when(id, depth,    tmp, ttype, is_option, k, j, arm, pat, blk, \
 # botfix wave 19）。
 function v2_e_binop_child(child_id, parent_op, is_right,    s, ctext, cprec, pprec, assoc) {
   s = v2_e_expr(child_id)
+  # 親が単項 NEG/NOT で、生成された子テキストが同じ演算子文字で始まる場合
+  # （`-(-a)` の子が UNOP NEG で `-a` を返す、またはリテラル畳み込みで
+  # 既に "-5" のような負数テキストが返る場合）、括弧で区切らずに連結すると
+  # `--a` になり gawk が前置デクリメント演算子として解釈してしまう
+  # （Codex review 指摘: 変数を書き換えた上で `a - 1` を返す誤動作になる）。
+  # NOT/NOT の "!!a" は awk 上は無害だが、同じ規則で括弧を付けても
+  # 意味は変わらないため対称に扱う。
+  if ((parent_op == "NEG" && substr(s, 1, 1) == "-") || \
+      (parent_op == "NOT" && substr(s, 1, 1) == "!")) {
+    return "(" s ")"
+  }
   if (AST[child_id,"kind"] != "BINOP") return s
   ctext = AST[child_id,"text"]
   cprec = V2_OP_PREC[ctext]
@@ -441,6 +475,12 @@ function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, is_gener
 
   if (name == "option.some") {
     call_expr = "option_some_make(" v2_e_pipe_args(rhs_id, lhs_out, 0) ")"
+  } else if (name == "ctx.res.json" && AST[rhs_id,"nc"] == 0 && TYPEOF[lhs_id] ~ /^(Dict|List)</) {
+    # ctx.res.json(dictOrList) の Dict/List 短絡を pipe 経路にも適用する
+    # （coderabbit review 4642730010 指摘。旧実装は v2_e_dispatch の直呼び
+    # 経路にしかこの分岐が無く、`x |> ctx.res.json()` だけ json(res, x) では
+    # なく ctx::dispatch("res.json", x) に落ちて出力形式がずれていた）。
+    call_expr = "json(res, " lhs_out ")"
   } else if (name == "ctx.res.redirect" && AST[rhs_id,"nc"] == 0) {
     # ctx.res.redirect(url) の直呼び特例（status 302 既定付与）を pipe
     # 経路にも適用する（Codex review 指摘, botfix wave 19。旧実装は
@@ -582,9 +622,9 @@ function v2_e_interp_build(content, line,    parts, np, j, fmt, args, litpart, e
 # parts[奇数] = リテラル、parts[偶数] = 式テキスト。返り値は常に奇数。
 # n はローカル変数なので再帰（ネスト補間展開）から呼んでも他フレームの
 # parts[] を汚さない。
-function v2_e_split_interp(content, parts,    i, c, len, cur, depth, n) {
+function v2_e_split_interp(content, parts,    i, c, len, cur, depth, n, in_str) {
   len = length(content)
-  cur = ""; depth = 0; n = 0
+  cur = ""; depth = 0; n = 0; in_str = 0
   for (i = 1; i <= len; i++) {
     c = substr(content, i, 1)
     if (depth == 0) {
@@ -597,7 +637,19 @@ function v2_e_split_interp(content, parts,    i, c, len, cur, depth, n) {
         cur = cur c
       }
     } else {
-      if (c == "{") { depth++; cur = cur c }
+      # 補間式内の文字列リテラル（`#{ f("}") }` 等）は深度計算から除外する
+      # （coderabbit review 4642730010 指摘。文字列内の `{`/`}` が補間の
+      # 終端記号として誤カウントされると、式が途中で切れてしまう。
+      # v2_e_expand_nested_str 側の生の `"` トグル・`\X` 2 文字エスケープ
+      # 規約に合わせ、ここでも同じ規約でスキップする）。
+      if (in_str) {
+        cur = cur c
+        if (c == "\\" && i < len) { cur = cur substr(content, i + 1, 1); i++ }
+        else if (c == "\"") in_str = 0
+      } else if (c == "\"") {
+        in_str = 1
+        cur = cur c
+      } else if (c == "{") { depth++; cur = cur c }
       else if (c == "}") {
         depth--
         if (depth == 0) { parts[++n] = cur; cur = "" }
