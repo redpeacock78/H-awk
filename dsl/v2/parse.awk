@@ -187,6 +187,12 @@ function v2_panic_skip(i) {
 # 出力するため、V2_LINEAST 経由のトップレベル行走査で二重に処理する必要が無い
 # （review C1: v2_p_block 経由の登録がトップレベル走査に漏出していた不具合の修正）。
 function v2_stmt_dispatch(marker, i, parent, toplevel,    id, ret) {
+  # 暗黙の契約（coderabbit 指摘, pre-Task12 botfix）: `id = V2_NAST + 1` は
+  # 「各サブパーサ（v2_parse_let/v2_parse_return/... 各 v2_parse_* / v2_p_*）が
+  # 呼び出し直後に真っ先に自分の文ノードを 1 個作る」という前提に依存する。
+  # サブパーサ側がノード作成より前に他のノードを作る、または複数ノードを
+  # 作ってから文ノードを作る実装に変えると、この id はその文ノードを指さなく
+  # なり V2_LINEAST の行対応がずれる。
   id = V2_NAST + 1
   if (marker == "FUNC_OPEN")          ret = v2_parse_func(i, parent)
   else if (marker == "LET" || \
@@ -342,6 +348,9 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
 # 返す: STMT_END の RPN インデックス
 function v2_parse_let(i, parent,    varname, let_id, typeann_id, j, expr_id) {
   varname = RPN[i+1,"val"]
+  # v2_stmt_dispatch の `id = V2_NAST + 1` 契約: この v2_node 呼び出しが
+  # 本関数内で最初に作るノードでなければならない（file:parse.awk 冒頭の
+  # v2_stmt_dispatch 参照）。
   let_id  = v2_node(RPN[i,"val"], RPN[i,"line"])   # LET または LETQ
   AST[let_id,"text"] = varname
 
