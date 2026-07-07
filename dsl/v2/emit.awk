@@ -200,19 +200,29 @@ function v2_e_func(id, depth,    k, c, kind, params, first, sig) {
   print v2_indent(depth) "}"
 }
 
-function v2_e_let(id, depth,    varname, k, c, expr_id, ekind) {
+function v2_e_let(id, depth,    varname, k, c, expr_id, ekind, typeann_id) {
   varname = AST[id,"text"]
-  expr_id = 0
+  expr_id = 0; typeann_id = 0
   for (k = 1; k <= AST[id,"nc"]; k++) {
     c = AST[id,"c" k]
-    if (AST[c,"kind"] != "TYPEANN") expr_id = c
+    if (AST[c,"kind"] == "TYPEANN") typeann_id = c
+    else expr_id = c
   }
   if (expr_id == 0) return   # 裸宣言: ホイストのみ、文は出力しない
   ekind = AST[expr_id,"kind"]
-  if (ekind == "DICTLIT" || ekind == "LISTLIT")
+  if (ekind == "DICTLIT" || ekind == "LISTLIT") {
     print v2_indent(depth) "delete " varname
-  else
+    # 明示的に `let xs: List<T> = []` と注釈された空リストのみ、JSON
+    # エンコーダ（json_encode_any）が配列と判定できるよう __json_type
+    # マーカーを立てる（対応表移植元: dsl/desugar_let.awk:473
+    # _ds_desugar_let_init。Dict は v1 でもマーカーを立てないため対称に
+    # しない。型注釈なしの `let rows = []` は v1 実測でもマーカーを
+    # 立てないため区別する。Codex review 4643328293 指摘）。
+    if (ekind == "LISTLIT" && typeann_id != 0 && AST[typeann_id,"text"] ~ /^List</)
+      print v2_indent(depth) varname "[\"__json_type\"] = \"array\""
+  } else {
     print v2_indent(depth) varname " = " v2_e_expr(expr_id)
+  }
 }
 
 # ─── `?=` 安全アンラップ文（LETQ） ─────────────────────────────────
@@ -291,10 +301,17 @@ function v2_e_when_arm(arm, tmp, is_option, depth, opened,    pat, blk, tag, \
   bind_name = (bind_id != 0) ? AST[bind_id,"text"] : ""
 
   if (tag == "ok" || tag == "some") {
-    cond = (tag == "ok") ? "result_ok(" tmp ")" : "option_some(" tmp ")"
+    # 述語・アンラップ関数は腕自身のタグ文字列ではなく対象式の実家系
+    # （is_option）で選ぶ（v1 実測: dsl/desugar_match.awk は ok/some を
+    # 単一の "ok" スロットへ merge し、対象型から決めた option_val/
+    # result_val を使う。旧実装は tag=="ok" かどうかだけで判定していたため、
+    # `Result` を `some` 腕 + `ng` catch-all で受けると、実際は
+    # result_ok/result_val であるべき箇所に option_some/option_val を
+    # 誤って emit していた。Codex review 4643328293 指摘）。
+    cond = is_option ? "option_some(" tmp ")" : "result_ok(" tmp ")"
     print v2_indent(depth) (opened ? "} else if (" : "if (") cond ") {"
     if (bind_name != "")
-      print v2_indent(depth + 1) bind_name " = " ((tag == "ok") ? "result_val(" tmp ")" : "option_val(" tmp ")")
+      print v2_indent(depth + 1) bind_name " = " (is_option ? "option_val(" tmp ")" : "result_val(" tmp ")")
     v2_e_block(blk, depth + 1)
   } else if (tag == "ng" && typeann_id != 0) {
     print v2_indent(depth) (opened ? "} else if (" : "if (") "awk::result_err_type(" tmp ") == \"" AST[typeann_id,"text"] "\") {"
@@ -338,8 +355,15 @@ function v2_e_when(id, depth,    tmp, ttype, is_option, k, arm, pat, tag, ok_k) 
       v2_e_when_arm(AST[id,"c" k], tmp, is_option, depth, 1)
     }
   } else {
+    # ok/some 腕が無い場合も、成功時は何もしない暗黙の腕を合成してから
+    # catch-all 腕チェーンへつなぐ（v1 実測: dsl/desugar_match.awk は
+    # ng のみの match でも常に `if (result_ok(tmp)) {\n} else {...}` の形に
+    # ラップし、成功値では catch-all 本体を実行しない。旧実装は catch-all
+    # を `if (1) {` として無条件展開しており、成功値でも result_err/
+    # ng ハンドラが走っていた。Codex review 4643328293 指摘）。
+    print v2_indent(depth) "if (" (is_option ? "option_some(" tmp ")" : "result_ok(" tmp ")") ") {"
     for (k = 2; k <= AST[id,"nc"]; k++)
-      v2_e_when_arm(AST[id,"c" k], tmp, is_option, depth, (k > 2))
+      v2_e_when_arm(AST[id,"c" k], tmp, is_option, depth, 1)
   }
   print v2_indent(depth) "}"
 }
