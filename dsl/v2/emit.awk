@@ -55,8 +55,14 @@ function v2_hoist_add(func_id, name) {
   # 仮引数と同名の let/when 束縛・一時変数はホイストしない（Codex review
   # 指摘, botfix wave 19）。重複してホイストすると `function f(x,    x)`
   # のような仮引数重複になり gawk が構文エラーで拒否する。同名再利用は
-  # 仮引数のスロットをそのまま使い回す（v1 も同じ変数名を再代入するだけで
-  # 別スロットを持たないため、この扱いで挙動は一致する）。
+  # 仮引数のスロットをそのまま使い回す。
+  # 訂正（rev-pre12 review Minor）: 「v1 も同じ変数名を再代入するだけで
+  # 別スロットを持たないため挙動一致」という以前のコメントは事実誤認
+  # だった。v1（`gawk -f dsl/desugar.awk`）で同パターンを実測すると、
+  # v1 も同じ形の重複仮引数（`function f(x,    x)`）を生成し gawk の
+  # 構文エラーになる（v1・v2 共通の既存バグ）。この修正は「v1 と同じ
+  # 挙動にする」ものではなく、生成コードが物理的に構文エラーになる
+  # P1 の欠陥を独自に修正したもの。
   if ((func_id, name) in FUNC_PARAM_SEEN) return
   if ((func_id, name) in HOIST_SEEN) return
   HOIST_SEEN[func_id, name] = 1
@@ -325,7 +331,7 @@ function v2_e_when(id, depth,    tmp, ttype, is_option, k, j, arm, pat, blk, \
 # 同順位で親が左結合かつ子が右オペランドの場合（`a - (b - c)` を
 # `a - b - c` に潰さないため）に括弧を付ける（Codex review 指摘,
 # botfix wave 19）。
-function v2_e_binop_child(child_id, parent_op, is_right,    s, ctext, cprec, pprec, s2) {
+function v2_e_binop_child(child_id, parent_op, is_right,    s, ctext, cprec, pprec, assoc) {
   s = v2_e_expr(child_id)
   if (AST[child_id,"kind"] != "BINOP") return s
   ctext = AST[child_id,"text"]
@@ -333,7 +339,15 @@ function v2_e_binop_child(child_id, parent_op, is_right,    s, ctext, cprec, ppr
   pprec = V2_OP_PREC[parent_op]
   if (cprec == "" || pprec == "") return s
   if (cprec + 0 < pprec + 0) return "(" s ")"
-  if (cprec + 0 == pprec + 0 && is_right && V2_OP_ASSOC[parent_op] == "L") return "(" s ")"
+  if (cprec + 0 == pprec + 0) {
+    assoc = V2_OP_ASSOC[parent_op]
+    # 左結合演算子は右オペランドが同順位のとき（`a - (b - c)` を
+    # `a - b - c` に潰さないため）、右結合演算子は左オペランドが
+    # 同順位のとき（`(a ^ b) ^ c` を `a ^ b ^ c` に潰さないため。
+    # rev-pre12 review Critical 2）に括弧が要る。
+    if (is_right && assoc == "L") return "(" s ")"
+    if (!is_right && assoc == "R") return "(" s ")"
+  }
   return s
 }
 
@@ -365,7 +379,14 @@ function v2_e_expr(id,    kind, s, k) {
     # 残るため、実際の awk 演算子へ写像してから出力する（さもないと
     # `return -a` が `return NEGa` という無関係の識別子参照になる。
     # Codex review 指摘, botfix wave 19）。
-    return (AST[id,"text"] == "NEG" ? "-" : "!") v2_e_expr(AST[id,"c1"])
+    #
+    # オペランドが BINOP のときは v2_e_binop_child で括弧要否を判定する
+    # （rev-pre12 review Critical 1）。NEG/NOT は演算子表で優先順位 90
+    # （全 BINOP より高い）に登録されているため、BINOP オペランドは
+    # 常に括弧が付く。旧実装はここを無条件 v2_e_expr にしていたため
+    # `!(a && b)` が `!a && b` に、`-(a + b)` が `-a + b` になり、
+    # 無診断で意味が変わっていた。
+    return (AST[id,"text"] == "NEG" ? "-" : "!") v2_e_binop_child(AST[id,"c1"], AST[id,"text"], 0)
   }
   if (kind == "INDEX")
     return v2_e_expr(AST[id,"c1"]) "[" v2_e_expr(AST[id,"c2"]) "]"
