@@ -1,0 +1,4 @@
+function f() -> Int {
+  let x = 1
+  return x :: 2
+}

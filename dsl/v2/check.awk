@@ -814,8 +814,16 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
       ct = TYPEOF[AST[id,"c1"]]
       if (ct != "" && V2_CUR_FUNC_RET != "" && V2_CUR_FUNC_RET != "Unknown" && \
           !v2_type_compat(V2_CUR_FUNC_RET, ct)) {
-        v2_diag(AST[id,"line"], 1, \
-          "function " V2_CUR_FUNC_NAME " expects return " V2_CUR_FUNC_RET ", got " ct)
+        # Void 戻り値関数のメッセージのみ "return" を含めない
+        # （v1 dsl/desugar.awk:457-461 の _ds_check_return と同一の文言。
+        #  Void 以外は "expects return TYPE" 形式。Task 12 互換ゲート）。
+        if (V2_CUR_FUNC_RET == "Void") {
+          v2_diag(AST[id,"line"], 1, \
+            "function " V2_CUR_FUNC_NAME " expects Void, got " ct)
+        } else {
+          v2_diag(AST[id,"line"], 1, \
+            "function " V2_CUR_FUNC_NAME " expects return " V2_CUR_FUNC_RET ", got " ct)
+        }
       }
     }
     t = ""

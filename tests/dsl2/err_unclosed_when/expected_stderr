@@ -1,1 +1,1 @@
-error: unclosed 'when' (missing 'end')
+error: unclosed when block (missing 'end')
