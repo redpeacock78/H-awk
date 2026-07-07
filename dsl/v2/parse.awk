@@ -180,16 +180,45 @@ function v2_panic_skip(i) {
 # ─── 文ディスパッチ ────────────────────────────────────────────────
 
 # MARKER に応じてサブパーサを選択し、末尾トークン位置を返す
-function v2_stmt_dispatch(marker, i, parent) {
-  if (marker == "FUNC_OPEN")          return v2_parse_func(i, parent)
-  if (marker == "LET" || \
-      marker == "LETQ")               return v2_parse_let(i, parent)
-  if (marker == "RETURN")             return v2_parse_return(i, parent)
-  if (marker == "WHEN")               return v2_p_when(i, parent)
-  if (marker == "EXPR")               return v2_parse_expr_stmt(i, parent)
-  if (marker == "RAWLINE")            return v2_parse_rawline(i, parent)
-  if (marker == "TYPEDECL")           return v2_parse_typedecl(i, parent)
-  return i
+# toplevel が真のときのみ、生成した文ノードの ID を V2_LINEAST[開始行] に記録する
+# （emit の行順マージ用）。v2_p_block（when アーム本体など、FUNC/PROGRAM 直下では
+# ないネスト文脈）からの呼び出しでは toplevel を渡さないため記録されない。
+# ネスト文はそれぞれの親ノード（FUNC・WHEN 等）の emit が AST を直接たどって
+# 出力するため、V2_LINEAST 経由のトップレベル行走査で二重に処理する必要が無い
+# （review C1: v2_p_block 経由の登録がトップレベル走査に漏出していた不具合の修正）。
+function v2_stmt_dispatch(marker, i, parent, toplevel,    id, ret) {
+  # 暗黙の契約（coderabbit 指摘, pre-Task12 botfix）: `id = V2_NAST + 1` は
+  # 「各サブパーサ（v2_parse_let/v2_parse_return/... 各 v2_parse_* / v2_p_*）が
+  # 呼び出し直後に真っ先に自分の文ノードを 1 個作る」という前提に依存する。
+  # サブパーサ側がノード作成より前に他のノードを作る、または複数ノードを
+  # 作ってから文ノードを作る実装に変えると、この id はその文ノードを指さなく
+  # なり V2_LINEAST の行対応がずれる。
+  id = V2_NAST + 1
+  if (marker == "FUNC_OPEN")          ret = v2_parse_func(i, parent)
+  else if (marker == "LET" || \
+           marker == "LETQ")          ret = v2_parse_let(i, parent)
+  else if (marker == "RETURN")        ret = v2_parse_return(i, parent)
+  else if (marker == "WHEN")          ret = v2_p_when(i, parent)
+  else if (marker == "EXPR")          ret = v2_parse_expr_stmt(i, parent)
+  else if (marker == "RAWLINE")       ret = v2_parse_rawline(i, parent)
+  else if (marker == "TYPEDECL")      ret = v2_parse_typedecl(i, parent)
+  # INDEX_ASSIGN（添字代入文）は v2_parse_func 本体ループにも同じ分岐が
+  # あるが、when アーム本体（v2_p_block 経由）やトップレベル（v2_parse 本体
+  # ループ経由）はいずれも v2_stmt_dispatch だけを通るため、ここに分岐が
+  # 無いと "else return i" に落ちて文全体が無診断で消える（Task 11 で
+  # `row["id"] = "#{...}"` が when アーム内で消失する不具合として発覚）。
+  else if (marker == "INDEX_ASSIGN")  ret = v2_parse_index_assign(i, parent)
+  else return i
+  # 同一ソース行にトップレベル文が複数並ぶ場合（深さ0のセミコロン区切り、
+  # CR）、V2_LINEAST[line] をスカラーのまま上書きすると後の文だけが残り
+  # 前の文が emit から消える（Codex review 指摘, botfix wave 19。例:
+  # `hawk.app.get(...); hawk.app.listen(...)` の 1 行 2 文で get 側が
+  # 消えていた）。行ごとに ID のリストとして蓄積する。
+  if (toplevel) {
+    V2_LINEAST_N[AST[id,"line"]]++
+    V2_LINEAST[AST[id,"line"], V2_LINEAST_N[AST[id,"line"]]] = id
+  }
+  return ret
 }
 
 # ─── type NAME = TYPE_EXPR 文（AP） ───────────────────────────────
@@ -327,6 +356,9 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
 # 返す: STMT_END の RPN インデックス
 function v2_parse_let(i, parent,    varname, let_id, typeann_id, j, expr_id) {
   varname = RPN[i+1,"val"]
+  # v2_stmt_dispatch の `id = V2_NAST + 1` 契約: この v2_node 呼び出しが
+  # 本関数内で最初に作るノードでなければならない（file:parse.awk 冒頭の
+  # v2_stmt_dispatch 参照）。
   let_id  = v2_node(RPN[i,"val"], RPN[i,"line"])   # LET または LETQ
   AST[let_id,"text"] = varname
 
@@ -440,7 +472,7 @@ function v2_parse(    i, kind, root) {
     if      (kind == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[i,"val"], RPN[i,"line"])
     else if (kind == "OP")      v2_reduce_op(RPN[i,"val"], RPN[i,"line"])
     else if (kind == "CALL")    v2_reduce_call(RPN[i,"val"], RPN[i,"arity"], RPN[i,"line"])
-    else if (kind == "MARKER")  i = v2_stmt_dispatch(RPN[i,"val"], i, root)
+    else if (kind == "MARKER")  i = v2_stmt_dispatch(RPN[i,"val"], i, root, 1)
     i++
   }
 }

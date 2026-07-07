@@ -1,0 +1,1 @@
+error: empty dict literal is only allowed as a 'let' initializer (e.g. 'let x: Dict<Str, T> = {}')

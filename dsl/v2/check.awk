@@ -1062,10 +1062,17 @@ function v2_interp_match_call_head(text,    name, pos) {
   return 1
 }
 
-# text 中の先頭の、丸括弧の深さ 0・文字列リテラル外にある "|>" の位置
-# （'|' の位置）を返す（CT。補間式内の pipe 検出用）。見つからなければ 0。
-function v2_find_toplevel_pipe(text,    i, c, depth, in_str) {
-  depth = 0; in_str = 0
+# text 中の先頭の、丸括弧の深さ 0・文字列リテラル外・正規表現リテラル外に
+# ある "|>" の位置（'|' の位置）を返す（CT。補間式内の pipe 検出用）。
+# 見つからなければ 0。
+# 正規表現リテラルのスキップは v2_e_interp_scan_calls（emit.awk）と同じ
+# ヒューリスティック（直前の非空白文字が値で終わっていなければ `/` は
+# 正規表現の開始とみなす）を使う。旧実装はこの走査を持たず、
+# `"#{x ~ /a|>b/}"` のような正規表現リテラル中の `|>` を DSL pipe と
+# 誤認し、"pipe right-hand side must be a call" 誤診断や `x~/a` への
+# 切り詰め出力を起こしていた（Codex review 4643328293 指摘）。
+function v2_find_toplevel_pipe(text,    i, c, depth, in_str, in_regex, prevc) {
+  depth = 0; in_str = 0; in_regex = 0
   for (i = 1; i <= length(text); i++) {
     c = substr(text, i, 1)
     if (in_str) {
@@ -1073,7 +1080,16 @@ function v2_find_toplevel_pipe(text,    i, c, depth, in_str) {
       if (c == "\"") in_str = 0
       continue
     }
+    if (in_regex) {
+      if (c == "\\") { i++; continue }
+      if (c == "/") in_regex = 0
+      continue
+    }
     if (c == "\"") { in_str = 1; continue }
+    else if (c == "/") {
+      prevc = v2_e_interp_prev_nonspace(text, i)
+      if (prevc !~ /[A-Za-z0-9_)\]"]/) { in_regex = 1; continue }
+    }
     else if (c == "(") depth++
     else if (c == ")") depth--
     else if (c == "|" && depth == 0 && substr(text, i + 1, 1) == ">") return i
@@ -1575,6 +1591,42 @@ function v2_check() {
   v2_check_when(1)
   v2_check_arm_order(1)
   v2_check_brand(1, 0)
+  v2_mark_let_literal_ok(1)
+  v2_check_bare_collection_lit(1)
+}
+
+# LET/LETQ の直接の初期化式（最後の子）だけが空コレクションリテラル
+# []/{} を受け付けられる（v2_e_let はこの位置しかハンドルしない）。
+# v2_check_bare_collection_lit より前に呼び、当該 id を許可集合に登録する。
+function v2_mark_let_literal_ok(id,    k, child, expr_id) {
+  if (AST[id,"kind"] == "LET" || AST[id,"kind"] == "LETQ") {
+    if (AST[id,"nc"] >= 1) {
+      expr_id = AST[id,"c" AST[id,"nc"]]
+      if (AST[expr_id,"kind"] == "LISTLIT" || AST[expr_id,"kind"] == "DICTLIT")
+        V2_LET_LIT_OK[expr_id] = 1
+    }
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_mark_let_literal_ok(AST[id,"c" k])
+}
+
+# `let` 初期化式以外の位置に現れる空コレクションリテラル []/{} を拒否する
+# （`return []` や `ctx.res.json([])` 等）。emit.awk は `let x: List<T> = []`
+# 形のみを LISTLIT/DICTLIT の出力先として実装しており（v2_e_let）、それ以外の
+# 式位置では case が無く "emit: unsupported node kind" に落ちる。旧実装は
+# check を通過させたまま emit まで進めて途中出力を吐いてから失敗しており
+# （fail-safe 自体は exit 1 で保たれるが、失敗地点が分かりにくい）、
+# check 段階で早期に明確な診断へ変える（Codex review 4643328293 指摘）。
+# v1 は `return []` を無診断で通過させ、生成された awk が `return []` という
+# 構文エラーになる（実測: LC_ALL=C gawk -f dsl/desugar.awk で確認、後段の
+# gawk 構文解析で初めて壊れる）ため、ここは v1 より安全側に倒す。
+function v2_check_bare_collection_lit(id,    k) {
+  if ((AST[id,"kind"] == "LISTLIT" || AST[id,"kind"] == "DICTLIT") && !(id in V2_LET_LIT_OK)) {
+    v2_diag(AST[id,"line"], 1, \
+      "empty " (AST[id,"kind"] == "LISTLIT" ? "list" : "dict") \
+      " literal is only allowed as a 'let' initializer (e.g. " \
+      (AST[id,"kind"] == "LISTLIT" ? "'let x: List<T> = []'" : "'let x: Dict<Str, T> = {}'") ")")
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_check_bare_collection_lit(AST[id,"c" k])
 }
 
 # 関数外（PROGRAM 直下）の LET/LETQ を拒否する（CF。v1 実測:
