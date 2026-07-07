@@ -52,6 +52,8 @@ function v2_e(id, depth,    kind) {
   else if (kind == "INDEX_ASSIGN") v2_e_index_assign(id, depth)
   else if (kind == "EXPR")         print v2_indent(depth) v2_e_expr(AST[id,"c1"])
   else if (kind == "RAWLINE")      print AST[id,"text"]
+  else if (kind == "TYPEDECL")     return   # コンパイル時の型情報のみ、実行コードは生成しない
+  else v2_diag(AST[id,"line"], 1, "emit: unsupported node kind: " kind " (Task 11 で対応予定)")
 }
 
 function v2_e_func(id, depth,    k, c, kind, params, first, sig) {
@@ -105,9 +107,18 @@ function v2_e_index_assign(id, depth) {
 
 function v2_e_expr(id,    kind, s, k) {
   kind = AST[id,"kind"]
-  if (kind == "NUMLIT" || kind == "IDENT" || kind == "STRLIT" || \
-      kind == "REGEXLIT" || kind == "RAW")
+  if (kind == "NUMLIT" || kind == "IDENT" || kind == "REGEXLIT" || kind == "RAW")
     return AST[id,"text"]
+  if (kind == "STRLIT") {
+    # 補間あり（#{...}）は Task 11 送りのスタブ（v2_e_interp 未実装）。
+    # 無診断で #{...} をそのまま awk 文字列リテラルへ出すと構文的に壊れるため、
+    # 補間なしの場合のみそのまま通す。
+    if (index(AST[id,"text"], "#{") > 0) {
+      v2_diag(AST[id,"line"], 1, "emit: unsupported node kind: STRLIT with interpolation (Task 11 で対応予定)")
+      return ""
+    }
+    return AST[id,"text"]
+  }
   if (kind == "BINOP")
     return v2_e_expr(AST[id,"c1"]) " " AST[id,"text"] " " v2_e_expr(AST[id,"c2"])
   if (kind == "UNOP")
@@ -120,7 +131,8 @@ function v2_e_expr(id,    kind, s, k) {
     for (k = 1; k <= AST[id,"nc"]; k++) s = s (k > 1 ? ", " : "") v2_e_expr(AST[id,"c" k])
     return s ")"
   }
-  return AST[id,"text"]
+  v2_diag(AST[id,"line"], 1, "emit: unsupported node kind: " kind " (Task 11 で対応予定)")
+  return ""
 }
 
 # ドット記法呼び出し -> ns::dispatch("path", args...) への変換。

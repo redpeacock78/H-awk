@@ -180,8 +180,13 @@ function v2_panic_skip(i) {
 # ─── 文ディスパッチ ────────────────────────────────────────────────
 
 # MARKER に応じてサブパーサを選択し、末尾トークン位置を返す
-# 生成した文ノードの ID を V2_LINEAST[開始行] に記録する（emit の行順マージ用）。
-function v2_stmt_dispatch(marker, i, parent,    id, ret) {
+# toplevel が真のときのみ、生成した文ノードの ID を V2_LINEAST[開始行] に記録する
+# （emit の行順マージ用）。v2_p_block（when アーム本体など、FUNC/PROGRAM 直下では
+# ないネスト文脈）からの呼び出しでは toplevel を渡さないため記録されない。
+# ネスト文はそれぞれの親ノード（FUNC・WHEN 等）の emit が AST を直接たどって
+# 出力するため、V2_LINEAST 経由のトップレベル行走査で二重に処理する必要が無い
+# （review C1: v2_p_block 経由の登録がトップレベル走査に漏出していた不具合の修正）。
+function v2_stmt_dispatch(marker, i, parent, toplevel,    id, ret) {
   id = V2_NAST + 1
   if (marker == "FUNC_OPEN")          ret = v2_parse_func(i, parent)
   else if (marker == "LET" || \
@@ -192,7 +197,7 @@ function v2_stmt_dispatch(marker, i, parent,    id, ret) {
   else if (marker == "RAWLINE")       ret = v2_parse_rawline(i, parent)
   else if (marker == "TYPEDECL")      ret = v2_parse_typedecl(i, parent)
   else return i
-  V2_LINEAST[AST[id,"line"]] = id
+  if (toplevel) V2_LINEAST[AST[id,"line"]] = id
   return ret
 }
 
@@ -444,7 +449,7 @@ function v2_parse(    i, kind, root) {
     if      (kind == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[i,"val"], RPN[i,"line"])
     else if (kind == "OP")      v2_reduce_op(RPN[i,"val"], RPN[i,"line"])
     else if (kind == "CALL")    v2_reduce_call(RPN[i,"val"], RPN[i,"arity"], RPN[i,"line"])
-    else if (kind == "MARKER")  i = v2_stmt_dispatch(RPN[i,"val"], i, root)
+    else if (kind == "MARKER")  i = v2_stmt_dispatch(RPN[i,"val"], i, root, 1)
     i++
   }
 }

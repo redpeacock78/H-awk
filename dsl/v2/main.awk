@@ -24,7 +24,7 @@ BEGIN {
   if (V2_DUMP == "types") { v2_dump_types(); exit(V2_ERRORS ? 1 : 0) }
   if (V2_ERRORS) exit 1
   v2_emit()
-  exit 0
+  exit(V2_ERRORS ? 1 : 0)
 }
 
 function v2_dump_lex(   i) { for (i = 1; i <= TOK["n"]; i++) printf "%d\t%s\t%d\t%d\t%s\n", i, TOK[i,"kind"], TOK[i,"line"], TOK[i,"col"], TOK[i,"text"] }
