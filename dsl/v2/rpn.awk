@@ -252,6 +252,26 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
       return
     }
   }
+
+  # "::" は v2_scan_dotted_chain が "IDENT COLON COLON IDENT" の4トークン
+  # 形（`ns::dispatch(...)` のような v1 desugar 後の最終形の直接記述。
+  # nullcoalesce_in_call botfix）に限って CALL 名として構造化する。
+  # それ以外の形の COLON COLON（例: `return x :: 2` のような偶発的な
+  # 二重コロン）が区間内にあると、main ループの COLON 分岐（非空 dict
+  # リテラルの構造トークンを診断なしで読み飛ばす既存の未実装対応）に
+  # 落ちて両方の COLON トークンが黙って消え、後続オペランドだけが残る
+  # （レビュー Critical 再現: `return x :: 2` が `return 2` になる）。
+  # v2_scan_dotted_chain が実際に消費できる形かどうかをここで事前検証し、
+  # 満たさなければ区間全体を RAW 素通し（"?" と同じ fail-safe 方針）にする。
+  for (k = i; k <= j; k++) {
+    if (TOK[k,"kind"] == "COLON" && TOK[k+1,"kind"] == "COLON") {
+      if (!(k > i && TOK[k-1,"kind"] == "IDENT" && TOK[k+2,"kind"] == "IDENT")) {
+        v2_emit_rpn("RAW", v2_read_span_text(i, j), TOK[i,"line"], "")
+        return
+      }
+      k++  # この "::" は正当な形と確認済みなので2個目の COLON はスキップ
+    }
+  }
   for (k = i; k <= j; k++) {
     t    = TOK[k,"kind"]
     line = TOK[k,"line"]
@@ -1045,7 +1065,15 @@ function v2_is_rawline(i,    line, j, k) {
       # 構造化できるようになった（nullcoalesce_in_call botfix）ため、
       # 禁止対象から除外する。連続しない単独の COLON（dict key /
       # when 腕 / 型注釈跨ぎ）は引き続き RAWLINE 対象のまま。
-      if (TOK[j+1,"kind"] == "COLON") { j++; continue }
+      # レビュー指摘（Critical）: v2_scan_dotted_chain が実際に構造化
+      # できるのは "IDENT COLON COLON IDENT" の4トークン形のみ。ここでの
+      # 除外条件をそれと厳密に一致させないと（直前 IDENT・直後 IDENT の
+      # 両方を要求しないと）、`return x :: 2` のような無関係な二重コロンも
+      # RAWLINE から外れてしまい、shunting yard が未知の COLON トークンを
+      # 黙って読み捨てて v1 と異なる出力を exit 0 で返す（fail-safe 違反の
+      # 再混入。レビュー再現: `return x :: 2` が `return 2` になる）。
+      if (TOK[j+1,"kind"] == "COLON" && j > i && TOK[j-1,"kind"] == "IDENT" && \
+          TOK[j+2,"kind"] == "IDENT") { j++; continue }
       return 1
     }
   }
@@ -1115,6 +1143,16 @@ function v2_index_assign_eq(i,    line, j, depth, has_comma) {
   if (j <= TOK["n"] && TOK[j,"line"] == line && \
       TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=") {
     if (has_comma) {
+      # 多次元 subscript 禁止（review EB）は、型注釈付き List</Dict<
+      # として宣言された DSL コレクション（V2_RPN_DSLVAR）にのみ適用する。
+      # V2_RPN_IDXVAR は nested_function botfix で無注釈の空リテラル
+      # （`let arr = []`）まで登録対象を広げたが、無注釈配列への多次元
+      # 添字（`arr[1, 2] = 3`）は素の awk 連想配列アクセスとして v1・旧v2
+      # とも正常にサポートされており、ここで診断すると互換性が後退する
+      # （レビュー Important 再現）。DSLVAR 未登録なら診断せず 0 を返し、
+      # 呼び出し元の v2_is_rawline 経路（v2_line_has_unsupported_index）で
+      # 行全体を RAWLINE にフォールバックさせ、v1 と同じ verbatim 出力にする。
+      if (!(TOK[i,"text"] in V2_RPN_DSLVAR)) return 0
       v2_diag(line, 1, "multi-dimensional subscript is not supported")
       return 0
     }
