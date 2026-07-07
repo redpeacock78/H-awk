@@ -180,16 +180,20 @@ function v2_panic_skip(i) {
 # ─── 文ディスパッチ ────────────────────────────────────────────────
 
 # MARKER に応じてサブパーサを選択し、末尾トークン位置を返す
-function v2_stmt_dispatch(marker, i, parent) {
-  if (marker == "FUNC_OPEN")          return v2_parse_func(i, parent)
-  if (marker == "LET" || \
-      marker == "LETQ")               return v2_parse_let(i, parent)
-  if (marker == "RETURN")             return v2_parse_return(i, parent)
-  if (marker == "WHEN")               return v2_p_when(i, parent)
-  if (marker == "EXPR")               return v2_parse_expr_stmt(i, parent)
-  if (marker == "RAWLINE")            return v2_parse_rawline(i, parent)
-  if (marker == "TYPEDECL")           return v2_parse_typedecl(i, parent)
-  return i
+# 生成した文ノードの ID を V2_LINEAST[開始行] に記録する（emit の行順マージ用）。
+function v2_stmt_dispatch(marker, i, parent,    id, ret) {
+  id = V2_NAST + 1
+  if (marker == "FUNC_OPEN")          ret = v2_parse_func(i, parent)
+  else if (marker == "LET" || \
+           marker == "LETQ")          ret = v2_parse_let(i, parent)
+  else if (marker == "RETURN")        ret = v2_parse_return(i, parent)
+  else if (marker == "WHEN")          ret = v2_p_when(i, parent)
+  else if (marker == "EXPR")          ret = v2_parse_expr_stmt(i, parent)
+  else if (marker == "RAWLINE")       ret = v2_parse_rawline(i, parent)
+  else if (marker == "TYPEDECL")      ret = v2_parse_typedecl(i, parent)
+  else return i
+  V2_LINEAST[AST[id,"line"]] = id
+  return ret
 }
 
 # ─── type NAME = TYPE_EXPR 文（AP） ───────────────────────────────

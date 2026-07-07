@@ -1,3 +1,3 @@
 function run() -> Void {
-  return
+  let n: Int = 1 + 2
 }
