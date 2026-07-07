@@ -449,14 +449,31 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
 # 終端条件: 深さ 0 での RBRACE/RP/RBRACK、文開始 KW (let/function/when/end/return)、
 # または深さ 0 でのソース行の変化（式は原則同一行内で終端する。丸括弧・角括弧・
 # 波括弧による継続は depth > 0 のため対象外）。
-function v2_find_expr_end(start,    k, depth, t, txt, startline) {
+function v2_find_expr_end(start,    k, depth, t, txt, startline, prevk) {
   depth     = 0
   startline = TOK[start,"line"]
   for (k = start; k <= TOK["n"]; k++) {
     t   = TOK[k,"kind"]
     txt = TOK[k,"text"]
 
-    if (depth == 0 && k > start && TOK[k,"line"] != startline) return k - 1
+    if (depth == 0 && k > start && TOK[k,"line"] != startline) {
+      # 複数行にまたがる暗黙の文字列リテラル連結（`let html: Str = "a"
+      # "b" "c"` のように、各行が文字列リテラル/補間だけで構成される
+      # 継続行）は行境界での即終端対象から除外する（botfix wave 19。
+      # v1 実測: この形は 1 個の sprintf(...) へ結合されるが、v2 は
+      # 「式は同一行内で終端する」設計のため各継続行が独立した「効果の
+      # ない式文」として個別 emit され、代入値が最初の行の内容だけに
+      # なっていた。直前トークンが STR/INTERP_CLOSE で継続行の先頭
+      # トークンも STR/INTERP_OPEN のときだけ継続とみなす。v2_shunt_expr
+      # 側の STR/INTERP_OPEN 連続マージ処理（既存）がこの拡張された
+      # トークン区間をそのまま 1 個の STRLIT へ結合する）。
+      prevk = TOK[k-1,"kind"]
+      if ((prevk == "STR" || prevk == "INTERP_CLOSE") && (t == "STR" || t == "INTERP_OPEN")) {
+        startline = TOK[k,"line"]
+      } else {
+        return k - 1
+      }
+    }
 
     # 深さ 0 の ';' は同一行内の文区切り（CR）。一行に複数文が並ぶ
     # `let x: Int = 1; return x` 形で、';' 以降を次の文として独立に
