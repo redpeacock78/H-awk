@@ -276,7 +276,7 @@ function v2_p_when(i, parent,    id, arm, blk) {
     v2_addchild(id, arm)
   }
   if (RPN[i,"val"] != "WHEN_END") {
-    v2_diag(AST[id,"line"], 1, "unclosed 'when' (missing 'end')")
+    v2_diag(AST[id,"line"], 1, "unclosed when block (missing 'end')")
     i = v2_panic_skip(i)
   }
   v2_addchild(parent, id)

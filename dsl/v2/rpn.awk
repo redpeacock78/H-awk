@@ -574,7 +574,7 @@ function v2_rpn_is_rawbrace_close_line(pos,    line, k) {
 }
 
 # KW に応じてサブパーサを選択するディスパッチャ
-function v2_rpn_dispatch(i,    kw) {
+function v2_rpn_dispatch(i,    kw, j) {
   # 深さ 0 のセミコロン文区切り（CR）: v2_find_expr_end が式終端として
   # ';' の手前で止めるため、前の文の直後に ';' 自体が残っている。次の文の
   # 開始トークンとして誤ってディスパッチしないよう読み飛ばす
@@ -598,6 +598,28 @@ function v2_rpn_dispatch(i,    kw) {
   else if (kw == "when")     return v2_rpn_when(i)
   else if (kw == "return")   return v2_rpn_return(i)
   else if (kw == "type")     return v2_rpn_typedecl(i)
+  # 単独の "end"（対応する when...of が無い）。v2_rpn_when 内の腕ループは
+  # 自前の end_idx 走査で "end" を消費するため、ここに到達する "end" は
+  # 常に when ブロック外の孤立トークン（v1 dsl/desugar_match.awk:25-29 の
+  # `_DS_match_depth == 0` 判定と同じ状況）。診断のみ出し、トークン自体は
+  # 出力に残さず読み飛ばす（Task 12 互換ゲート）。
+  else if (kw == "end") {
+    v2_diag(TOK[i,"line"], 1, "unexpected 'end' outside any when block")
+    return i + 1
+  }
+  # when ブロック外に現れた腕ヘッダ行（`ok x:` 等、"when...of" を伴わない）。
+  # v1 dsl/desugar_match.awk:31-35 の `_ds_match_is_arm_header` 判定と同じ
+  # タグ集合（ok/ng/some/none/default）のみを対象にする。
+  else if (v2_is_arm_pat(i) && \
+           ((TOK[i,"kind"] == "IDENT" && \
+             (TOK[i,"text"] == "ok" || TOK[i,"text"] == "ng" || \
+              TOK[i,"text"] == "some" || TOK[i,"text"] == "none")) || \
+            kw == "default")) {
+    v2_diag(TOK[i,"line"], 1, "arm header outside when block")
+    j = i
+    while (j <= TOK["n"] && TOK[j,"line"] == TOK[i,"line"]) j++
+    return j
+  }
   else                        return v2_rpn_stmt(i)
 }
 
@@ -841,7 +863,7 @@ function v2_rpn_when(i,    line, j, end_idx, depth, k, pat_text, arm_line) {
     }
     end_idx++
   }
-  if (end_idx > TOK["n"]) v2_diag(line, 1, "unclosed 'when' (missing 'end')")
+  if (end_idx > TOK["n"]) v2_diag(line, 1, "unclosed when block (missing 'end')")
 
   i = j + 1  # 最初の腕パターン開始位置
 
