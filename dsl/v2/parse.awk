@@ -209,7 +209,15 @@ function v2_stmt_dispatch(marker, i, parent, toplevel,    id, ret) {
   # `row["id"] = "#{...}"` が when アーム内で消失する不具合として発覚）。
   else if (marker == "INDEX_ASSIGN")  ret = v2_parse_index_assign(i, parent)
   else return i
-  if (toplevel) V2_LINEAST[AST[id,"line"]] = id
+  # 同一ソース行にトップレベル文が複数並ぶ場合（深さ0のセミコロン区切り、
+  # CR）、V2_LINEAST[line] をスカラーのまま上書きすると後の文だけが残り
+  # 前の文が emit から消える（Codex review 指摘, botfix wave 19。例:
+  # `hawk.app.get(...); hawk.app.listen(...)` の 1 行 2 文で get 側が
+  # 消えていた）。行ごとに ID のリストとして蓄積する。
+  if (toplevel) {
+    V2_LINEAST_N[AST[id,"line"]]++
+    V2_LINEAST[AST[id,"line"], V2_LINEAST_N[AST[id,"line"]]] = id
+  }
   return ret
 }
 
