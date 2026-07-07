@@ -145,9 +145,25 @@ function v2_scan_dotted_chain(k,    idx) {
   idx = k
   V2_CHAIN_NAME = TOK[idx,"text"]
   idx++
-  while (TOK[idx,"kind"] == "DOT" && TOK[idx+1,"kind"] == "IDENT") {
-    V2_CHAIN_NAME = V2_CHAIN_NAME "." TOK[idx+1,"text"]
-    idx += 2
+  while (1) {
+    if (TOK[idx,"kind"] == "DOT" && TOK[idx+1,"kind"] == "IDENT") {
+      V2_CHAIN_NAME = V2_CHAIN_NAME "." TOK[idx+1,"text"]
+      idx += 2
+      continue
+    }
+    # `ns::dispatch` のような、DSL のドット糖衣構文を経由せず既に
+    # 最終形（v1 desugar 後の出力形式）を直接書いた呼び出しを、そのまま
+    # 素通しの CALL 名として受理する（nullcoalesce_in_call botfix）。
+    # v1 実測: `hawk::dispatch(...)` は入力に直接書かれていても desugar 側
+    # では特別扱いされず、そのままの識別子として扱われる（未知関数）。
+    # v2_e_dispatch には渡さず（"." を含まないため）そのまま
+    # `name(args...)` として emit される（emit.awk CALL 分岐）。
+    if (TOK[idx,"kind"] == "COLON" && TOK[idx+1,"kind"] == "COLON" && TOK[idx+2,"kind"] == "IDENT") {
+      V2_CHAIN_NAME = V2_CHAIN_NAME "::" TOK[idx+2,"text"]
+      idx += 3
+      continue
+    }
+    break
   }
   return idx
 }
@@ -643,6 +659,7 @@ function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
   # 関数スコープ開始: 添字代入の構造化判定に使う DSL 変数の宣言型を初期化する
   # （CB）。前の関数の残留を持ち込まないよう毎回クリアする。
   delete V2_RPN_DSLVAR
+  delete V2_RPN_IDXVAR
   # 生 awk ブレースブロック（`if (x) { ... }` 等）の未閉鎖 `{` の深さ
   # （review EJ）。0 にリセットしてから本体走査を始める。
   V2_RPN_RAWBRACE_DEPTH = 0
@@ -674,8 +691,10 @@ function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
           # let のコレクション型注釈（CB）と同じ理由で、関数引数の
           # List<T>/Dict<K,V> 注釈（エイリアス越しを含む。CY）も
           # V2_RPN_DSLVAR に記録し、添字代入の構造化対象にする。
-          if (v2_rpn_expand_alias(paramtype) ~ /^List</ || v2_rpn_expand_alias(paramtype) ~ /^Dict</) \
+          if (v2_rpn_expand_alias(paramtype) ~ /^List</ || v2_rpn_expand_alias(paramtype) ~ /^Dict</) {
             V2_RPN_DSLVAR[pname] = paramtype
+            V2_RPN_IDXVAR[pname] = paramtype
+          }
         }
       } else {
         j++
@@ -769,10 +788,25 @@ function v2_rpn_typedecl(i,    line, name, j, typestart, typetext) {
   line = TOK[i,"line"]
   name = TOK[i+1,"text"]
 
+  j = i + 2
+
+  # record 形の type 定義（`type Todo = { id: Str, done: Bool }`）は
+  # 未対応（docs/dsl.md:123, AP）。v1 は正しくサポートしているため、この
+  # まま v2_skip_type に渡すと "{" を型トークンとして扱えず型定義本体
+  # （フィールド行）が未消費のまま後続処理に漏れ、生の awk として出力
+  # されて構文エラーになっていた（fail-safe 原則違反。qeq_ctx_req_json_record_t
+  # botfix）。ここで record 形を検出したら診断を出し、対応する閉じ "}"
+  # まで丸ごと読み飛ばして、壊れた awk を出力しないようにする。
+  if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=" && \
+      TOK[j+1,"kind"] == "LBRACE") {
+    v2_diag(line, TOK[j+1,"col"], \
+      "record-style type definitions (type " name " = { ... }) are not supported")
+    return v2_skip_record_body(j + 1)
+  }
+
   v2_emit_rpn("MARKER", "TYPEDECL", line, "")
   v2_emit_rpn("OPERAND", name, line, "")
 
-  j = i + 2
   typetext = ""
   if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=") {
     j++
@@ -785,6 +819,19 @@ function v2_rpn_typedecl(i,    line, name, j, typestart, typetext) {
   # 後続の let 型注釈・関数引数注釈が同名エイリアスを参照したとき
   # List</Dict< 判定に展開して使えるよう記録する（CU/CY）。
   V2_RPN_ALIAS[name] = typetext
+  return j
+}
+
+# record 形 type 定義の本体 `{ ... }`（open_pos は開き "{" の位置）を
+# ネストした { } を数えながら丸ごと読み飛ばし、閉じ "}" の次の位置を返す。
+function v2_skip_record_body(open_pos,    j, depth) {
+  depth = 1
+  j = open_pos + 1
+  while (j <= TOK["n"] && depth > 0) {
+    if      (TOK[j,"kind"] == "LBRACE") depth++
+    else if (TOK[j,"kind"] == "RBRACE") depth--
+    j++
+  }
   return j
 }
 
@@ -816,8 +863,10 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
     # `type Ints = List<Int>` のようなエイリアス越しの宣言は typetext が
     # literal "List<"/"Dict<" prefix にならず記録漏れになっていたため、
     # 判定前にエイリアス展開する（CU）。
-    if (v2_rpn_expand_alias(typetext) ~ /^List</ || v2_rpn_expand_alias(typetext) ~ /^Dict</) \
+    if (v2_rpn_expand_alias(typetext) ~ /^List</ || v2_rpn_expand_alias(typetext) ~ /^Dict</) {
       V2_RPN_DSLVAR[name] = typetext
+      V2_RPN_IDXVAR[name] = typetext
+    }
   }
 
   # 裸の let 宣言（hoist 形 `let tmp` / `let n: Int`、= も ?= もない）は
@@ -825,6 +874,21 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
   # shunt しないよう、= / ?= がある場合のみ RHS をパースする。
   if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && (TOK[j,"text"] == "=" || TOK[j,"text"] == "?=")) {
     j++  # = または ?= をスキップ
+    # 型注釈が無い（または List/Dict と判定されなかった）let でも、
+    # 初期化式が裸の空コレクションリテラル []/{} 単体なら、後続の添字代入文
+    # （name[idx] = ...）を RAWLINE に落とさず ASSIGN 系ノードとして構造化
+    # できるよう記録する（nested_function fixture。v1 実測 `let result = []`
+    # は型注釈なしでも配列として扱われ、本体内の
+    # `result[i] = hawk.app.get(...)` は正しく dispatch 変換される）。
+    # ここでは V2_RPN_DSLVAR（多次元添字禁止判定 389 行目の対象）ではなく、
+    # 単一添字代入の構造化専用ゲート V2_RPN_IDXVAR にのみ記録する。
+    # 型注釈なし配列は `rows[i, "id"]` のような多次元添字が許される既存
+    # fixture（emit_multidim_index_call）があり、DSLVAR に混ぜると多次元
+    # 添字が誤って禁止されてしまうため区別する。
+    if (!(name in V2_RPN_IDXVAR) && \
+        ((TOK[j,"kind"] == "LBRACK" && TOK[j+1,"kind"] == "RBRACK") || \
+         (TOK[j,"kind"] == "LBRACE" && TOK[j+1,"kind"] == "RBRACE")))
+      V2_RPN_IDXVAR[name] = (TOK[j,"kind"] == "LBRACK") ? "[]" : "{}"
     expr_end = v2_find_expr_end(j)
     if (expr_end >= j) {
       v2_shunt_expr(j, expr_end)
@@ -974,7 +1038,16 @@ function v2_is_rawline(i,    line, j, k) {
   line = TOK[i,"line"]
   for (j = i; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
     k = TOK[j,"kind"]
-    if (k == "LBRACE" || k == "COLON" || k == "ARROW") return 1
+    if (k == "LBRACE" || k == "ARROW") return 1
+    if (k == "COLON") {
+      # "::"（`hawk::dispatch(...)` のような、v1 desugar 後の最終形を
+      # 直接書いた呼び出し）は v2_scan_dotted_chain で CALL 名として
+      # 構造化できるようになった（nullcoalesce_in_call botfix）ため、
+      # 禁止対象から除外する。連続しない単独の COLON（dict key /
+      # when 腕 / 型注釈跨ぎ）は引き続き RAWLINE 対象のまま。
+      if (TOK[j+1,"kind"] == "COLON") { j++; continue }
+      return 1
+    }
   }
   if (v2_line_has_unsupported_index(i, line)) return 1
   return 0
@@ -1011,15 +1084,16 @@ function v2_is_compound_assign(i,    line, j, k, op1) {
 }
 
 # その他の文（裸の式文・代入・未知トークン）
-# 添字代入文 `name[idx] = rhs` を検出する（CB）。name が V2_RPN_DSLVAR に
-# 記録された List</Dict< 変数であり、深さ 0 の RBRACK の直後に単純な `=`
+# 添字代入文 `name[idx] = rhs` を検出する（CB）。name が V2_RPN_IDXVAR に
+# 記録された List</Dict< 変数、または無注釈の空コレクションリテラル
+# （nested_function botfix）であり、深さ 0 の RBRACK の直後に単純な `=`
 # （`==`/`+=` 等ではない）が続く場合のみ ASSIGN 系ノードとして扱う。
 # 一致すれば `=` の RPN インデックスを返し、しなければ 0 を返す。
-# 素の awk 配列（DSL 変数でないもの）への添字代入は従来どおり RAWLINE に
-# 委ねる（既存 fixture の a[i] = 1 は V2_RPN_DSLVAR に無いため対象外のまま）。
+# 素の awk 配列（IDXVAR 未登録のもの）への添字代入は従来どおり RAWLINE に
+# 委ねる（既存 fixture の a[i] = 1 は V2_RPN_IDXVAR に無いため対象外のまま）。
 function v2_index_assign_eq(i,    line, j, depth, has_comma) {
   line = TOK[i,"line"]
-  if (TOK[i,"kind"] != "IDENT" || !(TOK[i,"text"] in V2_RPN_DSLVAR)) return 0
+  if (TOK[i,"kind"] != "IDENT" || !(TOK[i,"text"] in V2_RPN_IDXVAR)) return 0
   if (TOK[i+1,"kind"] != "LBRACK") return 0
   depth = 0
   has_comma = 0

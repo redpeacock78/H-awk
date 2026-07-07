@@ -50,6 +50,7 @@ declare -A KNOWN_DIVERGENCE=(
   [match_arm_array_type_trust_ok]="ADVISORY: 同上（List添字型検査、safe.str.trust後）"
   [qeq_auth_error]="ADVISORY: type X = Error コンストラクタの戻り値型推論が未実装（GAP寄り、詳細はreport参照）"
   [qeq_ctx_req_json_object_map]="DEFERRED: result_val_into_map 関連（divergences.md記載）"
+  [qeq_ctx_req_json_record_t]="DEFERRED: AP（レコード型未対応。v2は診断化して安全側に倒す。botfix wave 22）"
   [qeq_non_json_result_scalar]="ADVISORY: 同上（Result<Int,...>のUnwrap後の型検査）"
   [safe_sink_ok]="ADVISORY: classify: sanitizer/validator注釈関数の戻り値型検査"
   [string_interpolation_multiple]="DEFERRED: M1（型注釈let の暗黙 type::coerce ラップ未実装）"
