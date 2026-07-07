@@ -236,7 +236,7 @@ function v2_read_span_text(start, end,    ln, scol, ecol, etoklen) {
 
 # トークン区間 [i, j] を操車場法で RPN に変換する
 function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary_pos, text, \
-                        chain_end, call_open, fname, has_generic, multidim_close) {
+                        chain_end, call_open, fname, has_generic, multidim_close, v2ok, m) {
   # 三項式 `cond ? a : b` は v2 の演算子集合として構造化サポートしていない
   # （PREC["?"] 未登録。"?" は単項でも二項でもなく素通りし、":" は
   # dict リテラルの COLON と共有トークンのため continue で読み飛ばされる
@@ -265,11 +265,22 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
   # 満たさなければ区間全体を RAW 素通し（"?" と同じ fail-safe 方針）にする。
   for (k = i; k <= j; k++) {
     if (TOK[k,"kind"] == "COLON" && TOK[k+1,"kind"] == "COLON") {
-      if (!(k > i && TOK[k-1,"kind"] == "IDENT" && TOK[k+2,"kind"] == "IDENT")) {
+      v2ok = (k > i && TOK[k-1,"kind"] == "IDENT" && TOK[k+2,"kind"] == "IDENT")
+      if (v2ok) {
+        # `ns::mod::fn` の多段チェーンを終端 IDENT まで読み進め、
+        # 呼び出し（直後 LP）でなければ RAW にする。`return x::y` のような
+        # 非呼び出し形は本走査で COLON が読み捨てられ式が壊れるため
+        # （coderabbit PR#110 指摘）。
+        m = k + 2
+        while (TOK[m+1,"kind"] == "COLON" && TOK[m+2,"kind"] == "COLON" && TOK[m+3,"kind"] == "IDENT")
+          m += 3
+        v2ok = (TOK[m+1,"kind"] == "LP")
+      }
+      if (!v2ok) {
         v2_emit_rpn("RAW", v2_read_span_text(i, j), TOK[i,"line"], "")
         return
       }
-      k++  # この "::" は正当な形と確認済みなので2個目の COLON はスキップ
+      k = m + 1  # チェーン全体を確認済みなので終端 IDENT までスキップ
     }
   }
   for (k = i; k <= j; k++) {
