@@ -1,1 +1,1 @@
-Todo: unknown field unknown
+record-style type definitions (type Todo = { ... }) are not supported

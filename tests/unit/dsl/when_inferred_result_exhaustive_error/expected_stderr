@@ -1,1 +1,1 @@
-when...of missing arm for CacheError
+function fetch_backend expects return Result<Str, DbError|CacheError>, got Str

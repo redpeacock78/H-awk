@@ -1,1 +1,1 @@
-desugar: error: duplicate binding 'a' in same branch (depth 1)
+catch-all arm must be last

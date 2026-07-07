@@ -1,5 +1,3 @@
-function ReadError(msg) { return result_ng("ReadError", msg) }
-function ParseError(msg) { return result_ng("ParseError", msg) }
 
 function fetch() {
 }
@@ -17,7 +15,7 @@ function handler(    _ds_mc_1, x, _ds_mc_2, value, e) {
   if (result_ok(_ds_mc_2)) {
     value = result_val(_ds_mc_2)
     return ctx::dispatch("res.status", value)
-  } else if (result_err_type(_ds_mc_2) == "ReadError") {
+  } else if (awk::result_err_type(_ds_mc_2) == "ReadError") {
     e = result_err(_ds_mc_2)
     return ctx::dispatch("res.status", 400)
   }

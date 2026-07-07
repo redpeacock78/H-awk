@@ -2,7 +2,7 @@ function find_title(id) {
   return option_none_make()
 }
 
-function handler(    _ds_tc_1, title) {
+function handler(    title, _ds_tc_1) {
   _ds_tc_1 = find_title(id)
   if (!option_some(_ds_tc_1)) {
     return ctx::dispatch("res.status", 404)

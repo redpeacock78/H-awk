@@ -1,0 +1,1 @@
+type mismatch: cannot assign Result<Int, JsonParseError|JsonTypeError|JsonTooDeepError> to Result<Int, JsonError>

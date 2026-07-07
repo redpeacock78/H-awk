@@ -1,1 +1,1 @@
-process does not accept Untrusted input
+process argument 1 expects Str, got Untrusted<Str>

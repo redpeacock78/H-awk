@@ -1,11 +1,5 @@
-function AuthError(msg) { return result_ng("AuthError", msg) }
-
-function authenticate(auth) {
-  return AuthError("bad")
-}
-
-function h(    _ds_tc_1, user, _ds_err_type__ds_tc_1) {
-  _ds_tc_1 = authenticate(ctx::dispatch("req.get_header", "Authorization"))
+function handler(    raw, _ds_tc_1, _ds_err_type__ds_tc_1) {
+  _ds_tc_1 = ctx::dispatch("req.form", "title")
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)
     if (_ds_err_type__ds_tc_1 == "ParseError") return ctx::dispatch("res.status", 400)
@@ -16,6 +10,6 @@ function h(    _ds_tc_1, user, _ds_err_type__ds_tc_1) {
     if (_ds_err_type__ds_tc_1 == "JsonTooDeepError") return ctx::dispatch("res.status", 400)
     return ctx::dispatch("res.status", 500)
   }
-  user = result_val(_ds_tc_1)
-  return ctx::dispatch("res.text", user["name"])
+  raw = result_val(_ds_tc_1)
+  return ctx::dispatch("res.html", escape_html(raw))
 }

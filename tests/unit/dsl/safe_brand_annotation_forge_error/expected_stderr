@@ -1,2 +1,1 @@
-safe/brand type cannot be created by annotation
-HtmlEscapedStr must be constructed by trusted sanitizer
+type mismatch: cannot assign Untrusted<Str> to HtmlEscapedStr
