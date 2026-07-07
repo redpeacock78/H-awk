@@ -167,9 +167,69 @@ function v2_scan_generic_arg(k,    idx, end) {
   return end + 1
 }
 
+# 添字 "[" の内側（深さ 1）にトップレベルのカンマがあるかを調べ、あれば
+# 対応する閉じ "]" の位置を返す（`rows[i, "id"]` のような awk 組込みの
+# 多次元連想配列アクセス。v2 は構造化 INDEX 二項演算子でこの形を表現
+# できない = v2_index_assign_eq の既存判断 review EB と同じ）。カンマが
+# 無い、またはネストした "[" を含む、または行内で閉じない場合は 0 を返す
+# （呼び出し元は通常の単純添字として v2_pop_bracket 経路に委ねる）。
+function v2_find_multidim_close(open_pos, line,    j, depth, has_comma) {
+  depth = 1
+  has_comma = 0
+  for (j = open_pos + 1; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
+    if      (TOK[j,"kind"] == "LBRACK") depth++
+    else if (TOK[j,"kind"] == "RBRACK") {
+      depth--
+      if (depth == 0) return has_comma ? j : 0
+    } else if (TOK[j,"kind"] == "COMMA" && depth == 1) has_comma = 1
+  }
+  return 0
+}
+
+# 添字 "[" open_pos の直後から閉じ "]" close_pos の直前までのトークン列を、
+# 元の awk 添字式に近い形（`i, "id"`）のテキストへ復元する。
+function v2_read_subscript_text(open_pos, close_pos,    m, text) {
+  text = ""
+  for (m = open_pos + 1; m < close_pos; m++) {
+    if      (TOK[m,"kind"] == "COMMA") text = text ", "
+    else if (TOK[m,"kind"] == "STR")   text = text "\"" TOK[m,"text"] "\""
+    else                                text = text TOK[m,"text"]
+  }
+  return text
+}
+
+# トークン区間 [start, end] を、可能なら元のソース行テキストから該当区間を
+# 切り出して復元する（トークン化で失われた空白・引用符を保つ）。複数行に
+# またがる場合はトークンを機械的に再結合したテキストへフォールバックする。
+function v2_read_span_text(start, end,    ln, scol, ecol, etoklen) {
+  ln = TOK[start,"line"]
+  if (TOK[end,"line"] == ln && (ln in V2_LINE_TEXT)) {
+    scol    = TOK[start,"col"]
+    etoklen = length(TOK[end,"text"]) + (TOK[end,"kind"] == "STR" ? 2 : 0)
+    ecol    = TOK[end,"col"] + etoklen - 1
+    return substr(V2_LINE_TEXT[ln], scol, ecol - scol + 1)
+  }
+  return v2_read_subscript_text(start - 1, end + 1)
+}
+
 # トークン区間 [i, j] を操車場法で RPN に変換する
 function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary_pos, text, \
-                        chain_end, call_open, fname, has_generic) {
+                        chain_end, call_open, fname, has_generic, multidim_close) {
+  # 三項式 `cond ? a : b` は v2 の演算子集合として構造化サポートしていない
+  # （PREC["?"] 未登録。"?" は単項でも二項でもなく素通りし、":" は
+  # dict リテラルの COLON と共有トークンのため continue で読み飛ばされる
+  # だけで、結果として不正な演算子木が組み立てられていた。pre-Task12
+  # botfix 2）。v1 実測（`gawk -f dsl/desugar.awk`）では三項式は型検査
+  # されず let の type::coerce でラップされるだけで内部構造には一切
+  # 踏み込まない（無検査 passthrough）。v2 も同じ寛容さに合わせるため、
+  # 区間内に "?" 演算子トークンが 1 つでもあれば区間全体を 1 個の RAW
+  # オペランドとして素通しする（型は Unknown、check.awk の型検査対象外）。
+  for (k = i; k <= j; k++) {
+    if (TOK[k,"kind"] == "OP" && TOK[k,"text"] == "?") {
+      v2_emit_rpn("RAW", v2_read_span_text(i, j), TOK[i,"line"], "")
+      return
+    }
+  }
   for (k = i; k <= j; k++) {
     t    = TOK[k,"kind"]
     line = TOK[k,"line"]
@@ -245,6 +305,16 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
           text = text "#{"
           k++
           while (k <= j && TOK[k,"kind"] != "INTERP_CLOSE") {
+            # 二重ネスト補間 `#{f("#{g}")}`（補間の中の補間）は、check.awk/
+            # emit.awk 側のテキストスキャン（v2_find_interp_close 等）が
+            # "#{"/"}" の深さを追跡しない前提で書かれているため、ここで
+            # 平坦化だけ直しても後続工程が壊れる（rpn.awk 単独修正では
+            # 閉じない規模の変更になる）。専用診断を出して安全に停止する
+            # （pre-Task12 botfix item4。coderabbit 指摘: 汎用 "unmatched
+            # ')'" は偶然の一致でこのケースを保証できないため、専用文言に
+            # する）。
+            if (TOK[k,"kind"] == "INTERP_OPEN")
+              v2_diag(line, TOK[k,"col"], "nested string interpolation is not supported")
             # 補間内のネストした文字列リテラル（review ES で lex.awk が STR
             # トークンとして認識するようになった）は、引用符を落とさず生の
             # " で再ラップして渡す（落とすと内部の } が補間終端と誤認される）。
@@ -287,6 +357,23 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
     # あれば非空 "[" を添字アクセスの開始として扱う（二項演算子 INDEX に還元）。
     if (t == "LBRACK") {
       prevkind = (k > i) ? TOK[k-1,"kind"] : ""
+      # 多次元添字（`rows[i, "id"]` のような awk 組込みの多次元連想配列
+      # アクセス）は v2 の構造化 INDEX 二項演算子で表現できない
+      # （v2_index_assign_eq の既存判断 review EB と同じ）。base が
+      # ドット連鎖の一部でない単純 IDENT のときに限り、直前に emit 済みの
+      # base OPERAND を書き換えて "base[i, \"id\"]" 全体を 1 個の RAW
+      # オペランドへ差し替える（pre-Task12 botfix 1。v1 実測: この形の
+      # 行は生ブロック内の生テキストとして無変更のまま出力されるため、
+      # v2 でも検査を経ない生テキスト passthrough が v1 と同じ挙動になる）。
+      if (prevkind == "IDENT" && TOK[k-2,"kind"] != "DOT") {
+        multidim_close = v2_find_multidim_close(k, line)
+        if (multidim_close > 0) {
+          RPN[RPN["n"],"kind"] = "RAW"
+          RPN[RPN["n"],"val"]  = TOK[k-1,"text"] "[" v2_read_subscript_text(k, multidim_close) "]"
+          k = multidim_close
+          continue
+        }
+      }
       if (prevkind == "IDENT" || prevkind == "NUM" || prevkind == "TYPE" || \
           prevkind == "STR" || prevkind == "RP" || prevkind == "RBRACK") {
         v2_os_push("[")
@@ -423,6 +510,19 @@ function v2_is_arm_pat(i,    j) {
 
 # ─── 文構造パーサ ────────────────────────────────────────────────
 
+# 生 awk ブレースブロック（`if (x) { ... }` / `for (...) { ... }`）の閉じ
+# `}` 単独行を RAWLINE として emit し、未閉鎖ブレース深さを 1 減らす
+# （review EJ の「単独 RBRACE を関数終端と誤認識しない」判定はそのままに、
+# 消費するだけで捨てていた閉じ括弧を AST に載せる。pre-Task12 botfix 3。
+# 開き `{` を含む行が RAWLINE として v2_rpn_stmt 経由で出力される一方、
+# 閉じ `}` だけの行はここでしか出力されないため、この行を丸ごと落とすと
+# emit 後の生成コードのブレースが不整合になっていた）。
+function v2_rpn_emit_rawbrace_close(line) {
+  v2_emit_rpn("MARKER",  "RAWLINE", line, "")
+  v2_emit_rpn("OPERAND", "}",       line, "")
+  V2_RPN_RAWBRACE_DEPTH--
+}
+
 # KW に応じてサブパーサを選択するディスパッチャ
 function v2_rpn_dispatch(i,    kw) {
   # 深さ 0 のセミコロン文区切り（CR）: v2_find_expr_end が式終端として
@@ -431,6 +531,16 @@ function v2_rpn_dispatch(i,    kw) {
   # （`let x: Int = 1; return x` の一行複数文に対応）。
   while (i <= TOK["n"] && TOK[i,"kind"] == "OP" && TOK[i,"text"] == ";") i++
   if (i > TOK["n"]) return i
+  # when アーム本体（v2_rpn_when）やトップレベル走査（v2_rpn）は
+  # v2_rpn_func 本体ループのような RBRACE 専用の事前チェックを持たず、
+  # このディスパッチャを直接呼ぶ。生ブロックの閉じ `}` がここに来た
+  # ときも同じ RAWLINE 化を行う（pre-Task12 botfix 3。v2_rpn_func 側は
+  # 独自に FUNC_CLOSE 判定を兼ねるため、この分岐より前で RBRACE を
+  # 消費しておりここには到達しない）。
+  if (TOK[i,"kind"] == "RBRACE" && V2_RPN_RAWBRACE_DEPTH > 0) {
+    v2_rpn_emit_rawbrace_close(TOK[i,"line"])
+    return i + 1
+  }
   kw = (TOK[i,"kind"] == "KW") ? TOK[i,"text"] : ""
   if      (kw == "function") return v2_rpn_func(i)
   else if (kw == "let")      return v2_rpn_let(i)
@@ -528,9 +638,11 @@ function v2_rpn_func(i,    fname, line, j, typestart, pname, paramtype) {
       # 「RBRACE を見たら関数終端」と判定すると生ブロックの閉じ括弧を関数
       # 終端と誤認識し、以降の文がトップレベル化していた（review EJ）。
       # RAWLINE 消化時に数えた未閉鎖 `{` の深さが残っている間は、この
-      # RBRACE を生ブロックの閉じ括弧として消費するだけに留める。
+      # RBRACE を関数終端にはしない。単に読み飛ばすだけだと閉じ括弧
+      # 自体が AST から消えて emit 後のブレースが不整合になるため、
+      # RAWLINE として emit してから深さを 1 減らす（pre-Task12 botfix 3）。
       if (V2_RPN_RAWBRACE_DEPTH > 0) {
-        V2_RPN_RAWBRACE_DEPTH--
+        v2_rpn_emit_rawbrace_close(TOK[j,"line"])
         j++
         continue
       }
