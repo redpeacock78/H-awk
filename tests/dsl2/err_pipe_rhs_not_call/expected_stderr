@@ -1,0 +1,1 @@
+error: pipe right-hand side must be a call (`expr |> f(args)`)

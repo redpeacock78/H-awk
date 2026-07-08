@@ -1,4 +1,12 @@
 @namespace "app"
+function fetch_user(x) {
+  return x
+}
+
+function find_name(x) {
+  return x
+}
+
 function handler(ctx,    user, name) {
   when fetch_user(ctx) of
     ok user:

@@ -1,4 +1,16 @@
 @namespace "app"
+function outer() {
+  return 1
+}
+
+function middle(x) {
+  return x
+}
+
+function inner(x) {
+  return x
+}
+
 function handler(ctx,    a, b, c) {
   when outer() of
     ok a:

@@ -39,14 +39,14 @@ for dir in tests/unit/dsl/*/; do
   [[ -f "${dir}input.awk" ]] || continue
   [[ -f "${dir}expected.awk" ]] || continue
 
-  actual=$(gawk -f dsl/desugar.awk "${dir}input.awk" 2>/dev/null | grep -v '^# line ')
+  actual=$(gawk -f dsl/desugar.awk "${dir}input.awk" 2>/dev/null | { grep -v '^# line ' || true; })
 
-  if diff -u "${dir}expected.awk" <(printf '%s\n' "$actual") >/dev/null 2>&1; then
+  if diff -u "${dir}expected.awk" <(if [[ -n "$actual" ]]; then printf '%s\n' "$actual"; fi) >/dev/null 2>&1; then
     printf "  PASS: %s\n" "$name"
     PASS=$((PASS + 1))
   else
     printf "  FAIL: %s\n" "$name"
-    diff -u "${dir}expected.awk" <(printf '%s\n' "$actual") || true
+    diff -u "${dir}expected.awk" <(if [[ -n "$actual" ]]; then printf '%s\n' "$actual"; fi) || true
     FAIL=$((FAIL + 1))
   fi
 done

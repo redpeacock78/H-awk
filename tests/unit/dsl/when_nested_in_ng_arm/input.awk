@@ -1,4 +1,12 @@
 @namespace "app"
+function fetch_user(x) {
+  return x
+}
+
+function recover_user(x) {
+  return x
+}
+
 function handler(ctx,    user, fallback) {
   when fetch_user(ctx) of
     ok user:

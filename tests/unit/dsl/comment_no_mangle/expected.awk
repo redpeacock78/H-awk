@@ -1,5 +1,5 @@
 BEGIN {
-  hawk::dispatch("app.get", "/", "cb") # hawk.app.post not here
+  hawk::dispatch("app.get", "/", "cb")
   # let x = hawk.app.get("/skip", "cb")
   x = 1 # some.thing.here(args)
 }

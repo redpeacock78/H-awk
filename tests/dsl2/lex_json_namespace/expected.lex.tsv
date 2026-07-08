@@ -1,0 +1,13 @@
+1	KW	1	1	function
+2	IDENT	1	10	f
+3	LP	1	11	(
+4	IDENT	1	12	s
+5	RP	1	13	)
+6	LBRACE	1	15	{
+7	IDENT	2	3	json
+8	DOT	2	7	.
+9	IDENT	2	8	decode
+10	LP	2	14	(
+11	IDENT	2	15	s
+12	RP	2	16	)
+13	RBRACE	3	1	}

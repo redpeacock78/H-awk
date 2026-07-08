@@ -1,0 +1,16 @@
+1	KW	1	1	function
+2	IDENT	1	10	run
+3	LP	1	13	(
+4	RP	1	14	)
+5	ARROW	1	16	->
+6	TYPE	1	19	Response
+7	LBRACE	1	28	{
+8	KW	2	3	let
+9	IDENT	2	7	n
+10	COLON	2	8	:
+11	TYPE	2	10	Int
+12	OP	2	14	=
+13	NUM	2	16	1
+14	OP	2	18	+
+15	NUM	2	20	2
+16	RBRACE	3	1	}

@@ -1,0 +1,1 @@
+error: hawk.app.get argument 2 expects HandlerName, got Int

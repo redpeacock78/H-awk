@@ -1,3 +1,3 @@
 function handler(    v) {
-    v = cache::dispatch("has", "k")
+  v = cache::dispatch("has", "k")
 }

@@ -1,4 +1,4 @@
 function handler(    s) {
-  s = "foobar"
+  s = "foo" "bar"
   return ctx::dispatch("res.text", s)
 }

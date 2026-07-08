@@ -1,4 +1,4 @@
-function handler(    a, b, c, d) {
+function handler(    a, b, c, d, _ds_frag_args_1) {
   a = safe::dispatch("html.escape", "<b>")
   b = safe::dispatch("html.escape", "&")
   c = safe::dispatch("html.escape", "<i>")

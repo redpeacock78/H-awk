@@ -1,0 +1,1 @@
+error: DSL construct (??/|>/namespace call/interpolation) inside an awk statement head is not supported; move it to its own line

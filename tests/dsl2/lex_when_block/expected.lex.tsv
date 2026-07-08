@@ -1,0 +1,14 @@
+1	KW	1	1	when
+2	IDENT	1	6	x
+3	KW	1	8	of
+4	IDENT	2	3	ok
+5	IDENT	2	6	v
+6	COLON	2	7	:
+7	IDENT	2	9	v
+8	OP	2	11	+
+9	NUM	2	13	1
+10	IDENT	3	3	err
+11	IDENT	3	7	e
+12	COLON	3	8	:
+13	NUM	3	10	0
+14	KW	4	1	end

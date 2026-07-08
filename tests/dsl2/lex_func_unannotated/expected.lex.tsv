@@ -1,0 +1,17 @@
+1	KW	1	1	function
+2	IDENT	1	10	handler
+3	LP	1	17	(
+4	RP	1	18	)
+5	LBRACE	1	20	{
+6	KW	2	3	let
+7	IDENT	2	7	title
+8	OP	2	13	=
+9	IDENT	2	15	ctx
+10	DOT	2	18	.
+11	IDENT	2	19	req
+12	DOT	2	22	.
+13	IDENT	2	23	form
+14	LP	2	27	(
+15	STR	2	28	title
+16	RP	2	35	)
+17	RBRACE	3	1	}

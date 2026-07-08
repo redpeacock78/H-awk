@@ -1,4 +1,4 @@
-function handler(    _ds_tc_1, raw, _ds_err_type__ds_tc_1, _ds_p_1, frag) {
+function handler(    raw, _ds_tc_1, _ds_err_type__ds_tc_1, frag) {
   _ds_tc_1 = ctx::dispatch("req.form", "title")
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)
@@ -11,7 +11,6 @@ function handler(    _ds_tc_1, raw, _ds_err_type__ds_tc_1, _ds_p_1, frag) {
     return ctx::dispatch("res.status", 500)
   }
   raw = result_val(_ds_tc_1)
-  _ds_p_1 = safe::dispatch("html.escape", raw)
-  frag = safe::dispatch("html.fragment", "<p>", _ds_p_1, "</p>")
+  frag = safe::dispatch("html.fragment", sprintf("<p>%s</p>", safe::dispatch("html.escape", raw)))
   return ctx::dispatch("res.html", frag)
 }

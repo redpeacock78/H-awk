@@ -1,0 +1,11 @@
+1	KW	1	1	function
+2	IDENT	1	10	f
+3	LP	1	11	(
+4	IDENT	1	12	x
+5	COLON	1	13	:
+6	TYPE	1	15	Float
+7	RP	1	20	)
+8	LBRACE	1	22	{
+9	KW	2	3	return
+10	IDENT	2	10	x
+11	RBRACE	3	1	}
