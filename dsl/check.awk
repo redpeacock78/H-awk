@@ -1888,6 +1888,7 @@ function v2_check() {
   v2_collect(1)
   v2_infer_unannotated_returns(1)
   v2_check_alias_cycles()
+  v2_check_record_return_type(1)
   v2_check_toplevel_let()
   v2_check_calls(1, 0)
   v2_infer(1)
@@ -2001,6 +2002,24 @@ function v2_check_alias_cycle_member(member, lineno, visiting,    m, inner, gpar
     gn = v2_split_generic_args(inner, gparts)
     for (k = 1; k <= gn; k++) v2_check_alias_cycle_member(gparts[k], lineno, visiting)
   }
+}
+
+# 戻り値注釈が record 型（alias 経由含む）だと gawk が配列 return で
+# fatal になる awk を exit 0 で出す（F2）。param 注釈側は現状の動作で
+# 問題ない（引数として awk 配列を渡す分には動く）ため対象外。関数一つに
+# つき 1 回だけ診断すればよいので、AST を 1 回再帰的に歩いて FUNC ノード
+# の SIG[name,"ret"] を確認する。
+function v2_check_record_return_type(id,    k, kind, name, resolved) {
+  kind = AST[id,"kind"]
+  if (kind == "FUNC") {
+    name = AST[id,"text"]
+    resolved = v2_expand_alias(SIG[name,"ret"])
+    if (resolved in V2_RECORD_TYPE) {
+      v2_diag(AST[id,"line"], 1, \
+        "function " name ": record type '" SIG[name,"ret"] "' cannot be used as a return type (record values are awk arrays; gawk rejects array return)")
+    }
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_check_record_return_type(AST[id,"c" k])
 }
 
 function v2_check_alias_cycles(    i, name, visiting) {
