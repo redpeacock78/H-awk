@@ -31,7 +31,7 @@ APP_AWK="$("$LIBS" desugar "$APP")"
 trap "rm -f '$APP_AWK'" EXIT
 
 if [[ "$STRICT" -eq 1 ]]; then
-  if ! gawk --sandbox -f "${HAWK_LIB}/dsl/strict_stubs.awk" -f "$APP_AWK" < /dev/null >/dev/null 2>&1; then
+  if ! gawk --sandbox -f "${HAWK_LIB}/dsl/adt.awk" -f "${HAWK_LIB}/dsl/strict_stubs.awk" -f "$APP_AWK" < /dev/null >/dev/null 2>&1; then
     echo "[hawk] --strict: gawk syntax error in desugared output" >&2
     exit 1
   fi
