@@ -156,7 +156,12 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
       v2_hoist_add(next_func, AST[id,"text"])
       types_var = "_ds_tct_" V2_TC_CNT
       LETQ_TYPES_VAR[id] = types_var
-      JSON_TYPEVAR[AST[id,"text"]] = types_var
+      # I2 対応: キーを関数スコープ付き（func_id, varname）にする。変数名
+      # だけをキーにすると、同名変数を持つ別関数の decode が先行関数の
+      # エントリを上書きし、後続関数が未宣言 awk グローバル参照を通じて
+      # 別関数の型マップ変数を見てしまう（Codex review 指摘。
+      # probe /tmp/codex5/i2.awk）。
+      JSON_TYPEVAR[next_func, AST[id,"text"]] = types_var
       v2_hoist_add(next_func, types_var)
       if (resolved !~ /^Option</) v2_hoist_add(next_func, "_ds_err_type_" tmpvar)
     } else {
@@ -176,7 +181,8 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
       # probe /tmp/codex5/h5.awk。record 実装の要件 5 と共通機構）。
       if (bound_type ~ /^(Dict|List)</) {
         types_var = "_ds_letq_ty_" tmpvar
-        JSON_TYPEVAR[AST[id,"text"]] = types_var
+        # I2 対応: 上と同じ理由で関数スコープ付きキーにする。
+        JSON_TYPEVAR[next_func, AST[id,"text"]] = types_var
         v2_hoist_add(next_func, types_var)
       }
     }
@@ -189,6 +195,13 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
 # する副作用を持つ（一時変数注入）。その print の直前に置くインデント幅を
 # 式評価元の文と揃えるため、文ディスパッチの入口で都度更新するグローバル。
 V2_CUR_DEPTH = 0
+
+# I2 対応: 現在 emit 中の関数の AST id（v2_collect_hoists_walk の func_id
+# と同じ体系）。JSON_TYPEVAR の関数スコープ付きキー（func_id, varname）を
+# 式 emit 側（v2_e_dispatch / v2_e_pipe）から引くために必要。v2_e_func の
+# 本体走査開始時に更新する。トップレベルには LETQ/record が出現しないため
+# 0 のままで問題ない。
+V2_CUR_FUNC = 0
 
 function v2_e(id, depth,    kind) {
   V2_CUR_DEPTH = depth
@@ -301,6 +314,7 @@ function v2_e_func(id, depth,    k, c, kind, params, first, sig) {
   if (id in HOIST) sig = sig (params != "" ? ",    " : "    ") HOIST[id]
 
   print v2_indent(depth) "function " AST[id,"text"] "(" sig ") {"
+  V2_CUR_FUNC = id
   for (k = 1; k <= AST[id,"nc"]; k++) {
     c = AST[id,"c" k]
     kind = AST[c,"kind"]
@@ -666,7 +680,29 @@ function v2_e_pipe_args(rhs_id, lhs_out, is_generic,    k, n, s) {
   return s
 }
 
-function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, is_generic, tmpvar, call_expr) {
+# ctx.res.json(dictOrList) / ctx.res.json(record) の短絡判定 + typed
+# decode（?=）由来の型マップ（JSON_TYPEVAR）引き回しを、直接呼び出し
+# （v2_e_dispatch）と pipe（v2_e_pipe）の両経路で共有する（I3 対応。
+# probe /tmp/codex5/i3.awk）。旧実装は pipe 経路にだけ独立した簡略版の
+# 判定があり、Dict/List しか見ておらず（record を落として generic な
+# ns::dispatch("res.json", ...) に化けていた）、かつ JSON_TYPEVAR も
+# 一切引き回していなかった。
+# arg_id: 第 1 引数（pipe では LHS）の AST id。
+# arg_out: v2_e_expr(arg_id) 済みのテキスト（副作用のある式の再評価に
+#          よる print 二重化を避けるため、呼び出し側で 1 度だけ評価した
+#          結果を渡す）。
+# 対象外なら空文字を返し、呼び出し側は通常の lowering にフォールバック
+# する。
+function v2_e_res_json_call(arg_id, arg_out,    arg1type, arg1name) {
+  arg1type = v2_resolve_sealed(TYPEOF[arg_id])
+  if (arg1type !~ /^(Dict|List)</ && !(arg1type in V2_RECORD_TYPE)) return ""
+  arg1name = AST[arg_id,"text"]
+  if (AST[arg_id,"kind"] == "IDENT" && ((V2_CUR_FUNC, arg1name) in JSON_TYPEVAR))
+    return "json(res, " arg_out ", " JSON_TYPEVAR[V2_CUR_FUNC, arg1name] ")"
+  return "json(res, " arg_out ")"
+}
+
+function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, is_generic, tmpvar, call_expr, res_json_call) {
   lhs_id = AST[id,"c1"]
   rhs_id = AST[id,"c2"]
   lhs_out = v2_e_expr(lhs_id)
@@ -675,16 +711,19 @@ function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, is_gener
   # で終わるものだけを generic 呼び出しとみなす。
   is_generic = (name ~ /_t$/)
 
+  res_json_call = ""
+  if (name == "ctx.res.json" && AST[rhs_id,"nc"] == 0)
+    res_json_call = v2_e_res_json_call(lhs_id, lhs_out)
+
   if (name == "option.some") {
     call_expr = "option_some_make(" v2_e_pipe_args(rhs_id, lhs_out, 0) ")"
-  } else if (name == "ctx.res.json" && AST[rhs_id,"nc"] == 0 && v2_resolve_sealed(TYPEOF[lhs_id]) ~ /^(Dict|List)</) {
-    # ctx.res.json(dictOrList) の Dict/List 短絡を pipe 経路にも適用する
-    # （coderabbit review 4642730010 指摘。旧実装は v2_e_dispatch の直呼び
-    # 経路にしかこの分岐が無く、`x |> ctx.res.json()` だけ json(res, x) では
-    # なく ctx::dispatch("res.json", x) に落ちて出力形式がずれていた）。
-    # TYPEOF は alias 展開前の生テキスト（`type L = List<Int>` の "L" 等）を
-    # 保持し得るため v2_resolve_sealed で展開してから判定する（F3 対応）。
-    call_expr = "json(res, " lhs_out ")"
+  } else if (res_json_call != "") {
+    # ctx.res.json(dictOrList/record) の短絡を pipe 経路にも適用する
+    # （coderabbit review 4642730010 指摘 + I3 追補。旧実装は
+    # v2_e_dispatch の直呼び経路にしかこの分岐が無く、`x |> ctx.res.json()`
+    # だけ json(res, x) ではなく ctx::dispatch("res.json", x) に落ちて
+    # 出力形式がずれていた）。
+    call_expr = res_json_call
   } else if (name == "ctx.res.redirect" && AST[rhs_id,"nc"] == 0) {
     # ctx.res.redirect(url) の直呼び特例（status 302 既定付与）を pipe
     # 経路にも適用する（Codex review 指摘, botfix wave 19。旧実装は
@@ -749,7 +788,7 @@ function v2_e_coalesce(id,    tmp, lhs_out, rhs_out) {
 
 # ドット記法呼び出し -> ns::dispatch("path", args...) への変換。
 # 対応表の移植元: dsl/desugar_dot.awk, docs/dsl.md 296-344 行。
-function v2_e_dispatch(id,    name, dot, ns, path, s, k, arg1type, arg1name) {
+function v2_e_dispatch(id,    name, dot, ns, path, s, k, res_json_call) {
   name = AST[id,"text"]
 
   if (name == "option.some") {
@@ -768,21 +807,17 @@ function v2_e_dispatch(id,    name, dot, ns, path, s, k, arg1type, arg1name) {
     # xs: L = []` の xs は TYPEOF が未展開の "L" のままのため、生テキスト
     # 前方一致では通らず、直接 `List<Int>` と書いた場合とだけ lowering
     # 分岐が変わっていた）。
-    arg1type = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
-    if (arg1type ~ /^(Dict|List)</ || arg1type in V2_RECORD_TYPE) {
-      # typed decode（`?=` + result_val_into_map、G6）由来の変数は型マップ
-      # 変数を第 3 引数に引き回す（JSON_TYPEVAR。wave 27 追補 H5:
-      # Dict/List の `?=` materialization でもこの型マップを渡さないと
-      # 復元後の値が文字列扱いのまま json_encode_any へ渡り型が壊れる。
-      # probe /tmp/codex5/h5.awk。record 実装の要件 5 と共通機構）。
-      # record リテラル由来（typed decode を経ない）や空リテラル
-      # （`let xs: List<T> = []`）は型マップが無いため 2 引数のまま
-      # （record_basic / emit_dict_basic 等の golden）。
-      arg1name = AST[AST[id,"c1"],"text"]
-      if (AST[AST[id,"c1"],"kind"] == "IDENT" && (arg1name in JSON_TYPEVAR))
-        return "json(res, " v2_e_expr(AST[id,"c1"]) ", " JSON_TYPEVAR[arg1name] ")"
-      return "json(res, " v2_e_expr(AST[id,"c1"]) ")"
-    }
+    # typed decode（`?=` + result_val_into_map、G6）由来の変数は型マップ
+    # 変数を第 3 引数に引き回す（JSON_TYPEVAR。wave 27 追補 H5:
+    # Dict/List の `?=` materialization でもこの型マップを渡さないと
+    # 復元後の値が文字列扱いのまま json_encode_any へ渡り型が壊れる。
+    # probe /tmp/codex5/h5.awk。record 実装の要件 5 と共通機構）。
+    # record リテラル由来（typed decode を経ない）や空リテラル
+    # （`let xs: List<T> = []`）は型マップが無いため 2 引数のまま
+    # （record_basic / emit_dict_basic 等の golden）。判定・引き回しは
+    # v2_e_res_json_call（v2_e_pipe と共有、I3 対応）に集約する。
+    res_json_call = v2_e_res_json_call(AST[id,"c1"], v2_e_expr(AST[id,"c1"]))
+    if (res_json_call != "") return res_json_call
   }
 
   # ctx.res.redirect(url) は status 302 をデフォルト付与する
