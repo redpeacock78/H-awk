@@ -994,6 +994,14 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
     rectype = v2_rpn_expand_alias(typetext)
     if ((rectype in V2_RECORD_TYPE) && \
         TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=" && TOK[j+1,"kind"] == "LBRACE") {
+      # record リテラルへ委譲する経路は下の通常 LET 処理（1016 行目付近の
+      # V2_RPN_DSLVAR/V2_RPN_IDXVAR 登録）を経由せず早期 return するため、
+      # ここで明示的に登録しておく（F3）。未登録のままだと後続の bracket
+      # 形代入 `t["nope"] = 1` が構造化 INDEX_ASSIGN にならず RAWLINE
+      # として無検査で素通しされ、check.awk の未知フィールド検査
+      # （v2_check_index_assign）が一切働かない。
+      V2_RPN_DSLVAR[name] = typetext
+      V2_RPN_IDXVAR[name] = typetext
       return v2_rpn_record_literal(name, rectype, line, j + 1)
     }
   }
