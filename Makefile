@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-.PHONY: run dev bench check emit test test-unit test-dsl test-e2e lint clean help ci build-libs fetch-libs test-libs libs-clean ci-full
+.PHONY: run dev bench check emit test test-unit test-dsl test-dsl2 test-cli test-e2e lint clean help ci build-libs fetch-libs test-libs libs-clean ci-full
 
 APP     ?= app.awk
 WORKERS ?= 4
@@ -38,7 +38,7 @@ check: ## DSL 型検査のみ (サーバー起動なし)
 emit: ## desugar 済み AWK を stdout 出力
 	./bin/hawk emit $(if $(STRICT),--strict) $(APP)
 
-test: test-unit test-dsl test-e2e ## 全テスト
+test: test-unit test-dsl test-dsl2 test-cli test-e2e ## 全テスト
 
 test-unit: ## awk 内 assert
 	@libs_args=""; libs_vars=""; \
@@ -60,6 +60,12 @@ test-unit: ## awk 内 assert
 
 test-dsl: ## DSL desugar 単体テスト
 	./tests/unit/dsl/run.sh
+
+test-dsl2: ## DSL v2 工程別 golden テスト
+	./tests/dsl2/run.sh
+
+test-cli: ## CLI 単体テスト
+	./tests/unit/cli/run.sh
 
 test-e2e: ## サーバー起動 + curl
 	./tests/e2e/run.sh
