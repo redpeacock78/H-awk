@@ -956,8 +956,15 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
   } else if (kind == "RETURN") {
     if (AST[id,"nc"] >= 1) {
       ct = TYPEOF[AST[id,"c1"]]
+      # 期待型・実際の型ともに Effect<T> なら比較前に剥がす（docs/dsl.md:
+      # 636-654。Effect は型レベル wrapper で実行時の包み込み不要。J2）。
+      # 実際の型側も剥がす必要があるのは、cache.get(...) のように呼び出し
+      # 先の SIG 自体が Effect<...> を返す宣言のとき、その戻り値をそのまま
+      # return する式の推論型（ct）も Effect<...> を保持するため（emit_letq_coalesce
+      # fixture）。片側だけ剥がすと逆に不一致になる。メッセージ本文は宣言
+      # どおり V2_CUR_FUNC_RET（Effect<...> のまま）を表示する。
       if (ct != "" && V2_CUR_FUNC_RET != "" && V2_CUR_FUNC_RET != "Unknown" && \
-          !v2_type_compat(V2_CUR_FUNC_RET, ct)) {
+          !v2_type_compat(v2_strip_effect(V2_CUR_FUNC_RET), v2_strip_effect(ct))) {
         # Void 戻り値関数のメッセージのみ "return" を含めない
         # （v1 dsl/desugar.awk:457-461 の _ds_check_return と同一の文言。
         #  Void 以外は "expects return TYPE" 形式。Task 12 互換ゲート）。
