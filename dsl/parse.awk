@@ -202,6 +202,7 @@ function v2_stmt_dispatch(marker, i, parent, toplevel,    id, ret) {
   else if (marker == "EXPR")          ret = v2_parse_expr_stmt(i, parent)
   else if (marker == "RAWLINE")       ret = v2_parse_rawline(i, parent)
   else if (marker == "TYPEDECL")      ret = v2_parse_typedecl(i, parent)
+  else if (marker == "RECORDLIT")     ret = v2_parse_recordlit(i, parent)
   # INDEX_ASSIGN（添字代入文）は v2_parse_func 本体ループにも同じ分岐が
   # あるが、when アーム本体（v2_p_block 経由）やトップレベル（v2_parse 本体
   # ループ経由）はいずれも v2_stmt_dispatch だけを通るため、ここに分岐が
@@ -336,6 +337,7 @@ function v2_parse_func(i, parent,    fname, func_id, typeann_id, param_id, j) {
       if (RPN[j,"val"] == "WHEN")                    { j = v2_p_when(j, func_id); continue }
       if (RPN[j,"val"] == "EXPR")                    { j = v2_parse_expr_stmt(j, func_id); continue }
       if (RPN[j,"val"] == "INDEX_ASSIGN")            { j = v2_parse_index_assign(j, func_id) + 1; continue }
+      if (RPN[j,"val"] == "RECORDLIT")               { j = v2_parse_recordlit(j, func_id) + 1; continue }
       j++; continue
     }
     if (RPN[j,"kind"] == "OPERAND") V2_STK[++V2_SP] = v2_operand_node(RPN[j,"val"], RPN[j,"line"])
@@ -432,6 +434,35 @@ function v2_parse_index_assign(i, parent,    name, id, j, idx_id, rhs_id) {
 
   v2_addchild(parent, id)
   return j   # j == STMT_END の位置
+}
+
+# ─── record リテラル文（wave 27） ───────────────────────────────────
+
+# RECORDLIT 文（i: RECORDLIT の RPN インデックス）
+# 消費: OPERAND(varname) OPERAND(typename)
+#       [OPERAND(fieldname) 値式... MARKER RECFIELD_END]... MARKER STMT_END
+# ノード: kind=RECORDLIT, text=varname, c1=TYPEANN(typename),
+#         c2.. = RECFIELD(text=fieldname, c1=値式)
+# 返す: STMT_END の RPN インデックス
+function v2_parse_recordlit(i, parent,    varname, typename, id, j, field_id) {
+  varname  = RPN[i+1,"val"]
+  typename = RPN[i+2,"val"]
+  id = v2_node("RECORDLIT", RPN[i,"line"])
+  AST[id,"text"] = varname
+  v2_addchild(id, v2_leaf("TYPEANN", typename, RPN[i,"line"]))
+
+  j = i + 3
+  while (j <= RPN["n"] && !(RPN[j,"kind"] == "MARKER" && RPN[j,"val"] == "STMT_END")) {
+    field_id = v2_node("RECFIELD", RPN[j,"line"])
+    AST[field_id,"text"] = RPN[j,"val"]
+    j++
+    j = v2_expr_until_marker(j, field_id)   # RECFIELD_END まで値式を還元
+    j++   # RECFIELD_END をスキップ
+    v2_addchild(id, field_id)
+  }
+
+  v2_addchild(parent, id)
+  return j   # STMT_END の位置
 }
 
 # ─── RETURN 文 ──────────────────────────────────────────────────

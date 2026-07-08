@@ -17,6 +17,15 @@
 # ─── 演算子テーブル初期化 ─────────────────────────────────────────
 
 function v2_ops_init() {
+  # "=" は全演算子中最低優先度・右結合（wave 27）。以前は V2_OP_PREC 未登録
+  # だったため v2_pop_ge("=") が常に即 return し、後続の "." のような高
+  # 優先度演算子を代入より先に還元しなかった（`recv.field = rhs` が
+  # DOT(recv, BINOP(=, field, rhs)) という誤った木になっていた。record
+  # フィールードット代入で顕在化）。単純な `x = a + b` は元々演算子スタック
+  # への push 順序（"=" が先に積まれ後続演算子がその上に積まれる）だけで
+  # 偶然正しい木になっていたため regression は無いはずだが、`recv.field =
+  # rhs` のように代入より先に出現する高優先度演算子がある式では必須の修正。
+  v2_op("=",       5, "R")
   v2_op("|>",     10, "L")
   v2_op("??",     20, "R")
   v2_op("||",     30, "L")
@@ -826,27 +835,25 @@ function v2_skip_type(j,    startline, depth) {
 }
 
 # type NAME = TYPE_EXPR（型エイリアス宣言、docs/dsl.md:504-506。AP）
-# Union（|）/ Intersection（&）の単一行形のみ対応する。record 形
-# （`type Todo = { ... }` docs/dsl.md:123）は Task 10/11（emit）と合わせて
-# 別途対応が必要なスコープのため、ここでは扱わない（報告書に明記）。
+# Union（|）/ Intersection（&）の単一行形と、record 形
+# （`type Todo = { id: Str, done: Bool }` docs/dsl.md:123）の両方に対応する
+# （wave 27。v1 dsl/desugar.awk:_DS_RECORD_TYPE/_ds_parse_record_fields の
+# 移植）。record 形は宣言をフィールド型テーブル（V2_RECORD_TYPE/
+# V2_RECORD_FIELDS）に収集するのみで、RPN には何も emit しない
+# （v1 と同じく出力に余分な行を残さない）。
 function v2_rpn_typedecl(i,    line, name, j, typestart, typetext) {
   line = TOK[i,"line"]
   name = TOK[i+1,"text"]
 
   j = i + 2
 
-  # record 形の type 定義（`type Todo = { id: Str, done: Bool }`）は
-  # 未対応（docs/dsl.md:123, AP）。v1 は正しくサポートしているため、この
-  # まま v2_skip_type に渡すと "{" を型トークンとして扱えず型定義本体
-  # （フィールド行）が未消費のまま後続処理に漏れ、生の awk として出力
-  # されて構文エラーになっていた（fail-safe 原則違反。qeq_ctx_req_json_record_t
-  # botfix）。ここで record 形を検出したら診断を出し、対応する閉じ "}"
-  # まで丸ごと読み飛ばして、壊れた awk を出力しないようにする。
+  # record 形の type 定義。`{` の直後は複数行形（フィールドが改行区切り）・
+  # inline 形（カンマ区切り、閉じ `}` も同一行）のどちらもあり得るため、
+  # フィールド走査は v2_rpn_record_fields に委ねる。
   if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=" && \
       TOK[j+1,"kind"] == "LBRACE") {
-    v2_diag(line, TOK[j+1,"col"], \
-      "record-style type definitions (type " name " = { ... }) are not supported")
-    return v2_skip_record_body(j + 1)
+    V2_RECORD_TYPE[name] = 1
+    return v2_rpn_record_fields(name, j + 1)
   }
 
   v2_emit_rpn("MARKER", "TYPEDECL", line, "")
@@ -868,8 +875,51 @@ function v2_rpn_typedecl(i,    line, name, j, typestart, typetext) {
 }
 
 # record 形 type 定義の本体 `{ ... }`（open_pos は開き "{" の位置）を
-# ネストした { } を数えながら丸ごと読み飛ばし、閉じ "}" の次の位置を返す。
-function v2_skip_record_body(open_pos,    j, depth) {
+# フィールド名・型のペアへ分解し V2_RECORD_FIELDS[typename, field] へ収集
+# する（wave 27）。フィールド区切りはカンマ（inline 形）または改行
+# （複数行形、v2_skip_type が行境界で自動的に止まる性質を利用）のいずれも
+# 許容する。ジェネリック型（`Dict<Str, Int>` 等）内部のカンマは
+# v2_skip_type の depth 追跡でフィールド区切りと誤認しない。
+# 対応する閉じ "}" の次の位置を返す（出力には何も emit しない）。
+function v2_rpn_record_fields(typename, open_pos,    j, fname, typestart, typetext, k) {
+  j = open_pos + 1
+  while (j <= TOK["n"] && TOK[j,"kind"] != "RBRACE") {
+    if (TOK[j,"kind"] != "IDENT" && TOK[j,"kind"] != "TYPE") { j++; continue }
+    fname = TOK[j,"text"]
+    j++
+    if (TOK[j,"kind"] != "COLON") { j++; continue }   # 想定外形は defensively スキップ
+    j++   # skip ":"
+    typestart = j
+    j = v2_skip_type(typestart)
+    typetext = ""
+    for (k = typestart; k < j; k++)
+      typetext = typetext ((TOK[k,"kind"] == "COMMA") ? ", " : TOK[k,"text"])
+    V2_RECORD_FIELDS[typename, fname] = typetext
+    if (TOK[j,"kind"] == "COMMA") j++   # inline 形の区切り
+  }
+  # v1 は record 宣言ブロック全体と直後の空行 1 行をまとめてスキップし、
+  # 出力に余分な空行を残さない（dsl/desugar.awk:127-137 _skip_type_rec_blank）。
+  # v2 は宣言行自体は元々 PASS 対象外（トークン化されるだけで AST を
+  # 持たない）だが、直後の空行は素の PASS 行として残るため、ここで明示的に
+  # 抑制対象として記録する（wave 27。emit 側 v2_emit が参照する）。
+  if (TOK[j,"kind"] == "RBRACE") {
+    if (((TOK[j,"line"] + 1) in V2_RAWLINE) && V2_RAWLINE[TOK[j,"line"] + 1] ~ /^[[:space:]]*$/)
+      V2_SUPPRESS_BLANK[TOK[j,"line"] + 1] = 1
+  }
+  return j + 1
+}
+
+# record リテラル `let NAME: TYPE = { ... }`（TYPE は record 型として登録
+# 済み。wave 27。v1 dsl/desugar_let.awk:_ds_desugar_record_literal の移植）。
+# フィールドは inline（カンマ区切り）・複数行（改行区切り）の両方に対応する。
+# RPN: MARKER RECORDLIT / OPERAND varname / OPERAND typename /
+#      [OPERAND fieldname / <値式> / MARKER RECFIELD_END]... / MARKER STMT_END
+# open_pos は開き "{" の位置。閉じ "}" の次の位置を返す。
+# ネストした { } を数えながら open_pos（開き "{"）に対応する閉じ "}" の
+# 次の位置まで丸ごと読み飛ばす。診断済みで構造化できない `{ ... }` ブロック
+# を安全に消費するための fail-safe ヘルパー（wave 27。旧 v2_skip_record_body
+# の汎用版）。
+function v2_skip_balanced_braces(open_pos,    j, depth) {
   depth = 1
   j = open_pos + 1
   while (j <= TOK["n"] && depth > 0) {
@@ -880,35 +930,104 @@ function v2_skip_record_body(open_pos,    j, depth) {
   return j
 }
 
+function v2_rpn_record_literal(varname, typename, line, open_pos,    j, fname, fline, vstart, valline, depth, brace_depth) {
+  v2_emit_rpn("MARKER", "RECORDLIT", line, "")
+  v2_emit_rpn("OPERAND", varname, line, "")
+  v2_emit_rpn("OPERAND", typename, line, "")
+
+  j = open_pos + 1
+  while (j <= TOK["n"] && TOK[j,"kind"] != "RBRACE") {
+    if (TOK[j,"kind"] != "IDENT" && TOK[j,"kind"] != "TYPE") { j++; continue }
+    fname = TOK[j,"text"]
+    fline = TOK[j,"line"]
+    j++
+    if (TOK[j,"kind"] != "COLON") { j++; continue }   # 想定外形は defensively スキップ
+    j++   # skip ":"
+    vstart = j
+    valline = TOK[j,"line"]
+    depth = 0; brace_depth = 0
+    while (j <= TOK["n"]) {
+      if      (TOK[j,"kind"] == "LP" || TOK[j,"kind"] == "LBRACK") { depth++; j++; continue }
+      else if (TOK[j,"kind"] == "RP" || TOK[j,"kind"] == "RBRACK") { depth--; j++; continue }
+      else if (TOK[j,"kind"] == "LBRACE") { brace_depth++; j++; continue }
+      else if (TOK[j,"kind"] == "RBRACE") {
+        if (brace_depth == 0) break   # record 自身の閉じ "}"
+        brace_depth--; j++; continue
+      }
+      else if (TOK[j,"kind"] == "COMMA" && depth == 0 && brace_depth == 0) break
+      else if (depth == 0 && brace_depth == 0 && TOK[j,"line"] != valline) break
+      j++
+    }
+    v2_emit_rpn("OPERAND", fname, fline, "")
+    if (j - 1 >= vstart) v2_shunt_expr(vstart, j - 1)
+    v2_emit_rpn("MARKER", "RECFIELD_END", TOK[j,"line"], "")
+    if (TOK[j,"kind"] == "COMMA") j++   # inline 形の区切り
+  }
+  v2_emit_rpn("MARKER", "STMT_END", TOK[j,"line"], "")
+  return j + 1
+}
+
 # let NAME [: TYPE] = EXPR  または  let NAME [: TYPE] ?= EXPR
-function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, k) {
+# NAME: TYPE が record 型として登録済みで、RHS が `{`（= 形のみ、v1
+# parity）なら record リテラルとして v2_rpn_record_literal に委譲する
+# （wave 27）。`?=` の typed decode（`ctx.req.json<Todo>()`）は record
+# 型でも既存の generic 呼び出し経路（"_t" 接尾の CALL）でそのまま処理
+# できるため、ここでの分岐対象は `=` 形のみでよい。
+function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, k, rectype) {
   line = TOK[i,"line"]
   name = TOK[i+1,"text"]
 
-  # LET / LETQ 判別: 型注釈を読み飛ばして代入演算子を確認
+  # LET / LETQ 判別 + 型注釈の先読み。record リテラル判定に使うため、
+  # 型注釈テキストはここで 1 度だけ読み取り、以降のブロックで使い回す。
   j = i + 2
-  if (TOK[j,"kind"] == "COLON") j = v2_skip_type(j + 1)
+  typetext = ""
+  if (TOK[j,"kind"] == "COLON") {
+    typestart = j + 1
+    j = v2_skip_type(typestart)
+    typetext = ""
+    for (k = typestart; k < j; k++)
+      typetext = typetext ((TOK[k,"kind"] == "COMMA") ? ", " : TOK[k,"text"])
+  }
   marker = (TOK[j,"kind"] == "OP" && TOK[j,"text"] == "?=") ? "LETQ" : "LET"
+
+  if (marker == "LET" && typetext != "") {
+    rectype = v2_rpn_expand_alias(typetext)
+    if ((rectype in V2_RECORD_TYPE) && \
+        TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=" && TOK[j+1,"kind"] == "LBRACE") {
+      return v2_rpn_record_literal(name, rectype, line, j + 1)
+    }
+  }
+
+  # 注釈なし record リテラル `let NAME = { id: 1, ... }` は v1 でも未対応
+  # （docs も annotated 形のみ）。型注釈が無いと、どの型のフィールド集合と
+  # 照合すべきか判定できない。空 Dict リテラル `let x = {}` は既存の
+  # 空コレクション対応（下の裸宣言ブロック）に任せるため対象外とし、
+  # 非空 `{ ... }` のみを診断で拒否する（fail-safe 原則。wave 27。probe
+  # /tmp/codex4/r1.awk が `t = false` という壊れた exit 0 を出していた穴を
+  # 塞ぐ）。
+  if (marker == "LET" && typetext == "" && \
+      TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=" && \
+      TOK[j+1,"kind"] == "LBRACE" && TOK[j+2,"kind"] != "RBRACE") {
+    v2_diag(line, TOK[j+1,"col"], \
+      "record literal requires a type annotation (let x: T = { ... })")
+    return v2_skip_balanced_braces(j + 1)
+  }
 
   v2_emit_rpn("MARKER", marker, line, "")
   v2_emit_rpn("OPERAND", name, line, "")
 
   # 型注釈 [: TYPE]（Dict<Str, Str> / Str|Int のような複数トークンの型に対応）
-  j = i + 2
-  if (TOK[j,"kind"] == "COLON") {
-    j++  # skip :
-    typestart = j
-    j = v2_skip_type(j)
-    typetext = ""
-    for (k = typestart; k < j; k++)
-      typetext = typetext ((TOK[k,"kind"] == "COMMA") ? ", " : TOK[k,"text"])
+  if (typetext != "") {
     v2_emit_rpn("OPERAND", typetext, TOK[typestart,"line"], "")
     # List</Dict< と宣言された変数は、後続の添字代入文（xs[k] = v）を RAWLINE
     # に吸収させず ASSIGN 系ノードとして構造化するための対象に記録する（CB）。
     # `type Ints = List<Int>` のようなエイリアス越しの宣言は typetext が
     # literal "List<"/"Dict<" prefix にならず記録漏れになっていたため、
-    # 判定前にエイリアス展開する（CU）。
-    if (v2_rpn_expand_alias(typetext) ~ /^List</ || v2_rpn_expand_alias(typetext) ~ /^Dict</) {
+    # 判定前にエイリアス展開する（CU）。record 型（`let todo: Todo ?= ...`
+    # の typed decode 束縛）も同じ理由で bracket 代入
+    # （`todo["done:bool"] = ...`）を構造化する対象に含める（wave 27）。
+    if (v2_rpn_expand_alias(typetext) ~ /^List</ || v2_rpn_expand_alias(typetext) ~ /^Dict</ || \
+        (v2_rpn_expand_alias(typetext) in V2_RECORD_TYPE)) {
       V2_RPN_DSLVAR[name] = typetext
       V2_RPN_IDXVAR[name] = typetext
     }

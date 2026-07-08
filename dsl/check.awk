@@ -527,7 +527,7 @@ function v2_index_type(id,    target_type, key_type, m, dn, dparts) {
 # 代入値と要素型の互換検査は v1 に対応する検査が無い（v1 は
 # _ds_check_collection_assign でキー型しか見ない）v2 独自の追加厳格化であり、
 # List<Int> の要素型検査を有効にするという CB の目的そのもの。
-function v2_check_index_assign(id,    name, idx_id, rhs_id, target_type, key_type, rhs_type, m) {
+function v2_check_index_assign(id,    name, idx_id, rhs_id, target_type, key_type, rhs_type, m, fkey, expected) {
   name        = AST[id,"text"]
   idx_id      = AST[id,"c1"]
   rhs_id      = AST[id,"c2"]
@@ -555,6 +555,44 @@ function v2_check_index_assign(id,    name, idx_id, rhs_id, target_type, key_typ
     if (rhs_type != "" && rhs_type != "Unknown" && !v2_type_compat(m[1], rhs_type)) {
       v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " rhs_type " to " m[1])
     }
+  } else if (target_type in V2_RECORD_TYPE) {
+    # record フィールードの bracket 形代入（`todo["done:bool"] = ...`。
+    # wave 27。v1 dsl/desugar.awk:300-305 と同じく、`:bool` サフィックスを
+    # 剥がしてフィールド lookup する）。
+    fkey = AST[idx_id,"text"]
+    gsub(/^"|"$/, "", fkey)
+    sub(/:bool$/, "", fkey)
+    if (!((target_type, fkey) in V2_RECORD_FIELDS)) {
+      v2_diag(AST[id,"line"], 1, target_type ": unknown field " fkey)
+    } else {
+      expected = V2_RECORD_FIELDS[target_type, fkey]
+      if (rhs_type != "" && rhs_type != "Unknown" && !v2_type_compat(expected, rhs_type)) {
+        v2_diag(AST[id,"line"], 1, target_type "." fkey " expects " expected ", got " rhs_type)
+      }
+    }
+  }
+}
+
+# record フィールードット代入 `recv.field = rhs` を検査する（wave 27。v1
+# dsl/typecheck.awk:_ds_check_record_field_assign の移植）。recv が record
+# 型として V2_ENV に登録されていない場合は何もしない（record 以外の DOT
+# ノード、例えば通常のメソッド呼び出しの結果を誤検出しないため）。
+function v2_check_record_dot_assign(id, rhs_type,    dotid, recv, fieldnode, vtype, fname, expected) {
+  dotid = AST[id,"c1"]
+  recv  = AST[dotid,"c1"]
+  fieldnode = AST[dotid,"c2"]
+  if (AST[recv,"kind"] != "IDENT" || !(AST[recv,"text"] in V2_ENV)) return
+  vtype = V2_ENV[AST[recv,"text"]]
+  if (!(vtype in V2_RECORD_TYPE)) return
+  if (AST[fieldnode,"kind"] != "IDENT") return
+  fname = AST[fieldnode,"text"]
+  if (!((vtype, fname) in V2_RECORD_FIELDS)) {
+    v2_diag(AST[id,"line"], 1, vtype ": unknown field " fname)
+    return
+  }
+  expected = V2_RECORD_FIELDS[vtype, fname]
+  if (rhs_type != "" && rhs_type != "Unknown" && !v2_type_compat(expected, rhs_type)) {
+    v2_diag(AST[id,"line"], 1, vtype "." fname " expects " expected ", got " rhs_type)
   }
 }
 
@@ -632,7 +670,8 @@ V2_CUR_FUNC_RET = ""
 V2_CUR_FUNC_NAME = ""
 
 function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
-                   saved_ret, saved_name, ret_type, name, ret_sig, typearg, lhs_decl_type, rhs_id) {
+                   saved_ret, saved_name, ret_type, name, ret_sig, typearg, lhs_decl_type, rhs_id, \
+                   rec_typename, rec_fname) {
   kind = AST[id,"kind"]
 
   if (kind == "FUNC") {
@@ -731,6 +770,10 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
             !v2_type_compat(lhs_decl_type, rt)) {
           v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " rt " to " lhs_decl_type)
         }
+      } else if (AST[AST[id,"c1"],"kind"] == "DOT") {
+        # record フィールードット代入 `recv.field = rhs`（wave 27。v1
+        # dsl/typecheck.awk:_ds_check_record_field_assign の移植）。
+        v2_check_record_dot_assign(id, rt)
       }
       t = rt
     } else {
@@ -818,6 +861,24 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     }
     V2_ENV[AST[id,"text"]] = (typeann_id != 0) ? AST[typeann_id,"text"] : \
                               ((expr_id != 0 && TYPEOF[expr_id] != "") ? TYPEOF[expr_id] : "Unknown")
+    t = ""
+  } else if (kind == "RECORDLIT") {
+    # record リテラル `let NAME: TYPE = { ... }`（wave 27）。v1
+    # dsl/desugar_let.awk:_ds_desugar_record_literal と同じく、未知フィールド
+    # のみをここで検査する（フィールド値のリテラル型はチェックしない —
+    # v1 実測: record_generic_field_type_error は `items: "{}"`（Dict<Str,Int>
+    # フィールドへ Str リテラル）を構築時にはエラーにせず、後続の
+    # `bag.items = "oops"` 代入時のみ型不一致を報告する）。
+    rec_typename = ""
+    for (k = 1; k <= AST[id,"nc"]; k++) {
+      child = AST[id,"c" k]
+      if (AST[child,"kind"] == "TYPEANN") { rec_typename = AST[child,"text"]; continue }
+      rec_fname = AST[child,"text"]
+      if (!((rec_typename, rec_fname) in V2_RECORD_FIELDS)) {
+        v2_diag(AST[child,"line"], 1, rec_typename ": unknown field " rec_fname)
+      }
+    }
+    V2_ENV[AST[id,"text"]] = rec_typename
     t = ""
   } else if (kind == "LETQ") {
     typeann_id = 0; expr_id = 0

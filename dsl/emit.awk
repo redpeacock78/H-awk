@@ -12,7 +12,9 @@
 function v2_emit(   l, id, k) {
   v2_collect_hoists()
   for (l = 1; l <= V2_NLINES; l++) {
-    if (l in PASS) {
+    if (l in V2_SUPPRESS_BLANK) {
+      continue
+    } else if (l in PASS) {
       print PASS[l]
     } else if (l in V2_LINEAST_N) {
       # 同一行に複数のトップレベル文が並ぶ場合（parse.awk 側で
@@ -73,7 +75,7 @@ function v2_hoist_add(func_id, name) {
   HOIST[func_id] = (func_id in HOIST) ? HOIST[func_id] ", " name : name
 }
 
-function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, child, resolved, tmpvar, typeann_id, bound_type) {
+function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, child, resolved, tmpvar, typeann_id, bound_type, types_var) {
   kind = AST[id,"kind"]
   next_func = (kind == "FUNC") ? id : func_id
 
@@ -84,7 +86,10 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
     }
   }
 
-  if (kind == "LET" || kind == "LETQ")
+  # LETQ の変数ホイストは束縛型により順序が変わる（record 束縛は v1
+  # parity で tmpvar より後に、それ以外は従来どおり先に）ため、下の
+  # kind == "LETQ" 専用ブロックへ移す（wave 27）。
+  if (kind == "LET" || kind == "RECORDLIT")
     v2_hoist_add(next_func, AST[id,"text"])
 
   # WHEN 自身の対象式一時変数（_ds_mc_N）は、腕の束縛名より先に確定する
@@ -126,7 +131,6 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
     V2_TC_CNT++
     tmpvar = "_ds_tc_" V2_TC_CNT
     LETQ_TMPVAR[id] = tmpvar
-    v2_hoist_add(next_func, tmpvar)
     rhs_id = 0; typeann_id = 0
     for (k = 1; k <= AST[id,"nc"]; k++) {
       child = AST[id,"c" k]
@@ -134,19 +138,37 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
       else                                rhs_id = child
     }
     resolved = (rhs_id != 0) ? v2_resolve_sealed(TYPEOF[rhs_id]) : ""
-    # Result 系のみ、エラー種別を受ける追加の一時変数が必要（Option 系は
-    # option_some()/option_val() だけで済むため不要）。
-    if (resolved !~ /^Option</) v2_hoist_add(next_func, "_ds_err_type_" tmpvar)
-    # G6: `?=` の束縛先が Dict</List< のとき（json.decode<Dict<...>>(...) 等）、
-    # result_val() の単純 scalar 代入では ADT payload 文字列がそのまま
-    # 残ってしまい、束縛後に添字アクセスや ctx.res.json() へ渡すと壊れる。
-    # v1 相当の result_val_into_map(res, out, out_types) で awk 連想配列へ
-    # 復元する（v2_e_letq）。その out_types サイドカー用の一時変数をここで
-    # 確定・ホイストしておく（型注釈が無ければ Result<T,E>/Option<T> を
-    # unwrap した T で判定。check.awk の V2_ENV 決定と同じ規則）。
+    # 束縛型（型注釈が無ければ Result<T,E>/Option<T> を unwrap した T で
+    # 判定。check.awk の V2_ENV 決定と同じ規則）。
     bound_type = (typeann_id != 0) ? v2_resolve_sealed(AST[typeann_id,"text"]) : v2_unwrap_type(resolved)
     LETQ_BOUND_TYPE[id] = bound_type
-    if (bound_type ~ /^(Dict|List)</) v2_hoist_add(next_func, "_ds_letq_ty_" tmpvar)
+    if (bound_type in V2_RECORD_TYPE) {
+      # record 型の typed decode（`ctx.req.json<Todo>()`）は v1
+      # dsl/desugar_let.awk:_ds_let_transform の局所変数登録順（tmpvar ->
+      # varname -> 型マップ変数 -> errtype）をそのまま踏襲する（wave 27。
+      # golden fixture qeq_ctx_req_json_record_t が要求する順序で、
+      # 下の Dict/List 分岐が採用する v2 独自の順序とは異なる）。
+      v2_hoist_add(next_func, tmpvar)
+      v2_hoist_add(next_func, AST[id,"text"])
+      types_var = "_ds_tct_" V2_TC_CNT
+      LETQ_TYPES_VAR[id] = types_var
+      JSON_TYPEVAR[AST[id,"text"]] = types_var
+      v2_hoist_add(next_func, types_var)
+      if (resolved !~ /^Option</) v2_hoist_add(next_func, "_ds_err_type_" tmpvar)
+    } else {
+      v2_hoist_add(next_func, AST[id,"text"])
+      v2_hoist_add(next_func, tmpvar)
+      # Result 系のみ、エラー種別を受ける追加の一時変数が必要（Option 系は
+      # option_some()/option_val() だけで済むため不要）。
+      if (resolved !~ /^Option</) v2_hoist_add(next_func, "_ds_err_type_" tmpvar)
+      # G6: `?=` の束縛先が Dict</List< のとき（json.decode<Dict<...>>(...) 等）、
+      # result_val() の単純 scalar 代入では ADT payload 文字列がそのまま
+      # 残ってしまい、束縛後に添字アクセスや ctx.res.json() へ渡すと壊れる。
+      # v1 相当の result_val_into_map(res, out, out_types) で awk 連想配列へ
+      # 復元する（v2_e_letq）。その out_types サイドカー用の一時変数をここで
+      # 確定・ホイストしておく。
+      if (bound_type ~ /^(Dict|List)</) v2_hoist_add(next_func, "_ds_letq_ty_" tmpvar)
+    }
   }
 }
 
@@ -166,10 +188,63 @@ function v2_e(id, depth,    kind) {
   else if (kind == "RETURN")       v2_e_return(id, depth)
   else if (kind == "INDEX_ASSIGN") v2_e_index_assign(id, depth)
   else if (kind == "WHEN")         v2_e_when(id, depth)
-  else if (kind == "EXPR")         print v2_indent(depth) v2_e_expr(AST[id,"c1"])
+  else if (kind == "EXPR")         v2_e_expr_stmt(id, depth)
   else if (kind == "RAWLINE")      v2_e_rawline(id)
   else if (kind == "TYPEDECL")     v2_e_typedecl(id, depth)
+  else if (kind == "RECORDLIT")    v2_e_recordlit(id, depth)
   else v2_diag(AST[id,"line"], 1, "emit: unsupported node kind: " kind)
+}
+
+# EXPR 文（式文）の emit。通常は式をそのまま 1 行として出力するが、
+# record フィールードット代入 `recv.field = rhs` は v2_e_expr が持たない
+# DOT ノードを LHS に含むため（wave 27。plain な `.field` アクセスは
+# v2_e_expr の対応外 — namespace 呼び出しは v2_scan_dotted_chain が
+# 別経路で CALL に還元するため、DOT ノードとして残るのは record
+# フィールードアクセスのみ）、ここで bracket 形へ lowering してから出力する。
+function v2_e_expr_stmt(id, depth,    binop, lhs, rhs_id, recv, fieldnode, vtype) {
+  binop = AST[id,"c1"]
+  if (AST[binop,"kind"] == "BINOP" && AST[binop,"text"] == "=") {
+    lhs = AST[binop,"c1"]
+    if (AST[lhs,"kind"] == "DOT") {
+      recv = AST[lhs,"c1"]
+      fieldnode = AST[lhs,"c2"]
+      if (AST[recv,"kind"] == "IDENT" && (AST[recv,"text"] in V2_ENV)) {
+        vtype = V2_ENV[AST[recv,"text"]]
+        if ((vtype in V2_RECORD_TYPE) && AST[fieldnode,"kind"] == "IDENT") {
+          rhs_id = AST[binop,"c2"]
+          print v2_indent(depth) v2_e_record_field_assign(AST[recv,"text"], vtype, AST[fieldnode,"text"], rhs_id)
+          return
+        }
+      }
+    }
+  }
+  print v2_indent(depth) v2_e_expr(AST[id,"c1"])
+}
+
+# record フィールードへの代入を bracket 形へ lowering する
+# （varname["field"] = val / Bool フィールードは varname["field:bool"] = 0|1。
+# wave 27。v1 dsl/desugar.awk:284-288,_ds_desugar_record_literal と同じ規約）。
+# record リテラル構築（v2_e_recordlit）とドット代入（v2_e_expr_stmt）の
+# 両方から共有する。
+function v2_e_record_field_assign(varname, vtype, fname, rhs_id,    vexpr, ftype) {
+  vexpr = v2_e_expr(rhs_id)
+  ftype = V2_RECORD_FIELDS[vtype, fname]
+  if (ftype == "Bool")
+    return varname "[\"" fname ":bool\"] = " ((vexpr == "true" || vexpr == "1") ? "1" : "0")
+  return varname "[\"" fname "\"] = " vexpr
+}
+
+# record リテラル `let NAME: TYPE = { ... }` の emit（wave 27。v1
+# dsl/desugar_let.awk:_ds_desugar_record_literal と同じ lowering）。
+function v2_e_recordlit(id, depth,    varname, typename, k, c) {
+  varname = AST[id,"text"]
+  typename = ""
+  print v2_indent(depth) "delete " varname
+  for (k = 1; k <= AST[id,"nc"]; k++) {
+    c = AST[id,"c" k]
+    if (AST[c,"kind"] == "TYPEANN") { typename = AST[c,"text"]; continue }
+    print v2_indent(depth) v2_e_record_field_assign(varname, typename, AST[c,"text"], AST[c,"c1"])
+  }
 }
 
 # classify: transform|validator|sanitizer|sink は Pass 1（check.awk の
@@ -283,7 +358,12 @@ function v2_e_letq(id, depth,    varname, rhs_id, k, c, tmpvar, rhs_out, resolve
     print v2_indent(depth + 1) "return ctx::dispatch(\"res.status\", 500)"
     print v2_indent(depth) "}"
     bound_type = LETQ_BOUND_TYPE[id]
-    if (bound_type ~ /^(Dict|List)</) {
+    if (bound_type in V2_RECORD_TYPE) {
+      # record 型 typed decode（`ctx.req.json<Todo>()`）。型マップ変数は
+      # v1 parity で "_ds_tct_N"（v2_collect_hoists_walk が確定・ホイスト
+      # 済み。wave 27）。
+      print v2_indent(depth) "result_val_into_map(" tmpvar ", " varname ", " LETQ_TYPES_VAR[id] ")"
+    } else if (bound_type ~ /^(Dict|List)</) {
       types_var = "_ds_letq_ty_" tmpvar
       print v2_indent(depth) "result_val_into_map(" tmpvar ", " varname ", " types_var ")"
       if (bound_type ~ /^List</)
@@ -638,7 +718,7 @@ function v2_e_coalesce(id,    tmp, lhs_out, rhs_out) {
 
 # ドット記法呼び出し -> ns::dispatch("path", args...) への変換。
 # 対応表の移植元: dsl/desugar_dot.awk, docs/dsl.md 296-344 行。
-function v2_e_dispatch(id,    name, dot, ns, path, s, k, arg1type) {
+function v2_e_dispatch(id,    name, dot, ns, path, s, k, arg1type, arg1name) {
   name = AST[id,"text"]
 
   if (name == "option.some") {
@@ -659,6 +739,17 @@ function v2_e_dispatch(id,    name, dot, ns, path, s, k, arg1type) {
     # 分岐が変わっていた）。
     arg1type = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
     if (arg1type ~ /^(Dict|List)</) return "json(res, " v2_e_expr(AST[id,"c1"]) ")"
+    # record 型（wave 27。v1 dsl/desugar.awk:290-298 の移植）: typed decode
+    # （`?=` + result_val_into_map、G6）由来の変数は型マップ変数を第 3 引数に
+    # 引き回す（JSON_TYPEVAR。qeq_ctx_req_json_record_t golden）。record
+    # リテラル由来（typed decode を経ない）は型マップが無いため 2 引数のまま
+    # （record_basic golden）。
+    if (arg1type in V2_RECORD_TYPE) {
+      arg1name = AST[AST[id,"c1"],"text"]
+      if (AST[AST[id,"c1"],"kind"] == "IDENT" && (arg1name in JSON_TYPEVAR))
+        return "json(res, " v2_e_expr(AST[id,"c1"]) ", " JSON_TYPEVAR[arg1name] ")"
+      return "json(res, " v2_e_expr(AST[id,"c1"]) ")"
+    }
   }
 
   # ctx.res.redirect(url) は status 302 をデフォルト付与する
