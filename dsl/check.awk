@@ -140,6 +140,16 @@ function v2_collect(id,    k, name, child, argn) {
       ALIAS[name] = AST[AST[id,"c1"],"text"]
       ALIAS_DECL_LINE[name] = AST[id,"line"]
       ALIAS_DECL_ORDER[++ALIAS_DECL_N] = name
+      # G2: `type NAME = Error` は emit.awk が v1 相当の constructor
+      # `function NAME(msg) { return result_ng("NAME", msg) }` を生成する
+      # （v2_e_typedecl）。この呼び出し `NAME("msg")` 自体を Result<Any,
+      # NAME> の Err 側として型検査できるよう、v1 の
+      # `_DS_SIG_RET[name] = "Result<Any, name>"` と同じ SIG を登録する。
+      if (ALIAS[name] ~ /^Error([[:space:]]|$)/) {
+        SIG[name,"ret"]   = "Result<Any, " name ">"
+        SIG[name,"arity"] = 1
+        SIG[name,"arg1"]  = "Str"
+      }
     }
   } else if (AST[id,"kind"] == "FUNC") {
     name = AST[id,"text"]

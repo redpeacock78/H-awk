@@ -314,7 +314,16 @@ function v2_shunt_expr(i, j,    k, t, line, arity_idx, saved_sp, prevkind, unary
     # generic (f<T>) のいずれも FN: を push する前に callee 全体を収集する。
     # dotted の組込みシグネチャは "ctx.res.text" のようにフルネームで
     # 登録されているため、末尾の識別子だけを CALL 名にすると検査が壊れる。
-    if (t == "IDENT") {
+    #
+    # TYPE も callee 候補に含める（G2）: lex.awk は大文字始まり識別子を
+    # 常に TYPE 種別にするため、`type AuthError = Error` の Error
+    # constructor 呼び出し `AuthError("msg")` や union alias validator
+    # `Status(val)`（docs/dsl.md）は IDENT ではなく TYPE として来る。ここで
+    # 除外すると呼び出しが CALL に還元されず、直前トークンとの暗黙 CONCAT
+    # （`"AuthError" . msg` 相当）に落ちて型検査をすり抜けたまま壊れた
+    # 意味になっていた。名前空間（ctx/env/hawk/safe/json/cache）は小文字の
+    # ため衝突しない。
+    if (t == "IDENT" || t == "TYPE") {
       chain_end = v2_scan_dotted_chain(k)
       fname     = V2_CHAIN_NAME
       has_generic = 0

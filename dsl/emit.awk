@@ -20,7 +20,11 @@ function v2_emit(   l, id, k) {
       # 記録順にすべて emit する。
       for (k = 1; k <= V2_LINEAST_N[l]; k++) {
         id = V2_LINEAST[l, k]
-        v2_e(id, (AST[id,"kind"] == "FUNC") ? 0 : 1)
+        # TYPEDECL（G2 の Error alias constructor 含む）は FUNC と同じく
+        # トップレベル宣言であり BEGIN{} の中身ではないため depth 0。
+        # それ以外の非 FUNC トップレベル文（EXPR 等）は従来どおり
+        # BEGIN{} 内前提の depth 1 のまま。
+        v2_e(id, (AST[id,"kind"] == "FUNC" || AST[id,"kind"] == "TYPEDECL") ? 0 : 1)
       }
     }
   }
@@ -153,7 +157,7 @@ function v2_e(id, depth,    kind) {
   else if (kind == "WHEN")         v2_e_when(id, depth)
   else if (kind == "EXPR")         print v2_indent(depth) v2_e_expr(AST[id,"c1"])
   else if (kind == "RAWLINE")      v2_e_rawline(id)
-  else if (kind == "TYPEDECL")     return   # コンパイル時の型情報のみ、実行コードは生成しない
+  else if (kind == "TYPEDECL")     v2_e_typedecl(id, depth)
   else v2_diag(AST[id,"line"], 1, "emit: unsupported node kind: " kind)
 }
 
@@ -275,6 +279,21 @@ function v2_e_return(id, depth) {
 
 function v2_e_index_assign(id, depth) {
   print v2_indent(depth) AST[id,"text"] "[" v2_e_expr(AST[id,"c1"]) "] = " v2_e_expr(AST[id,"c2"])
+}
+
+# `type NAME = Error` 宣言（G2）。トップレベル型情報のみで実行コードを
+# 生成しない他の TYPEDECL（純粋な型エイリアス・レコード型）とは異なり、
+# Error alias だけは v1（dsl/desugar.awk）と同じく Result の Err 側を
+# 作るコンストラクタ関数 `function NAME(msg) { return result_ng("NAME",
+# msg) }` を emit する必要がある。生成しないと `AuthError("msg")` 呼び出しが
+# 未定義関数のランタイム fatal になるか、check.awk 側で Str 型と誤判定
+# されコンパイルエラーになっていた（review 指摘）。
+# ALIAS[name] は check.awk の v2_collect が既に埋めている（v2_check() は
+# v2_emit() より前に実行される）。
+function v2_e_typedecl(id, depth,    name) {
+  name = AST[id,"text"]
+  if (name == "" || !(name in ALIAS) || ALIAS[name] !~ /^Error([[:space:]]|$)/) return
+  print v2_indent(depth) "function " name "(msg) { return result_ng(\"" name "\", msg) }"
 }
 
 # ─── `when ... of ... end` 文 ──────────────────────────────────────

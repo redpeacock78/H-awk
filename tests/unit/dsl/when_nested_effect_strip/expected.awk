@@ -1,3 +1,4 @@
+function SaveError(msg) { return result_ng("SaveError", msg) }
 
 function fetch_user(ctx) {
 }

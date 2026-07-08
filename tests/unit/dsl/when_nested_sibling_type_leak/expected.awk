@@ -1,3 +1,5 @@
+function ReadError(msg) { return result_ng("ReadError", msg) }
+function ParseError(msg) { return result_ng("ParseError", msg) }
 
 function fetch() {
 }

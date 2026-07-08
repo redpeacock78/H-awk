@@ -1,3 +1,5 @@
+function ErrA(msg) { return result_ng("ErrA", msg) }
+function ErrB(msg) { return result_ng("ErrB", msg) }
 
 function fetch_user(ctx) {
 }
