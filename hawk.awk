@@ -29,6 +29,7 @@
 @include "core/response.awk"
 @include "core/hawk.awk"
 @include "core/env.awk"
+@include "dsl/type.awk"
 @include "core/safe.awk"
 @include "core/router.awk"
 @include "core/ctx.awk"

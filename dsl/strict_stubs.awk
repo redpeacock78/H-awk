@@ -7,8 +7,11 @@
 # BEGIN block harmlessly) without needing the full runtime.
 #
 # NOTE: dsl/adt.awk (result_ok/result_ng/option_some/... in the default "awk"
-# namespace) is loaded separately by libexec/hawk-check and libexec/hawk-emit
-# since it is real, pure, dependency-free code -- no stub needed for it.
+# namespace) and dsl/type.awk (type::accepts/coerce/normalize, used by the
+# non-Error type-alias validator constructors emitted for `type X = A | B`,
+# wave 27 追補 H4) are loaded separately by libexec/hawk-check and
+# libexec/hawk-emit since both are real, pure, dependency-free code -- no
+# stub needed for them.
 
 @namespace "hawk"
 function dispatch(path, a1, a2, a3) { return 0 }
