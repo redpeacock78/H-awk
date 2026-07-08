@@ -1637,12 +1637,69 @@ function v2_check_brand(id, extra,    k, name, arity, argidx, expected, child, c
 
 # ─── エントリポイント ─────────────────────────────────────────────
 
+# G5: 戻り値注釈（-> RETTYPE）を持たない関数は SIG[name,"ret"] が
+# "Unknown" のままになり、`when wrapper() of` の網羅性検査
+# （v2_check_when/v2_check_arm_order）に参加しない（未知型は Unknown 側で
+# 診断を抑制する既存規則のため）。v1 は本体の return から戻り値型を推論し
+# `-> RETTYPE` 相当として扱っていたため、これは v1 パリティの欠落だった。
+#
+# 完全な推論（複数 return の合流・多分岐の型統一等）は大工事になるため、
+# このwaveでは最小限の単純ケースのみ対応する: 関数本体が「単一の return
+# 文だけ」で構成され、その式の型が SIG[]（他の既知関数・組込み dispatch）
+# だけから即座に解決できる場合に限り SIG[name,"ret"] を上書きする。
+# v2_collect(1) が全関数の SIG を収集し終えた直後に呼ぶことで、他の
+# （注釈付き・組込み）関数への前方参照も解決できる。多段（他の未注釈
+# 関数を経由する）ケースは 1 パスでは解決されず Unknown のまま残る
+# （final report に制限として明記）。
+function v2_infer_unannotated_returns(id,    k, child, kind, name, stmt_n, stmt_id, ret_id, inferred) {
+  if (AST[id,"kind"] == "FUNC") {
+    name = AST[id,"text"]
+    if (((name,"ret") in SIG) && SIG[name,"ret"] == "Unknown") {
+      stmt_n = 0; ret_id = 0
+      for (k = 1; k <= AST[id,"nc"]; k++) {
+        child = AST[id,"c" k]
+        kind  = AST[child,"kind"]
+        if (kind == "PARAM" || kind == "TYPEANN") continue
+        stmt_n++
+        ret_id = child
+      }
+      if (stmt_n == 1 && AST[ret_id,"kind"] == "RETURN" && AST[ret_id,"nc"] == 1) {
+        inferred = v2_prescan_expr_type(AST[ret_id,"c1"])
+        if (inferred != "" && inferred != "Unknown") SIG[name,"ret"] = inferred
+      }
+    }
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_infer_unannotated_returns(AST[id,"c" k])
+}
+
+# v2_infer_unannotated_returns 専用の最小限の型解決。TYPEOF[]/V2_ENV[] に
+# 依存する完全な v2_infer() とは独立させ（この時点ではまだ計算されて
+# いない）、SIG[] だけから即座に分かる範囲のみ扱う。診断は一切出さない
+# （不確実なら "" を返して呼び出し元が Unknown 扱いのまま諦める）。
+function v2_prescan_expr_type(id,    kind, name, inner) {
+  kind = AST[id,"kind"]
+  if (kind == "STRLIT") return "Str"
+  if (kind == "NUMLIT")  return (AST[id,"text"] ~ /[.]/) ? "Float" : "Int"
+  if (kind == "CALL") {
+    name = AST[id,"text"]
+    if (name == "option.some" && AST[id,"nc"] >= 1) {
+      inner = v2_prescan_expr_type(AST[id,"c1"])
+      return (inner != "") ? "Option<" inner ">" : ""
+    }
+    if (name == "option.none") return "Option<Any>"
+    if ((name,"ret") in SIG && SIG[name,"ret"] != "Unknown") return SIG[name,"ret"]
+    return ""
+  }
+  return ""
+}
+
 function v2_check() {
   v2_init_builtins()
   VARIANTS["Result"] = "ok" SUBSEP "ng"
   VARIANTS["Option"]  = "some" SUBSEP "none"
 
   v2_collect(1)
+  v2_infer_unannotated_returns(1)
   v2_check_alias_cycles()
   v2_check_toplevel_let()
   v2_check_calls(1, 0)
