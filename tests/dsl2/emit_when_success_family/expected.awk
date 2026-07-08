@@ -1,7 +1,7 @@
 function MyErr(msg) { return result_ng("MyErr", msg) }
 
 function f(x) {
-  return result::dispatch("ok", x)
+  return result_ok_make(x)
 }
 
 function g(    _ds_mc_1, v, e) {

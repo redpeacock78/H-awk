@@ -726,6 +726,9 @@ function v2_e_pipe(id,    lhs_id, rhs_id, lhs_out, name, dot, ns, path, is_gener
 
   if (name == "option.some") {
     call_expr = "option_some_make(" v2_e_pipe_args(rhs_id, lhs_out, 0) ")"
+  } else if (name == "result.ok" || name == "result.ng") {
+    call_expr = (name == "result.ok" ? "result_ok_make(" : "result_ng(") \
+                v2_e_pipe_args(rhs_id, lhs_out, 0) ")"
   } else if (res_json_call != "") {
     # ctx.res.json(dictOrList/record) の短絡を pipe 経路にも適用する
     # （coderabbit review 4642730010 指摘 + I3 追補。旧実装は
@@ -824,6 +827,16 @@ function v2_e_dispatch(id,    name, dot, ns, path, s, k, res_json_call, arg1_out
     return s ")"
   }
   if (name == "option.none") return "option_none_make()"
+
+  # result namespace は option と同様 ADT ヘルパへ直接 lowering する（K3。
+  # result::dispatch は実行時に未定義で fatal になるため option.* と対称に
+  # 特別処理し、result.ok(val)/result.ng(type[, msg]) を result_ok_make/
+  # result_ng へそのまま引数を引き回す）。
+  if (name == "result.ok" || name == "result.ng") {
+    s = (name == "result.ok" ? "result_ok_make(" : "result_ng(")
+    for (k = 1; k <= AST[id,"nc"]; k++) s = s (k > 1 ? ", " : "") v2_e_expr(AST[id,"c" k])
+    return s ")"
+  }
 
   dot  = index(name, ".")
   ns   = substr(name, 1, dot - 1)
@@ -1117,6 +1130,12 @@ function v2_e_interp_build_call(name, genarg, extra_first, args, nargs,    allar
     return s ")"
   }
   if (name == "option.none") return "option_none_make()"
+
+  if (name == "result.ok" || name == "result.ng") {
+    s = (name == "result.ok" ? "result_ok_make(" : "result_ng(")
+    for (k = 1; k <= nall; k++) s = s (k > 1 ? ", " : "") allargs[k]
+    return s ")"
+  }
 
   dot = index(name, ".")
   if (dot == 0) {
