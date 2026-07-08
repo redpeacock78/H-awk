@@ -1,3 +1,4 @@
+function MyErr(msg) { return result_ng("MyErr", msg) }
 
 function f(x) {
   return result::dispatch("ok", x)

@@ -1,4 +1,4 @@
 function f(    html) {
-  html = "<tr><td></td>"
+  html = "<tr>" "<td></td>"
   return html
 }

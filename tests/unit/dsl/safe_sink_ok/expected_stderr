@@ -1,0 +1,1 @@
+function escape_html expects return Safe<HtmlStr>, got Str

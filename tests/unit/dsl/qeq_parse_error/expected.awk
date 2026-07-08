@@ -1,4 +1,4 @@
-function h(    _ds_tc_1, title, _ds_err_type__ds_tc_1) {
+function h(    title, _ds_tc_1, _ds_err_type__ds_tc_1) {
   _ds_tc_1 = ctx::dispatch("req.form", "title")
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)

@@ -1,0 +1,1 @@
+record literal requires a type annotation (let x: T = { ... })

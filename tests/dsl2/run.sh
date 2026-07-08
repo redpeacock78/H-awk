@@ -23,7 +23,7 @@ for dir in tests/dsl2/*/; do
   # エラー fixture
   if [[ -f "${dir}expected_stderr" ]]; then
     set +e
-    actual_err=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>&1 >/dev/null)
+    actual_err=$(gawk -f dsl/desugar.awk "${dir}input.awk" 2>&1 >/dev/null)
     ret=$?
     set -e
     if [[ $ret -eq 1 ]] && grep -qF "$(cat "${dir}expected_stderr")" <<<"$actual_err"; then
@@ -40,7 +40,7 @@ for dir in tests/dsl2/*/; do
     [[ -f "${dir}expected.${stage}.tsv" ]] || continue
     stderr_file=$(mktemp)
     set +e
-    actual=$(gawk -v V2_DUMP=$stage -f dsl/v2/main.awk "${dir}input.awk" 2>"$stderr_file")
+    actual=$(gawk -v V2_DUMP=$stage -f dsl/desugar.awk "${dir}input.awk" 2>"$stderr_file")
     ret=$?
     set -e
     actual_err=$(cat "$stderr_file"); rm -f "$stderr_file"
@@ -56,7 +56,7 @@ for dir in tests/dsl2/*/; do
   if [[ -f "${dir}expected.awk" ]]; then
     stderr_file=$(mktemp)
     set +e
-    actual=$(gawk -f dsl/v2/main.awk "${dir}input.awk" 2>"$stderr_file")
+    actual=$(gawk -f dsl/desugar.awk "${dir}input.awk" 2>"$stderr_file")
     ret=$?
     set -e
     actual_err=$(cat "$stderr_file"); rm -f "$stderr_file"

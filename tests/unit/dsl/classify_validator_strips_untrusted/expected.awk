@@ -2,7 +2,7 @@ function validate_id(s) {
   return s
 }
 
-function h(    _ds_tc_1, raw, _ds_err_type__ds_tc_1, _ds_p_1, id) {
+function h(    raw, _ds_tc_1, _ds_err_type__ds_tc_1, id, _ds_p_1) {
   _ds_tc_1 = ctx::dispatch("req.query", "id")
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)

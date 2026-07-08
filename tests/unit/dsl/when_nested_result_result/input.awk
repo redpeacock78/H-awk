@@ -1,4 +1,12 @@
 @namespace "app"
+function fetch_user(x) {
+  return x
+}
+
+function save_user(x) {
+  return x
+}
+
 function handler(ctx,    user, saved) {
   when fetch_user(ctx) of
     ok user:

@@ -1,0 +1,1 @@
+ctx.res.text argument 1 expects Str|Untrusted<Str>, got Int

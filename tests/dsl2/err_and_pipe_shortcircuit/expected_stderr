@@ -1,0 +1,1 @@
+'&&' right-hand side must not require pipe/coalesce hoisting (short-circuit would be broken)

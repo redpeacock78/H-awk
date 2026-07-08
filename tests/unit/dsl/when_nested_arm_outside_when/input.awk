@@ -1,5 +1,5 @@
 @namespace "app"
-function handler(    x) {
+function handler(x) -> Response {
   x = lookup()
   ok x:
     pass()
