@@ -940,8 +940,15 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
         v2_diag(AST[id,"line"], 1, "type mismatch: cannot assign " ct " to " AST[typeann_id,"text"])
       }
     }
+    # 明示注釈が無い bare `[]` は List<Any> と確定させず untyped fallback
+    # （Unknown）にする（K1）。v2_infer の LISTLIT 推論は空リストを一律
+    # List<Any> とするが、注釈なしの `let payload = []` まで List 扱いに
+    # すると v2_check_index_assign の数値キー検査が誤って連想キー代入
+    # （`payload["count"] = 1`）を拒否する。v1 は無注釈の bare [] を型無し
+    # として扱い連想キーを許容するため、明示 List<T> 注釈が付いた場合のみ
+    # 数値キー検査を課す。
     V2_ENV[AST[id,"text"]] = (typeann_id != 0) ? AST[typeann_id,"text"] : \
-                              ((expr_id != 0 && TYPEOF[expr_id] != "") ? TYPEOF[expr_id] : "Unknown")
+                              ((expr_id != 0 && TYPEOF[expr_id] != "" && TYPEOF[expr_id] != "List<Any>") ? TYPEOF[expr_id] : "Unknown")
     t = ""
   } else if (kind == "RECORDLIT") {
     # record リテラル `let NAME: TYPE = { ... }`（wave 27）。v1
