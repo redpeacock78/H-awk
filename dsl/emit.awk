@@ -240,8 +240,17 @@ function v2_e_expr_stmt(id, depth,    binop, lhs, rhs_id, recv, fieldnode, vtype
 function v2_e_record_field_assign(varname, vtype, fname, rhs_id,    vexpr, ftype) {
   vexpr = v2_e_expr(rhs_id)
   ftype = V2_RECORD_FIELDS[vtype, fname]
-  if (ftype == "Bool")
-    return varname "[\"" fname ":bool\"] = " ((vexpr == "true" || vexpr == "1") ? "1" : "0")
+  if (ftype == "Bool") {
+    # I1 対応: RHS が Bool リテラル `true`/`false` のときだけ 1/0 へ畳み込む。
+    # 旧実装は emit 済みテキストと "true"/"1" を文字列比較しており、
+    # リテラル以外（変数参照・関数呼び出し等の正当な Bool 式）は全て
+    # 一致せず無条件に 0 へ落ちていた（Codex review 指摘、probe
+    # /tmp/codex5/i1.awk）。DSL の Bool は実行時 1/0 で表現されるため、
+    # リテラル以外はそのまま代入すれば良い。
+    if (vexpr == "true")  return varname "[\"" fname ":bool\"] = 1"
+    if (vexpr == "false") return varname "[\"" fname ":bool\"] = 0"
+    return varname "[\"" fname ":bool\"] = " vexpr
+  }
   return varname "[\"" fname "\"] = " vexpr
 }
 
