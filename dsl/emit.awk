@@ -86,6 +86,21 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
     }
   }
 
+  # record リテラルで束縛された変数の型を (func_id, varname) キーで
+  # サイドカーに記録する（K6。JSON_TYPEVAR と同じ関数スコープ付き方式）。
+  # emit 時の DOT 代入（v2_e_expr_stmt）は checker の V2_ENV に依存すると
+  # 「最後に検査した関数の環境」を全関数が共有してしまうため、check.awk
+  # とは独立にここで func_id 単位に記録する。
+  if (kind == "RECORDLIT") {
+    for (k = 1; k <= AST[id,"nc"]; k++) {
+      child = AST[id,"c" k]
+      if (AST[child,"kind"] == "TYPEANN") {
+        RECORD_VARTYPE[next_func, AST[id,"text"]] = AST[child,"text"]
+        break
+      }
+    }
+  }
+
   # LETQ の変数ホイストは束縛型により順序が変わる（record 束縛は v1
   # parity で tmpvar より後に、それ以外は従来どおり先に）ため、下の
   # kind == "LETQ" 専用ブロックへ移す（wave 27）。
@@ -241,8 +256,8 @@ function v2_e_expr_stmt(id, depth,    binop, lhs, rhs_id, recv, fieldnode, vtype
     if (AST[lhs,"kind"] == "DOT") {
       recv = AST[lhs,"c1"]
       fieldnode = AST[lhs,"c2"]
-      if (AST[recv,"kind"] == "IDENT" && (AST[recv,"text"] in V2_ENV)) {
-        vtype = V2_ENV[AST[recv,"text"]]
+      if (AST[recv,"kind"] == "IDENT" && ((V2_CUR_FUNC, AST[recv,"text"]) in RECORD_VARTYPE)) {
+        vtype = RECORD_VARTYPE[V2_CUR_FUNC, AST[recv,"text"]]
         if ((vtype in V2_RECORD_TYPE) && AST[fieldnode,"kind"] == "IDENT") {
           rhs_id = AST[binop,"c2"]
           print v2_indent(depth) v2_e_record_field_assign(AST[recv,"text"], vtype, AST[fieldnode,"text"], rhs_id)

@@ -727,6 +727,24 @@ function v2_infer_when(id,    k, j, arm, pat, blk, pc, tag, typeann_id, bind_id,
 V2_CUR_FUNC_RET = ""
 V2_CUR_FUNC_NAME = ""
 
+# 関数走査に入る前の V2_ENV をスタックへ退避し、走査後に復元する（K2）。
+V2_ENV_STACK_DEPTH = 0
+function v2_env_push(    key) {
+  V2_ENV_STACK_DEPTH++
+  for (key in V2_ENV) V2_ENV_SAVE[V2_ENV_STACK_DEPTH, key] = V2_ENV[key]
+}
+function v2_env_pop(    combined, parts) {
+  delete V2_ENV
+  for (combined in V2_ENV_SAVE) {
+    split(combined, parts, SUBSEP)
+    if (parts[1] == V2_ENV_STACK_DEPTH) {
+      V2_ENV[parts[2]] = V2_ENV_SAVE[combined]
+      delete V2_ENV_SAVE[combined]
+    }
+  }
+  V2_ENV_STACK_DEPTH--
+}
+
 function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
                    saved_ret, saved_name, ret_type, name, ret_sig, typearg, lhs_decl_type, rhs_id, \
                    rec_typename, rec_fname) {
@@ -739,8 +757,13 @@ function v2_infer(id,    k, kind, t, lt, rt, ct, typeann_id, expr_id, child, \
     saved_name = V2_CUR_FUNC_NAME
     V2_CUR_FUNC_RET  = ret_type
     V2_CUR_FUNC_NAME = name
+    # 関数走査後に V2_ENV が空/前関数のローカルのまま残ると、後続のトップ
+    # レベル文が同名のグローバルをローカルと誤認する（K2）。走査前の
+    # V2_ENV を退避し、走査後に復元する。
+    v2_env_push()
     delete V2_ENV
     for (k = 1; k <= AST[id,"nc"]; k++) v2_infer(AST[id,"c" k])
+    v2_env_pop()
     V2_CUR_FUNC_RET  = saved_ret
     V2_CUR_FUNC_NAME = saved_name
     return ""
