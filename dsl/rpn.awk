@@ -1109,6 +1109,35 @@ function v2_is_awk_stmt_head(i) {
      TOK[i,"text"] == "delete")
 }
 
+# G3: v2_rpn_stmt が RAWLINE へ fallback しようとしている物理行に、
+# 素の awk としては構文的に成立しない DSL 演算子・呼び出し（`??` / `|>` /
+# 名前空間呼び出し hawk./ctx./env./safe./json./cache. / 文字列補間 #{...}）
+# が含まれるかどうかを判定する。これらはそのまま RAWLINE で素通しすると
+# 未変換のドット記法・演算子が残った壊れた awk が exit 0 で出てしまう
+# （fail-safe 原則違反）。
+#
+# 一方、既知の型注釈付きユーザー関数の呼び出し（`f(1)`）はそれ自体が
+# そのまま有効な awk 呼び出し構文であり RAWLINE 素通しでも壊れないため
+# ここでは検出しない（emit_double_colon_noncall_passthrough 等の
+# 既存 fixture が `print f(1)` の RAWLINE 素通しを期待している。引数型
+# 検査を head 内でも行う完全解は (a) 式変換が必要で、この wave の最低
+# ラインである (b) 拒否の対象外 = G4 の残課題として report に明記する）。
+#
+# トークン列ベースの判定なので文字列・正規表現リテラル内の同形テキストは
+# 元々別トークン種別＝誤検出しない（`if (s ~ /a\?\?b/)` の REGEX トークンは
+# ここに引っかからない）。
+function v2_stmt_head_has_dsl(i, line,    j, k) {
+  for (j = i; j <= TOK["n"] && TOK[j,"line"] == line; j++) {
+    k = TOK[j,"kind"]
+    if (k == "OP" && (TOK[j,"text"] == "??" || TOK[j,"text"] == "|>")) return 1
+    if (k == "INTERP_OPEN") return 1
+    # 名前空間付きドット呼び出し（hawk./ctx./env./safe./json./cache.）
+    if (k == "IDENT" && TOK[j,"text"] ~ /^(hawk|ctx|env|safe|json|cache)$/ && \
+        j + 1 <= TOK["n"] && TOK[j+1,"line"] == line && TOK[j+1,"kind"] == "DOT") return 1
+  }
+  return 0
+}
+
 # 素の awk 複合代入演算子（+= -= *= /= %= ^=）を検出する（CS）。lex.awk の
 # 2 文字演算子表にこれらが含まれず単文字 OP 2 つに分割されるため、
 # shunting yard がそれぞれを独立した演算子として扱い stack underflow に
@@ -1218,6 +1247,16 @@ function v2_rpn_stmt(i,    j, line, eq_pos, prefix) {
     prefix = substr(V2_LINE_TEXT[line], 1, TOK[i,"col"] - 1)
     if (prefix !~ /^[ \t]*$/) {
       v2_diag(line, TOK[i,"col"], "raw awk statement sharing a source line with a DSL construct is not supported; move it to its own line")
+      v2_emit_rpn("MARKER",  "RAWLINE", line, "")
+      v2_emit_rpn("OPERAND", "", line, "")
+    } else if (v2_stmt_head_has_dsl(i, line)) {
+      # G3: if/while/for/print の頭部や生ブロック（`{ ... }` を同一行に
+      # 含む文）に `??` / `|>` / 名前空間呼び出し / 補間 / 既知の型注釈
+      # 付き関数呼び出しが含まれる場合、そのまま RAWLINE で素通しすると
+      # 壊れた awk（未変換の DSL 演算子・関数呼び出しがそのまま残る）が
+      # exit 0 で出てしまう（fail-safe 原則違反）。(a) 式の変換までは
+      # 実装せず、最低ラインの (b) 拒否のみ行う。
+      v2_diag(line, TOK[i,"col"], "DSL construct (??/|>/namespace call/interpolation) inside an awk statement head is not supported; move it to its own line")
       v2_emit_rpn("MARKER",  "RAWLINE", line, "")
       v2_emit_rpn("OPERAND", "", line, "")
     } else {
