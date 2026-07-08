@@ -1,4 +1,16 @@
 @namespace "app"
+function outer() {
+  return 1
+}
+
+function middle(x) {
+  return x
+}
+
+function inner(x) {
+  return x
+}
+
 function handler(ctx, a, b, c,    _ds_mc_1, _ds_mc_2, _ds_mc_3, e1, e0) {
   _ds_mc_1 = outer()
   if (result_ok(_ds_mc_1)) {

@@ -1,4 +1,16 @@
 @namespace "app"
+function lookup() {
+  return 1
+}
+
+function pass() {
+  return 1
+}
+
+function inner() {
+  return 1
+}
+
 function handler(x,    _ds_mc_1, n, err, _ds_mc_2, y) {
   x = lookup()
   _ds_mc_1 = x

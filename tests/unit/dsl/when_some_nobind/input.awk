@@ -1,3 +1,7 @@
+function find_item(x) {
+  return x
+}
+
 function handler() {
   when find_item(id) of
     some:

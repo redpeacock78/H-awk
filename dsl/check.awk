@@ -189,6 +189,48 @@ function v2_collect(id,    k, name, child, argn) {
 
 # ─── パス 2: CALL の arity 検査・TYPEOF 設定 ───────────────────────
 
+# awk 組み込み関数名（POSIX + gawk 拡張）。bare CALL の許可リスト（J1）。
+# v1 desugar_let.awk の _ds_infer_type_safe と同水準の網羅性で揃える。
+function v2_is_awk_builtin(name,    list) {
+  list = " length substr index split sub gsub gensub sprintf match patsplit " \
+         "sin cos atan2 exp log sqrt int rand srand " \
+         "tolower toupper systime mktime strftime " \
+         "close fflush system getline " \
+         "and or xor compl lshift rshift " \
+         "typeof asort asorti isarray strtonum "
+  return index(list, " " name " ") > 0
+}
+
+# 生 awk 関数定義（DSL 構文を一切含まないため lex.awk の v2_is_dsl 判定で
+# raw passthrough 行に分類され、PASS[] に verbatim 保持されるだけで AST/SIG
+# には一切現れない関数）の関数名を、行テキストから正規表現で収集する
+# （J1。v1 dsl/desugar.awk の pass1 が生ソース全行を再走査して
+# `function NAME(...)` を DSL 判定と無関係に拾う挙動の移植）。
+# v2_collect（AST 由来）は DSL として認識された FUNC ノードしか見えないため、
+# 素の awk 関数（型注釈も dot 呼び出しも無い単純な関数）はここでしか拾えない。
+# bare CALL 診断（unknown function）の許可リストにのみ使う名前のみの集合で、
+# arity 等は追跡しない（呼び出し先が素の awk 関数である以上、引数検査は
+# awk 自身の実行時エラーに委ねる。v1 も同様に prescan では名前のみ収集する）。
+function v2_collect_raw_funcs(    l, m) {
+  for (l = 1; l <= V2_NLINES; l++) {
+    if (!(l in PASS)) continue
+    if (match(PASS[l], /^[[:space:]]*function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\(/, m))
+      V2_RAW_FUNC[m[1]] = 1
+  }
+}
+
+# DSL lowering が生成し dsl/adt.awk が実装する ADT ヘルパ関数名。bare CALL の
+# 許可リスト（J1）。option.some/none・result.ok/ng の dot 構文からの lowering
+# 先であると同時に、DSL ソース側から直接エスケープハッチとして呼び出すことも
+# 許容されている（g2_error_type_constructor/g2_error_type_when_of_match
+# fixture が `result_ok_make(x)` を直接記述する形で実測済み）。
+function v2_is_dsl_adt_helper(name,    list) {
+  list = " result_ok result_val result_ok_make result_ok_from_map " \
+         "result_val_into_map result_ng result_err_type result_err " \
+         "option_some_make option_none_make option_some option_none option_val "
+  return index(list, " " name " ") > 0
+}
+
 # extra: PIPE の RHS にある CALL は、パイプで渡される左辺値の分だけ実引数が
 # +1 されるとみなす（`x |> f()` は f を実質 1 引数で呼ぶのと同じ）。
 function v2_check_calls(id, extra,    k, name, min_arity, max_arity, actual, child_extra) {
@@ -207,6 +249,22 @@ function v2_check_calls(id, extra,    k, name, min_arity, max_arity, actual, chi
       # 生成した名前のうち SIG 未登録のもの（v1 dsl/desugar_dot.awk の
       # unknown generic dispatch と同じ扱い。BJ。v1 実測でエラーになることを確認済み）。
       v2_diag(AST[id,"line"], 1, "unknown generic dispatch: " name)
+    } else if (extra == 0 && index(name, ".") == 0 && index(name, "::") == 0 && \
+               !v2_is_awk_builtin(name) && !v2_is_dsl_adt_helper(name) && \
+               !(name in V2_RAW_FUNC)) {
+      # SIG 未登録かつ awk builtin でもない bare 関数呼び出し（v1
+      # desugar_let.awk の "unknown function" 診断と同じ扱い。J1。
+      # プレースホルダ typo がランタイム fatal な awk として素通しされる
+      # のを防ぐ。ユーザー定義関数は v2_collect の prescan で SIG に
+      # 登録済み。この診断はドットを含まない bare 識別子呼び出しに限定する:
+      #   - "." を含む名前（`result.ok` 等の DOT メソッド呼び出し）は
+      #     SIG["recv.method"] 未登録でも Unknown 許容が既存の意図的な
+      #     挙動（v1 実測でも exit 0）。
+      #   - "::" を含む名前（`hawk::dispatch(...)` 等）は既に lowering 後
+      #     形の raw awk 呼び出しがそのまま DSL に埋め込まれたもの。
+      #   - extra > 0（PIPE の RHS: `x |> trim()` 等）は v1 と同じく
+      #     未登録でも許容する既存の意図的な緩さ（emit_pipe fixture 参照）。
+      v2_diag(AST[id,"line"], 1, "unknown function " name)
     }
   }
 
@@ -1779,6 +1837,7 @@ function v2_check() {
   VARIANTS["Result"] = "ok" SUBSEP "ng"
   VARIANTS["Option"]  = "some" SUBSEP "none"
 
+  v2_collect_raw_funcs()
   v2_collect(1)
   v2_infer_unannotated_returns(1)
   v2_check_alias_cycles()

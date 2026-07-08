@@ -1,4 +1,12 @@
 @namespace "app"
+function fetch_user(x) {
+  return x
+}
+
+function find_name(x) {
+  return x
+}
+
 function handler(ctx, user, name,    _ds_mc_1, _ds_mc_2, n, e) {
   _ds_mc_1 = fetch_user(ctx)
   if (result_ok(_ds_mc_1)) {

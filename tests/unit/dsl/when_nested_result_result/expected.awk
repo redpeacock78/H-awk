@@ -1,4 +1,12 @@
 @namespace "app"
+function fetch_user(x) {
+  return x
+}
+
+function save_user(x) {
+  return x
+}
+
 function handler(ctx, user, saved,    _ds_mc_1, _ds_mc_2, inner, outer) {
   _ds_mc_1 = fetch_user(ctx)
   if (result_ok(_ds_mc_1)) {
