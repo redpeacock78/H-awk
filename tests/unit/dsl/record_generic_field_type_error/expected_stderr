@@ -1,1 +1,1 @@
-record-style type definitions (type Bag = { ... }) are not supported
+Bag.items expects Dict<Str, Int>, got Str
