@@ -139,8 +139,12 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
     }
     resolved = (rhs_id != 0) ? v2_resolve_sealed(TYPEOF[rhs_id]) : ""
     # 束縛型（型注釈が無ければ Result<T,E>/Option<T> を unwrap した T で
-    # 判定。check.awk の V2_ENV 決定と同じ規則）。
-    bound_type = (typeann_id != 0) ? v2_resolve_sealed(AST[typeann_id,"text"]) : v2_unwrap_type(resolved)
+    # 判定。check.awk の V2_ENV 決定と同じ規則）。unwrap 直後の T が
+    # alias 名（`type L = List<Int>` の "L" 等）のままだと、下の
+    # Dict/List 判定・record 判定のどちらにも一致せず materialization
+    # されない（wave 27 追補 H1。probe /tmp/codex5/h1.awk）。
+    # v2_resolve_sealed で 1 段以上 alias 展開してから判定する。
+    bound_type = (typeann_id != 0) ? v2_resolve_sealed(AST[typeann_id,"text"]) : v2_resolve_sealed(v2_unwrap_type(resolved))
     LETQ_BOUND_TYPE[id] = bound_type
     if (bound_type in V2_RECORD_TYPE) {
       # record 型の typed decode（`ctx.req.json<Todo>()`）は v1
@@ -166,8 +170,15 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
       # 残ってしまい、束縛後に添字アクセスや ctx.res.json() へ渡すと壊れる。
       # v1 相当の result_val_into_map(res, out, out_types) で awk 連想配列へ
       # 復元する（v2_e_letq）。その out_types サイドカー用の一時変数をここで
-      # 確定・ホイストしておく。
-      if (bound_type ~ /^(Dict|List)</) v2_hoist_add(next_func, "_ds_letq_ty_" tmpvar)
+      # 確定・ホイストしておく。record と共通の JSON_TYPEVAR[] に登録して
+      # おくことで、後段の `ctx.res.json(var)` lowering（v2_e_dispatch）が
+      # 型マップ変数を第 3 引数へ引き回せるようにする（wave 27 追補 H5。
+      # probe /tmp/codex5/h5.awk。record 実装の要件 5 と共通機構）。
+      if (bound_type ~ /^(Dict|List)</) {
+        types_var = "_ds_letq_ty_" tmpvar
+        JSON_TYPEVAR[AST[id,"text"]] = types_var
+        v2_hoist_add(next_func, types_var)
+      }
     }
   }
 }
@@ -392,10 +403,21 @@ function v2_e_index_assign(id, depth) {
 # されコンパイルエラーになっていた（review 指摘）。
 # ALIAS[name] は check.awk の v2_collect が既に埋めている（v2_check() は
 # v2_emit() より前に実行される）。
-function v2_e_typedecl(id, depth,    name) {
+function v2_e_typedecl(id, depth,    name, typeexpr) {
   name = AST[id,"text"]
-  if (name == "" || !(name in ALIAS) || ALIAS[name] !~ /^Error([[:space:]]|$)/) return
-  print v2_indent(depth) "function " name "(msg) { return result_ng(\"" name "\", msg) }"
+  if (name == "" || !(name in ALIAS)) return
+  typeexpr = ALIAS[name]
+  if (typeexpr ~ /^Error([[:space:]]|$)/) {
+    print v2_indent(depth) "function " name "(msg) { return result_ng(\"" name "\", msg) }"
+    return
+  }
+  # 非 Error alias（`type Status = Int | Str` 等）の validator constructor
+  # （wave 27 追補 H4。v1 dsl/desugar.awk の union/intersection alias 分岐の
+  # 移植。docs/dsl.md:512 に文書化された形。この emit が無いと
+  # `Status(42)` のような constructor 呼び出しがそのまま素通しされ、
+  # 未定義関数のランタイム fatal になっていた）。
+  print v2_indent(depth) "function " name "(val) { if (type::accepts(\"" typeexpr \
+    "\", val)) return val; return result_ng(\"TypeError:" name "\", \"expected " typeexpr ", got \" val) }"
 }
 
 # ─── `when ... of ... end` 文 ──────────────────────────────────────
@@ -738,13 +760,15 @@ function v2_e_dispatch(id,    name, dot, ns, path, s, k, arg1type, arg1name) {
     # 前方一致では通らず、直接 `List<Int>` と書いた場合とだけ lowering
     # 分岐が変わっていた）。
     arg1type = v2_resolve_sealed(TYPEOF[AST[id,"c1"]])
-    if (arg1type ~ /^(Dict|List)</) return "json(res, " v2_e_expr(AST[id,"c1"]) ")"
-    # record 型（wave 27。v1 dsl/desugar.awk:290-298 の移植）: typed decode
-    # （`?=` + result_val_into_map、G6）由来の変数は型マップ変数を第 3 引数に
-    # 引き回す（JSON_TYPEVAR。qeq_ctx_req_json_record_t golden）。record
-    # リテラル由来（typed decode を経ない）は型マップが無いため 2 引数のまま
-    # （record_basic golden）。
-    if (arg1type in V2_RECORD_TYPE) {
+    if (arg1type ~ /^(Dict|List)</ || arg1type in V2_RECORD_TYPE) {
+      # typed decode（`?=` + result_val_into_map、G6）由来の変数は型マップ
+      # 変数を第 3 引数に引き回す（JSON_TYPEVAR。wave 27 追補 H5:
+      # Dict/List の `?=` materialization でもこの型マップを渡さないと
+      # 復元後の値が文字列扱いのまま json_encode_any へ渡り型が壊れる。
+      # probe /tmp/codex5/h5.awk。record 実装の要件 5 と共通機構）。
+      # record リテラル由来（typed decode を経ない）や空リテラル
+      # （`let xs: List<T> = []`）は型マップが無いため 2 引数のまま
+      # （record_basic / emit_dict_basic 等の golden）。
       arg1name = AST[AST[id,"c1"],"text"]
       if (AST[AST[id,"c1"],"kind"] == "IDENT" && (arg1name in JSON_TYPEVAR))
         return "json(res, " v2_e_expr(AST[id,"c1"]) ", " JSON_TYPEVAR[arg1name] ")"

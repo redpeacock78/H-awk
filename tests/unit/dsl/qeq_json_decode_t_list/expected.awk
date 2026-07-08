@@ -12,5 +12,5 @@ function handler(    xs, _ds_tc_1, _ds_err_type__ds_tc_1, _ds_letq_ty__ds_tc_1) 
   }
   result_val_into_map(_ds_tc_1, xs, _ds_letq_ty__ds_tc_1)
   xs["__json_type"] = "array"
-  return json(res, xs)
+  return json(res, xs, _ds_letq_ty__ds_tc_1)
 }

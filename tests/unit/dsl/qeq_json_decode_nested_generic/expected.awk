@@ -11,5 +11,5 @@ function handler(    body, _ds_tc_1, _ds_err_type__ds_tc_1, _ds_letq_ty__ds_tc_1
     return ctx::dispatch("res.status", 500)
   }
   result_val_into_map(_ds_tc_1, body, _ds_letq_ty__ds_tc_1)
-  return json(res, body)
+  return json(res, body, _ds_letq_ty__ds_tc_1)
 }

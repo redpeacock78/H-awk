@@ -1,5 +1,6 @@
-function handler(s,    d, _ds_tc_1, _ds_err_type__ds_tc_1, _ds_letq_ty__ds_tc_1) {
-  _ds_tc_1 = json::dispatch("decode_t", "Dict<Str, Int>", s)
+function L(val) { if (type::accepts("List<Int>", val)) return val; return result_ng("TypeError:L", "expected List<Int>, got " val) }
+function run(s,    xs, _ds_tc_1, _ds_err_type__ds_tc_1, _ds_letq_ty__ds_tc_1) {
+  _ds_tc_1 = json::dispatch("decode_t", "L", s)
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)
     if (_ds_err_type__ds_tc_1 == "ParseError") return ctx::dispatch("res.status", 400)
@@ -10,6 +11,7 @@ function handler(s,    d, _ds_tc_1, _ds_err_type__ds_tc_1, _ds_letq_ty__ds_tc_1)
     if (_ds_err_type__ds_tc_1 == "JsonTooDeepError") return ctx::dispatch("res.status", 400)
     return ctx::dispatch("res.status", 500)
   }
-  result_val_into_map(_ds_tc_1, d, _ds_letq_ty__ds_tc_1)
-  return json(res, d, _ds_letq_ty__ds_tc_1)
+  result_val_into_map(_ds_tc_1, xs, _ds_letq_ty__ds_tc_1)
+  xs["__json_type"] = "array"
+  return json(res, xs, _ds_letq_ty__ds_tc_1)
 }
