@@ -31,7 +31,11 @@ function v2_init_builtins() {
   ALIAS["JsonScalar"]    = "Str|Int|Float|Bool|Null"
   ALIAS["JsonValue"]     = "JsonScalar|Array|JsonObject"
   ALIAS["JsonObject"]    = "Map"
-  ALIAS["JsonError"]     = "JsonParseError|JsonTooDeepError"
+  # G7: json.decode_t / ctx.req.json_t は JsonTypeError も返しうる
+  # （SIG["json.decode_t","ret"] 参照）。JsonError alias が parse/depth の
+  # 2 種のみだと `-> Result<T, JsonError>` の documented alias が
+  # 実際の decode_t 戻り値 union を包含できず拒否されていた（review 指摘）。
+  ALIAS["JsonError"]     = "JsonParseError|JsonTypeError|JsonTooDeepError"
 
   # env.*
   SIG["env.get","ret"] = "Str";  SIG["env.get","arity"] = 1; SIG["env.get","arg1"] = "Str"
