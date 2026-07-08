@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# dsl/main.awk -- DSL v2 compiler driver
+# dsl/desugar.awk -- DSL v2 compiler driver
 #
 # 工程順: lex -> rpn -> parse -> check -> emit
 # V2_DUMP=lex|rpn|ast|types で工程ダンプして終了。

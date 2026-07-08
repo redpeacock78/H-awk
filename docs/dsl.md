@@ -56,15 +56,18 @@ function handler(    n) {
 ```
 
 ```awk
-# Bare typed declaration — hoist only, typed assignment auto-coerced
-function handler() {
+# Bare typed declaration — hoist only, typed assignment auto-coerced.
+# The RHS type must be statically unknown (e.g. an unannotated parameter)
+# for coercion to apply; a literal like "42" is already known to be
+# NumericStr and is rejected outright by the static check below.
+function handler(v) {
   let n: Int
-  n = "42"   # auto-coerced + static check
+  n = v
 }
 
 # Desugared
-function handler(    n) {
-  n = type::coerce("42", "Int")
+function handler(v,    n) {
+  n = type::coerce(v, "Int")
 }
 ```
 
@@ -73,7 +76,7 @@ Static type checking at desugar time — mismatched types produce an error:
 ```sh
 # Desugar-time error: string literal assigned to Int
 let port: Int = "hello"
-# dsl error: app.awk:5: type mismatch: cannot assign Str to Int
+# app.awk:5:1: error: type mismatch: cannot assign Str to Int
 ```
 
 **Union type annotations**
@@ -88,7 +91,7 @@ function handler() {
 ```sh
 # Desugar-time error: Bool is not a member of Int | Str
 let port: Int | Str = true
-# dsl error: app.awk:3: type mismatch: cannot assign Bool to Int|Str
+# app.awk:3:1: error: type mismatch: cannot assign Bool to Int|Str
 ```
 
 The `??` operator infers a union type from its two operands (`Str | Int` from `env.get("PORT") ?? 8080`). The built-in `Port` type alias expands to `Int|NumericStr|Str`, so `hawk.app.listen(env.get("PORT") ?? 8080)` passes type checking.
@@ -133,7 +136,9 @@ let todo: Todo = {
 }
 ```
 
-Assignment to undefined fields is a type error. Passing a Record to `ctx.res.json` produces a JSON object.
+Assignment to undefined fields is a type error (both `todo.field = ...` and `todo["field"] = ...` forms). Passing a Record to `ctx.res.json` produces a JSON object.
+
+Current support scope: a record type may be used as a `let` binding or a function **parameter** annotation. It **cannot** be used as a function **return type** annotation (record values are gawk arrays, and gawk does not allow arrays to be returned from functions — this is rejected at desugar time). Reading a record field back out with dot notation (`todo.id`) is not supported; read fields with bracket notation (`todo["id"]`) instead.
 
 | DSL type | JSON |
 |---|---|
@@ -184,23 +189,23 @@ Desugar-time checks on user-defined functions:
 ```sh
 # Wrong argument type
 normalize(123)
-# dsl error: app.awk:8: normalize argument 1 expects Str, got Int
+# app.awk:8:1: error: normalize argument 1 expects Str, got Int
 
 # Wrong arity
 normalize("a", "b")
-# dsl error: app.awk:8: normalize expects 1 argument(s), got 2
+# app.awk:8:1: error: normalize expects 1 argument(s), got 2
 
 # Wrong return type
 function hello() -> Response {
   return "hello"
 }
-# dsl error: app.awk:2: function hello expects return Response, got Str
+# app.awk:2:1: error: function hello expects return Response, got Str
 
 # Void with value
 function setup() -> Void {
   return ctx.res.text("ok")
 }
-# dsl error: app.awk:2: function setup expects Void, got Response
+# app.awk:2:1: error: function setup expects Void, got Response
 ```
 
 **Safe HTML output (`safe.*`)**
@@ -235,11 +240,11 @@ Brand types cannot be forged by plain string assignment — only the `safe.*` sa
 # Desugar-time error: plain Str cannot be passed to ctx.res.html
 let html: Str = "<b>hello</b>"
 return ctx.res.html(html)
-# dsl error: app.awk:3: ctx.res.html argument 1 expects HtmlEscapedStr|HtmlFragment, got Str
+# app.awk:3:1: error: ctx.res.html argument 1 expects HtmlEscapedStr|HtmlFragment, got Str
 
 # Desugar-time error: brand type cannot be created by annotation alone
 let frag: HtmlFragment = user_input
-# dsl error: app.awk:4: brand type HtmlFragment cannot be assigned Untrusted<Str>
+# app.awk:4:1: error: brand type HtmlFragment cannot be assigned Untrusted<Str>
 ```
 
 **String interpolation (`#{...}`)**
@@ -266,8 +271,10 @@ If any embedded expression is `Untrusted<T>`, the resulting variable is inferred
 ```awk
 when ctx.req.form("name") of
   ok raw_name:
-    let greeting: Str = "Hello, #{raw_name}!"
-    # → greeting is Untrusted<Str> because raw_name is Untrusted<Str>
+    let greeting: Untrusted<Str> = "Hello, #{raw_name}!"
+    # → greeting is Untrusted<Str> because raw_name is Untrusted<Str>.
+    # A plain `Str` annotation here is rejected — the value is still
+    # untrusted and must be passed through a `safe.*` sanitizer first.
   ng:
     return ctx.res.status(400)
 end
@@ -469,7 +476,7 @@ function handler() {
       return ctx.res.status(401)
   end
 }
-# dsl error: app.awk:9: when...of missing arm for NotFoundError (add 'ng e<NotFoundError>:' or 'default:')
+# app.awk:9:1: error: when...of missing arm for NotFoundError (add 'ng e<NotFoundError>:' or 'default:')
 ```
 
 **`type` declarations**
@@ -628,7 +635,7 @@ Desugar-time error if the RHS type is not `Option` or `Result`:
 
 ```sh
 let port ?= env.get("PORT")
-# dsl error: app.awk:5: ?= requires Option or Result, got Str
+# app.awk:5:1: error: ?= requires Option or Result, got Str
 ```
 
 After `?=` unwrap, the variable holds `Untrusted<T>` — pass it to a `safe.*` sanitizer before using in HTML output.
@@ -693,11 +700,11 @@ Desugar validates arity and argument types for all built-in DSL functions and us
 ```sh
 # Wrong number of arguments
 ctx.res.status()
-# dsl error: app.awk:5: ctx.res.status expects 1 argument(s), got 0
+# app.awk:5:1: error: ctx.res.status expects 1 argument(s), got 0
 
 # Wrong argument type
 ctx.res.status("ok")
-# dsl error: app.awk:5: ctx.res.status argument 1 expects Int, got Str
+# app.awk:5:1: error: ctx.res.status argument 1 expects Int, got Str
 ```
 
 User-defined functions with type annotations are checked the same way. Forward references work — a function can be called before it is defined in the source file.
