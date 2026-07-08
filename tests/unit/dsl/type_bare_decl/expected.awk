@@ -1,4 +1,4 @@
 function setup(    i, s) {
-  i = 42
-  s = "hello"
+  i = type::coerce(42, "Int")
+  s = type::coerce("hello", "Str")
 }

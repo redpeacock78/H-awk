@@ -38,6 +38,11 @@ function v2_indent(depth,    s, i) {
   return s
 }
 
+# v1 dsl/desugar_let.awk:_ds_is_primitive_type と同じ集合（F1）。
+function v2_is_primitive_type(t) {
+  return (t == "Int" || t == "Float" || t == "Str" || t == "Bool")
+}
+
 # ─── 関数ローカル変数のホイスト収集 ────────────────────────────────
 # 各 FUNC の子孫にある LET/LETQ 変数名、WHEN 腕束縛名、PIPE/COALESCE/LETQ が
 # 注入する一時変数名を HOIST[func_id] にカンマ区切りで集める。
@@ -96,6 +101,21 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
       child = AST[id,"c" k]
       if (AST[child,"kind"] == "TYPEANN") {
         RECORD_VARTYPE[next_func, AST[id,"text"]] = AST[child,"text"]
+        break
+      }
+    }
+  }
+
+  # プリミティブ型注釈付き let（`let n: Int` / `let n: Int = 42` どちらも）
+  # を (func_id, varname) キーで記録する（F1）。この変数への後続の素の
+  # 代入 `n = expr` は v1 dsl/desugar_let.awk:400-411 と同じく常に
+  # type::coerce(expr, "型") でラップする（初期化行自体は対象外。
+  # v2_e_let 側で別途、初期値が静的に型へ適合しない場合のみ扱う）。
+  if (kind == "LET") {
+    for (k = 1; k <= AST[id,"nc"]; k++) {
+      child = AST[id,"c" k]
+      if (AST[child,"kind"] == "TYPEANN" && v2_is_primitive_type(AST[child,"text"])) {
+        TYPED_PRIM_VAR[next_func, AST[id,"text"]] = AST[child,"text"]
         break
       }
     }
@@ -264,6 +284,14 @@ function v2_e_expr_stmt(id, depth,    binop, lhs, rhs_id, recv, fieldnode, vtype
           return
         }
       }
+    } else if (AST[lhs,"kind"] == "IDENT" && ((V2_CUR_FUNC, AST[lhs,"text"]) in TYPED_PRIM_VAR)) {
+      # プリミティブ型注釈済み変数への素の代入は type::coerce でラップする
+      # （F1。v1 dsl/desugar_let.awk:400-411 と同じ規約。docs/dsl.md:59-69
+      # 「typed assignment auto-coerced」）。
+      vtype = TYPED_PRIM_VAR[V2_CUR_FUNC, AST[lhs,"text"]]
+      rhs_id = AST[binop,"c2"]
+      print v2_indent(depth) AST[lhs,"text"] " = type::coerce(" v2_e_expr(rhs_id) ", \"" vtype "\")"
+      return
     }
   }
   print v2_indent(depth) v2_e_expr(AST[id,"c1"])
