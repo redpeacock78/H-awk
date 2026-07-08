@@ -73,7 +73,7 @@ function v2_hoist_add(func_id, name) {
   HOIST[func_id] = (func_id in HOIST) ? HOIST[func_id] ", " name : name
 }
 
-function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, child, resolved, tmpvar) {
+function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, child, resolved, tmpvar, typeann_id, bound_type) {
   kind = AST[id,"kind"]
   next_func = (kind == "FUNC") ? id : func_id
 
@@ -127,15 +127,26 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
     tmpvar = "_ds_tc_" V2_TC_CNT
     LETQ_TMPVAR[id] = tmpvar
     v2_hoist_add(next_func, tmpvar)
-    rhs_id = 0
+    rhs_id = 0; typeann_id = 0
     for (k = 1; k <= AST[id,"nc"]; k++) {
       child = AST[id,"c" k]
-      if (AST[child,"kind"] != "TYPEANN") rhs_id = child
+      if (AST[child,"kind"] == "TYPEANN") typeann_id = child
+      else                                rhs_id = child
     }
     resolved = (rhs_id != 0) ? v2_resolve_sealed(TYPEOF[rhs_id]) : ""
     # Result 系のみ、エラー種別を受ける追加の一時変数が必要（Option 系は
     # option_some()/option_val() だけで済むため不要）。
     if (resolved !~ /^Option</) v2_hoist_add(next_func, "_ds_err_type_" tmpvar)
+    # G6: `?=` の束縛先が Dict</List< のとき（json.decode<Dict<...>>(...) 等）、
+    # result_val() の単純 scalar 代入では ADT payload 文字列がそのまま
+    # 残ってしまい、束縛後に添字アクセスや ctx.res.json() へ渡すと壊れる。
+    # v1 相当の result_val_into_map(res, out, out_types) で awk 連想配列へ
+    # 復元する（v2_e_letq）。その out_types サイドカー用の一時変数をここで
+    # 確定・ホイストしておく（型注釈が無ければ Result<T,E>/Option<T> を
+    # unwrap した T で判定。check.awk の V2_ENV 決定と同じ規則）。
+    bound_type = (typeann_id != 0) ? v2_resolve_sealed(AST[typeann_id,"text"]) : v2_unwrap_type(resolved)
+    LETQ_BOUND_TYPE[id] = bound_type
+    if (bound_type ~ /^(Dict|List)</) v2_hoist_add(next_func, "_ds_letq_ty_" tmpvar)
   }
 }
 
@@ -237,9 +248,12 @@ function v2_e_let(id, depth,    varname, k, c, expr_id, ekind, typeann_id) {
 #
 # 対応表の移植元: dsl/desugar_let.awk:_ds_let_transform（?= 分岐）+
 # _ds_result_ng_return。JSON デコード時の Dict/List 特殊分岐
-# （result_val_into_map 等）は Task 11 のスコープ外（fixture・app.awk の
-# いずれも踏まないため、報告書に Task 12 送りと明記して見送る）。
-function v2_e_letq(id, depth,    varname, rhs_id, k, c, tmpvar, rhs_out, resolved, errvar) {
+# （result_val_into_map 等、G6）: 束縛先が Dict</List< のとき、v1 相当の
+# result_val_into_map(res, out, out_types) で awk 連想配列へ復元する。
+# List< はさらに json_encode_any が配列と判定できるよう __json_type
+# マーカーを立てる（v2_e_let の空リストリテラル分岐と同じ規約。
+# dsl/desugar_let.awk:314-315,465-473 が移植元）。
+function v2_e_letq(id, depth,    varname, rhs_id, k, c, tmpvar, rhs_out, resolved, errvar, bound_type, types_var) {
   varname = AST[id,"text"]
   rhs_id = 0
   for (k = 1; k <= AST[id,"nc"]; k++) {
@@ -268,7 +282,15 @@ function v2_e_letq(id, depth,    varname, rhs_id, k, c, tmpvar, rhs_out, resolve
     print v2_indent(depth + 1) "if (" errvar " == \"JsonTooDeepError\") return ctx::dispatch(\"res.status\", 400)"
     print v2_indent(depth + 1) "return ctx::dispatch(\"res.status\", 500)"
     print v2_indent(depth) "}"
-    print v2_indent(depth) varname " = result_val(" tmpvar ")"
+    bound_type = LETQ_BOUND_TYPE[id]
+    if (bound_type ~ /^(Dict|List)</) {
+      types_var = "_ds_letq_ty_" tmpvar
+      print v2_indent(depth) "result_val_into_map(" tmpvar ", " varname ", " types_var ")"
+      if (bound_type ~ /^List</)
+        print v2_indent(depth) varname "[\"__json_type\"] = \"array\""
+    } else {
+      print v2_indent(depth) varname " = result_val(" tmpvar ")"
+    }
   }
 }
 

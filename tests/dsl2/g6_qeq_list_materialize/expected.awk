@@ -1,5 +1,5 @@
-function handler(    xs, _ds_tc_1, _ds_err_type__ds_tc_1, _ds_letq_ty__ds_tc_1) {
-  _ds_tc_1 = ctx::dispatch("req.json_t", "List<Int>")
+function handler(    items, _ds_tc_1, _ds_err_type__ds_tc_1, _ds_letq_ty__ds_tc_1) {
+  _ds_tc_1 = json::dispatch("decode_t", "List<Int>", "[1,2,3]")
   if (!result_ok(_ds_tc_1)) {
     _ds_err_type__ds_tc_1 = awk::result_err_type(_ds_tc_1)
     if (_ds_err_type__ds_tc_1 == "ParseError") return ctx::dispatch("res.status", 400)
@@ -10,7 +10,7 @@ function handler(    xs, _ds_tc_1, _ds_err_type__ds_tc_1, _ds_letq_ty__ds_tc_1) 
     if (_ds_err_type__ds_tc_1 == "JsonTooDeepError") return ctx::dispatch("res.status", 400)
     return ctx::dispatch("res.status", 500)
   }
-  result_val_into_map(_ds_tc_1, xs, _ds_letq_ty__ds_tc_1)
-  xs["__json_type"] = "array"
-  return json(res, xs)
+  result_val_into_map(_ds_tc_1, items, _ds_letq_ty__ds_tc_1)
+  items["__json_type"] = "array"
+  return json(res, items)
 }
