@@ -1259,8 +1259,12 @@ function v2_stmt_head_has_dsl(i, line,    j, k) {
     k = TOK[j,"kind"]
     if (k == "OP" && (TOK[j,"text"] == "??" || TOK[j,"text"] == "|>")) return 1
     if (k == "INTERP_OPEN") return 1
-    # 名前空間付きドット呼び出し（hawk./ctx./env./safe./json./cache.）
-    if (k == "IDENT" && TOK[j,"text"] ~ /^(hawk|ctx|env|safe|json|cache)$/ && \
+    # 名前空間付きドット呼び出し（hawk./ctx./env./safe./json./cache./option.）
+    # wave 27 追補 H6: `option` が抜けており `print option.some("x")` が
+    # 素通し RAWLINE となって option_some_make(...) へ変換されないまま
+    # 未変換の DSL 構文を含む壊れた awk が exit 0 で出ていた
+    # （fail-safe 原則違反。probe /tmp/codex5/h6.awk）。
+    if (k == "IDENT" && TOK[j,"text"] ~ /^(hawk|ctx|env|safe|json|cache|option)$/ && \
         j + 1 <= TOK["n"] && TOK[j+1,"line"] == line && TOK[j+1,"kind"] == "DOT") return 1
   }
   return 0
