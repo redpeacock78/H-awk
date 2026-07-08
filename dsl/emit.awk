@@ -127,6 +127,15 @@ function v2_collect_hoists_walk(id, func_id,    k, kind, next_func, rhs_id, chil
     V2_TC_CNT++
     TC_TMPVAR[id] = "_ds_tc_" V2_TC_CNT
     v2_hoist_add(next_func, TC_TMPVAR[id])
+  } else if (kind == "CALL" && AST[id,"text"] == "safe.html.fragment" && AST[id,"nc"] >= 4) {
+    # safe.html.fragment の 4 引数以上は可変長ヘルパ safe::fragment_v
+    # へ lowering する（J5。v1 dsl/desugar_dot.awk:_ds_expand_fragment_v_calls
+    # 移植。core/safe.awk の dispatch(path, a1, a2, a3) は 3 引数固定で
+    # 4 個目以降が黙って落ちるため）。引数を積む連想配列を一時変数として
+    # ホイストする。
+    V2_FRAG_CNT++
+    FRAG_TMPVAR[id] = "_ds_frag_args_" V2_FRAG_CNT
+    v2_hoist_add(next_func, FRAG_TMPVAR[id])
   } else if (kind == "LETQ") {
     V2_TC_CNT++
     tmpvar = "_ds_tc_" V2_TC_CNT
@@ -786,9 +795,27 @@ function v2_e_coalesce(id,    tmp, lhs_out, rhs_out) {
   return "(" tmp " != \"\" ? " tmp " : " rhs_out ")"
 }
 
+# safe.html.fragment(a1, a2, a3, a4, ...) を可変長ヘルパへ lowering する
+# （J5。v1 dsl/desugar_dot.awk:_ds_expand_fragment_v_calls 移植）。
+# docs/dsl.md 217, 220: 「Calls with four or more parts are lowered
+# through the variadic fragment helper」。core/safe.awk の
+# dispatch(path, a1, a2, a3) は 3 引数固定のため、4 個目以降を渡すには
+# 連想配列 + 要素数のペアで safe::fragment_v(arr, n) を呼ぶ必要がある。
+# 一時変数名は v2_collect_hoists_walk が採番済み（FRAG_TMPVAR[id]）。
+function v2_e_fragment_v(id,    name, argc, k, arg_out) {
+  name = FRAG_TMPVAR[id]
+  argc = AST[id,"nc"]
+  print v2_indent(V2_CUR_DEPTH) "delete " name
+  for (k = 1; k <= argc; k++) {
+    arg_out = v2_e_expr(AST[id,"c" k])
+    print v2_indent(V2_CUR_DEPTH) name "[" k "] = " arg_out
+  }
+  return "safe::fragment_v(" name ", " argc ")"
+}
+
 # ドット記法呼び出し -> ns::dispatch("path", args...) への変換。
 # 対応表の移植元: dsl/desugar_dot.awk, docs/dsl.md 296-344 行。
-function v2_e_dispatch(id,    name, dot, ns, path, s, k, res_json_call) {
+function v2_e_dispatch(id,    name, dot, ns, path, s, k, res_json_call, arg1_out, have_arg1_out) {
   name = AST[id,"text"]
 
   if (name == "option.some") {
@@ -816,7 +843,14 @@ function v2_e_dispatch(id,    name, dot, ns, path, s, k, res_json_call) {
     # （`let xs: List<T> = []`）は型マップが無いため 2 引数のまま
     # （record_basic / emit_dict_basic 等の golden）。判定・引き回しは
     # v2_e_res_json_call（v2_e_pipe と共有、I3 対応）に集約する。
-    res_json_call = v2_e_res_json_call(AST[id,"c1"], v2_e_expr(AST[id,"c1"]))
+    # 引数の評価は 1 回だけ行い、collection fast path 判定（v2_e_res_json_call
+    # 内の arg1type 判定）と fallback（下の generic dispatch）の両方で結果を
+    # 再利用する（J3。pipe/`??` 由来で hoist が必要な引数を持つ場合、
+    # v2_e_expr が hoist 文を print する副作用を持つため、二重呼び出しは
+    # `_ds_p_N = ...` を 2 行 emit し副作用も 2 回走らせてしまう）。
+    arg1_out = v2_e_expr(AST[id,"c1"])
+    have_arg1_out = 1
+    res_json_call = v2_e_res_json_call(AST[id,"c1"], arg1_out)
     if (res_json_call != "") return res_json_call
   }
 
@@ -826,8 +860,18 @@ function v2_e_dispatch(id,    name, dot, ns, path, s, k, res_json_call) {
   if (name == "ctx.res.redirect" && AST[id,"nc"] == 1)
     return "ctx::dispatch(\"res.redirect\", " v2_e_expr(AST[id,"c1"]) ", 302)"
 
+  # safe.html.fragment の 4 引数以上は可変長ヘルパへ lowering する（J5）。
+  # 3 個以下は core/safe.awk の dispatch(path, a1, a2, a3) 固定引数に
+  # そのまま乗るため、下の generic dispatch フォールバックのままでよい。
+  if (name == "safe.html.fragment" && AST[id,"nc"] >= 4)
+    return v2_e_fragment_v(id)
+
   s = ns "::dispatch(\"" path "\""
-  for (k = 1; k <= AST[id,"nc"]; k++) s = s ", " v2_e_expr(AST[id,"c" k])
+  for (k = 1; k <= AST[id,"nc"]; k++) {
+    # 第 1 引数は上の ctx.res.json fast-path 判定で既に評価済みならその
+    # 結果を再利用する（J3。再評価すると hoist 文の print が二重化する）。
+    s = s ", " ((k == 1 && have_arg1_out) ? arg1_out : v2_e_expr(AST[id,"c" k]))
+  }
   return s ")"
 }
 
