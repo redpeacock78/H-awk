@@ -1840,6 +1840,16 @@ function v2_prescan_expr_type(id,    kind, name, inner, ret_sig, typearg) {
   kind = AST[id,"kind"]
   if (kind == "STRLIT") return "Str"
   if (kind == "NUMLIT")  return (AST[id,"text"] ~ /[.]/) ? "Float" : "Int"
+  if (kind == "UNOP") {
+    # 単項式 return（`return -1` 等）も推論対象にする（K5）。この時点では
+    # まだ v2_infer（本走査）が動いておらずオペランドの TYPEOF は空のため、
+    # v2_infer の UNOP 分岐と同じ規則を再帰的に prescan で評価する。
+    # オペランドが推論不能なら Unknown のまま（"" を返す）で構わない。
+    if (AST[id,"text"] == "NOT") return "Bool"
+    inner = v2_prescan_expr_type(AST[id,"c1"])
+    if (inner == "Int" || inner == "Float") return inner
+    return ""
+  }
   if (kind == "CALL") {
     name = AST[id,"text"]
     if (name == "option.some" && AST[id,"nc"] >= 1) {
