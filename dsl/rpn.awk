@@ -1423,6 +1423,28 @@ function v2_rpn_stmt(i,    j, line, eq_pos, prefix) {
 
 # ─── メインエントリ ───────────────────────────────────────────────
 
+# record 形の type 宣言（`type NAME = { ... }`）だけを本走査に先立って
+# 全トークンから収集し、V2_RECORD_TYPE/V2_RECORD_FIELDS を先行して埋める
+# （J4。v1 dsl/desugar.awk の prescan で record 宣言を先行収集する挙動の
+# 移植）。v2_rpn_typedecl は単一パスの左→右走査中に record 宣言へ到達した
+# 時点で初めて V2_RECORD_TYPE に登録するため、関数本体（record リテラル）
+# が宣言より前にあると、リテラル解析時点では未収集で通常式として誤解析
+# されていた（前方参照が拒否される問題）。v2_rpn_record_fields は出力に
+# 何も emit しないため、本走査で同じ宣言に再度到達して呼び出されても
+# 副作用なく安全（同じテーブルへの再代入のみ）。
+function v2_rpn_prescan_records(    i, name, j) {
+  for (i = 1; i <= TOK["n"]; i++) {
+    if (TOK[i,"kind"] != "KW" || TOK[i,"text"] != "type") continue
+    name = TOK[i+1,"text"]
+    j = i + 2
+    if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=" && \
+        TOK[j+1,"kind"] == "LBRACE") {
+      V2_RECORD_TYPE[name] = 1
+      v2_rpn_record_fields(name, j + 1)
+    }
+  }
+}
+
 function v2_rpn(    i) {
   RPN["n"]  = 0
   v2_os_sp  = 0
@@ -1431,6 +1453,8 @@ function v2_rpn(    i) {
   # ファイル先頭から順に埋める。プログラム全体で 1 つの表（関数スコープでは
   # クリアしない）。
   delete V2_RPN_ALIAS
+
+  v2_rpn_prescan_records()
 
   i = 1
   while (i <= TOK["n"]) {
