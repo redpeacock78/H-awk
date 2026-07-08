@@ -1741,7 +1741,7 @@ function v2_infer_unannotated_returns(id,    k, child, kind, name, stmt_n, stmt_
 # 依存する完全な v2_infer() とは独立させ（この時点ではまだ計算されて
 # いない）、SIG[] だけから即座に分かる範囲のみ扱う。診断は一切出さない
 # （不確実なら "" を返して呼び出し元が Unknown 扱いのまま諦める）。
-function v2_prescan_expr_type(id,    kind, name, inner) {
+function v2_prescan_expr_type(id,    kind, name, inner, ret_sig, typearg) {
   kind = AST[id,"kind"]
   if (kind == "STRLIT") return "Str"
   if (kind == "NUMLIT")  return (AST[id,"text"] ~ /[.]/) ? "Float" : "Int"
@@ -1752,7 +1752,23 @@ function v2_prescan_expr_type(id,    kind, name, inner) {
       return (inner != "") ? "Option<" inner ">" : ""
     }
     if (name == "option.none") return "Option<Any>"
-    if ((name,"ret") in SIG && SIG[name,"ret"] != "Unknown") return SIG[name,"ret"]
+    if ((name,"ret") in SIG && SIG[name,"ret"] != "Unknown") {
+      ret_sig = SIG[name,"ret"]
+      # wave 27 追補 H3（wave 26 G5 リグレッション）: generic 呼び出し
+      # （`json.decode_t("Int", s)` 等）の SIG[name,"ret"] は `<T>` を
+      # 含む未特殊化テンプレートのままのため、v2_infer の CALL 分岐
+      # （型引数を第 1 実引数から取り出して gsub する規約）と同じ規則で
+      # 特殊化してから返す。特殊化できない場合はこの関数の prescan 推論
+      # 自体を諦める（"" を返す = 呼び出し元は Unknown のまま。誤検出
+      # より wave 26 以前の「推論しない」に倒す方が安全）。
+      if (ret_sig ~ /\<T\>/) {
+        if (AST[id,"nc"] < 1) return ""
+        typearg = AST[AST[id,"c1"],"text"]
+        gsub(/^"|"$/, "", typearg)
+        gsub(/\<T\>/, typearg, ret_sig)
+      }
+      return ret_sig
+    }
     return ""
   }
   return ""
