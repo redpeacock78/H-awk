@@ -1714,6 +1714,12 @@ function v2_check_brand_arg(call_id, name, argidx, expected, child,    actual, t
   }
   actual = ((child) in TYPEOF) ? TYPEOF[child] : ""
   if (actual == "" || v2_type_compat(expected, actual)) return
+  # 実引数として渡す NumericStr リテラル（`normalize("1")` の "1" 等）は
+  # Str仮引数へ許容する（F4。v1 実測: text: Str の関数へ数字のみの文字列
+  # リテラルを渡してもexit 0）。v2_type_compat自体は変更しない —
+  # `let s: Str = "1"` という代入方向の拒否は v1 パリティのため維持する
+  # （実引数方向のみの緩和）。
+  if (expected == "Str" && actual == "NumericStr") return
   # classify: transform/validator/sanitizer は docs/dsl.md の規定どおり
   # Untrusted<T> 入力を受容する（CA）。宣言引数型そのものは素の T のままでよく、
   # 呼び出し側の Untrusted<T> 実引数だけを classify で免除する。
