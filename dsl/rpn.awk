@@ -1432,7 +1432,7 @@ function v2_rpn_stmt(i,    j, line, eq_pos, prefix) {
 # されていた（前方参照が拒否される問題）。v2_rpn_record_fields は出力に
 # 何も emit しないため、本走査で同じ宣言に再度到達して呼び出されても
 # 副作用なく安全（同じテーブルへの再代入のみ）。
-function v2_rpn_prescan_records(    i, name, j) {
+function v2_rpn_prescan_records(    i, name, j, typestart, typetext) {
   for (i = 1; i <= TOK["n"]; i++) {
     if (TOK[i,"kind"] != "KW" || TOK[i,"text"] != "type") continue
     name = TOK[i+1,"text"]
@@ -1441,6 +1441,17 @@ function v2_rpn_prescan_records(    i, name, j) {
         TOK[j+1,"kind"] == "LBRACE") {
       V2_RECORD_TYPE[name] = 1
       v2_rpn_record_fields(name, j + 1)
+    } else if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=") {
+      # record エイリアス（`type TodoAlias = Todo` 形）も本走査に先立って
+      # V2_RPN_ALIAS へ収集する（K4）。record 宣言本体（上の分岐）と違い
+      # このエイリアス宣言はソース上で参照より後に置かれることが多く、
+      # v2_rpn_typedecl の通常の左→右走査だけでは前方参照時に未解決の
+      # まま（v2_rpn_expand_alias が展開できず、record 型として認識され
+      # ない）になる（`let t: TodoAlias = {...}` が TodoAlias 宣言より前
+      # にあるケース）。
+      typestart = j + 1
+      typetext = v2_read_type_text(typestart, v2_skip_type(typestart))
+      V2_RPN_ALIAS[name] = typetext
     }
   }
 }
