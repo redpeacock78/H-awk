@@ -93,7 +93,15 @@ function v2_collect_annotated_funcs(nlines,    i, s, m, names, n) {
   names = ""; n = 0
   for (i = 1; i <= nlines; i++) {
     s = v2_strip_str_comment(V2_RAWLINE[i])
+    # 戻り値注釈 (-> RETTYPE) を持つ関数
     if (match(s, /function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\([^)]*\)[[:space:]]*->/, m)) {
+      if (!(m[1] in V2_DSL_FUNCNAME)) { V2_DSL_FUNCNAME[m[1]] = 1; names = names (n++ ? "|" : "") m[1] }
+      continue
+    }
+    # param-only シグネチャ（`->` 無し、`function f(x: Str) { ... }`）。
+    # G4: 戻り値注釈が無いだけで prescan から漏れ、他に DSL 構文を持たない
+    # caller から呼ばれても引数型検査に参加していなかった（review 指摘）。
+    if (match(s, /function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\(([^)]*)\)/, m) && m[2] ~ /:/) {
       if (!(m[1] in V2_DSL_FUNCNAME)) { V2_DSL_FUNCNAME[m[1]] = 1; names = names (n++ ? "|" : "") m[1] }
     }
   }
