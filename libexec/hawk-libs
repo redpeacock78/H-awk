@@ -52,13 +52,53 @@ case "$subcmd" in
       echo "[hawk-libs] desugar: file not found: $src" >&2
       exit 1
     fi
-    tmp=$(mktemp /tmp/hawk.XXXXXX)
-    if ! gawk -f "${HAWK_LIB}/dsl/desugar.awk" "$src" > "$tmp"; then
-      echo "[hawk-libs] desugar failed: $src" >&2
-      rm -f "$tmp"
-      exit 1
-    fi
-    echo "$tmp"
+    dist="${HAWK_DIST:-dist}"
+    src_root="$(cd "$(dirname "$src")" && pwd)"
+    _seen=" "
+
+    # rel: src_root からの相対パス。desugar して dist/rel に出力し、
+    # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
+    _desugar_one() {
+      local rel="$1" in out tmp inc incs
+      case "$_seen" in *" $rel "*) return 0 ;; esac
+      _seen="$_seen$rel "
+      in="$src_root/$rel"
+      out="$dist/$rel"
+      mkdir -p "$(dirname "$out")"
+      # dsl/desugar.awk 自身が @include "dsl/util.awk" 等の相対パスを持ち、
+      # gawk は '/' を含む @include をカレントディレクトリ相対で解決するため、
+      # HAWK_LIB (リポジトリルート) に cd してから実行する。
+      if ! ( cd "$HAWK_LIB" && gawk -f dsl/desugar.awk "$in" ) > "$out"; then
+        echo "[hawk-libs] desugar failed: $in" >&2
+        exit 1
+      fi
+      incs=""
+      while IFS= read -r inc; do
+        [[ -f "$src_root/$inc" ]] && incs="$incs$inc"$'\n'
+      done < <(gawk 'match($0, /^[[:space:]]*@include[[:space:]]+"([^"]+)"/, m) { print m[1] }' "$out") || true
+      if [[ -n "$incs" ]]; then
+        # gawk は '/' を含む @include パスを AWKPATH 探索しないため、
+        # dist 接頭の実パスに書き換える
+        tmp="$out.tmp"
+        gawk -v dist="$dist" -v list="$incs" '
+          BEGIN { n = split(list, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") L[a[i]] = 1 }
+          {
+            if (match($0, /^([[:space:]]*@include[[:space:]]+")([^"]+)(".*)$/, m) && (m[2] in L))
+              print m[1] dist "/" m[2] m[3]
+            else
+              print
+          }
+        ' "$out" > "$tmp" && mv "$tmp" "$out"
+        while IFS= read -r inc; do
+          [[ -n "$inc" ]] && _desugar_one "$inc"
+        done <<< "$incs"
+      fi
+      return 0
+    }
+
+    entry_rel="$(basename "$src")"
+    _desugar_one "$entry_rel"
+    echo "$dist/$entry_rel"
     ;;
   *)
     echo "[hawk-libs] unknown subcommand: $subcmd" >&2
