@@ -2155,16 +2155,36 @@ function v2_mut_strip(text,    out) {
 # 中身を v2_mut_check_text で検査する（F4）。emit.awk の v2_e_split_interp
 # と同様の深度カウントで `{`/`}` の対応を取るが、ここではネストした
 # `#{}` の展開までは追わない（既存の補間パーサの挙動同様スコープ外）。
-function v2_mut_scan_strlit(id,    text, i, n, c, depth, seg, line) {
+function v2_mut_scan_strlit(id,    text, i, n, c, depth, seg, line, in_str, in_regex, prevc) {
   text = AST[id,"text"]
   n = length(text)
   line = AST[id,"line"]
   depth = 0
   seg = ""
+  in_str = 0
+  in_regex = 0
   for (i = 1; i <= n; i++) {
     c = substr(text, i, 1)
     if (depth == 0) {
-      if (c == "#" && i < n && substr(text, i + 1, 1) == "{") { depth = 1; seg = ""; i++ }
+      if (c == "#" && i < n && substr(text, i + 1, 1) == "{") { depth = 1; seg = ""; in_str = 0; in_regex = 0; i++ }
+    } else if (in_str) {
+      # 補間式内の文字列リテラル（`#{ f("}") }` 等）の `{`/`}` は深度計算
+      # から除外する（v2_e_split_interp と同じ規約。除外しないと文字列内の
+      # `}` が補間の終端と誤認され、後続の代入が未検査になる）。
+      seg = seg c
+      if (c == "\\" && i < n) { seg = seg substr(text, i + 1, 1); i++ }
+      else if (c == "\"") in_str = 0
+    } else if (in_regex) {
+      seg = seg c
+      if (c == "\\" && i < n) { seg = seg substr(text, i + 1, 1); i++ }
+      else if (c == "/") in_regex = 0
+    } else if (c == "\"") {
+      in_str = 1
+      seg = seg c
+    } else if (c == "/") {
+      prevc = v2_e_interp_prev_nonspace(text, i)
+      if (prevc !~ /[A-Za-z0-9_)\]"]/) in_regex = 1
+      seg = seg c
     } else if (c == "{") {
       depth++; seg = seg c
     } else if (c == "}") {
