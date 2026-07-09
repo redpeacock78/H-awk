@@ -1038,8 +1038,13 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
   v2_emit_rpn("OPERAND", name, line, "")
 
   # 型注釈 [: TYPE]（Dict<Str, Str> / Str|Int のような複数トークンの型に対応）
+  # OPERAND に ":" を前置し、後続の初期化式先頭トークン（大文字始まり
+  # 識別子等）と区別できるようにする（parse.awk 側は PARAM の ":TYPE" と
+  # 同じ規約で判定する。F5: `:` の有無に依存しない大文字始まりヒューリ
+  # スティックだと `let mut x = Y`（Y は関数引数など）の RHS が型注釈と
+  # 誤認識され初期化式が消えていた）。
   if (typetext != "") {
-    v2_emit_rpn("OPERAND", typetext, TOK[typestart,"line"], "")
+    v2_emit_rpn("OPERAND", ":" typetext, TOK[typestart,"line"], "")
     # List</Dict< と宣言された変数は、後続の添字代入文（xs[k] = v）を RAWLINE
     # に吸収させず ASSIGN 系ノードとして構造化するための対象に記録する（CB）。
     # `type Ints = List<Int>` のようなエイリアス越しの宣言は typetext が

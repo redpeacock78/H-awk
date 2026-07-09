@@ -365,13 +365,16 @@ function v2_parse_let(i, parent,    varname, let_id, typeann_id, j, expr_id) {
   AST[let_id,"text"] = varname
   if (RPN[i,"arity"] == "mut") AST[let_id,"mut"] = 1
 
-  # 型注釈: i+2 が大文字始まりの OPERAND、またはユーザー定義エイリアス名
-  # （`type status = Int` のような小文字始まりを含む。lex の
-  # v2_collect_type_aliases が事前収集した V2_DSL_ALIAS と同じ判定基準に
-  # 揃える。CV）なら TYPEANN を追加する。
+  # 型注釈: i+2 が ":" 前置の OPERAND（rpn.awk が実際に `:` を見たときのみ
+  # 付与する。PARAM の ":TYPE" 規約と同じ）なら TYPEANN を追加する。
+  # F5: 旧実装は「大文字始まり、またはユーザー定義エイリアス名」という
+  # 命名ヒューリスティックで判定しており、型注釈もアローも無い大文字
+  # 始まり初期化式（`let mut x = Y`、Y は関数引数など）の RHS が型注釈
+  # と誤認識されて初期化式ごと消失していた。`:` の有無という構造的な
+  # 信号に切り替えることで、大文字/小文字に関わらず正しく判別できる。
   j = i + 2
-  if (RPN[j,"kind"] == "OPERAND" && (RPN[j,"val"] ~ /^[A-Z]/ || (RPN[j,"val"] in V2_DSL_ALIAS))) {
-    typeann_id = v2_leaf("TYPEANN", RPN[j,"val"], RPN[j,"line"])
+  if (RPN[j,"kind"] == "OPERAND" && RPN[j,"val"] ~ /^:/) {
+    typeann_id = v2_leaf("TYPEANN", substr(RPN[j,"val"], 2), RPN[j,"line"])
     v2_addchild(let_id, typeann_id)
     j = i + 3
   }
