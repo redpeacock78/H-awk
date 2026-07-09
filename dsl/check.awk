@@ -2109,6 +2109,16 @@ function v2_mut_scan_checks(id,    k, kind, name, lhs, binder) {
     }
   } else if (kind == "RAWLINE") {
     v2_mut_scan_rawline(id)
+  } else if (kind == "RAW") {
+    # F3 対応: 三項演算子の腕（`c ? (x = 2) : 3` 等）は BINOP に分解されず
+    # RAW 葉ノードとしてテキストのまま残るため、RAWLINE と同じ正規表現
+    # 検査をテキストに直接適用する。
+    v2_mut_check_text(v2_mut_strip(AST[id,"text"]), AST[id,"line"])
+  } else if (kind == "STRLIT" && index(AST[id,"text"], "#{") > 0) {
+    # F4 対応: 文字列補間 `"#{x = 2}"` は emit 時に遅延パースされ check
+    # 時点では BINOP として現れないため、STRLIT テキストから `#{...}`
+    # セグメントを抽出して個別に検査する（ネストした #{} はスコープ外）。
+    v2_mut_scan_strlit(id)
   } else if (kind == "PAT" && AST[id,"nc"] >= 1) {
     # when アームの束縛（`ok x: ...` 等）。PAT の最初の子が IDENT のとき
     # それが束縛変数名（ワイルドカード `_` は対象外）。desugar でこの
@@ -2130,13 +2140,41 @@ function v2_mut_strip(text,    out) {
   gsub(/"([^"\\]|\\.)*"/, "\"\"", out)
   # 正規表現リテラル /.../ を "//" に潰すヒューリスティック。
   # `/` は除算演算子でもあるため完全な awk 字句解析はスコープ外とし、
-  # `~` `!~` `(` `,` `=` `&&` `||` `!` `?` `:` の直後、または文頭・`;`/`{` の直後に
-  # 現れる `/` のみを正規表現リテラルの開始とみなす（&&/|| は末尾の
-  # `&`/`|` 一文字で判定できるので個別に扱わなくてよい）。
+  # `~` `!~` `(` `,` `=` `&&` `||` `!` `?` `:` の直後、または文頭・`;`/`{` の直後、
+  # あるいは `return` キーワード直後（単語境界。F1: `return /x =/` のような
+  # RAWLINE で正規表現本文が代入と誤認識されていた）に現れる `/` のみを
+  # 正規表現リテラルの開始とみなす（&&/|| は末尾の `&`/`|` 一文字で判定
+  # できるので個別に扱わなくてよい）。
   # `a / b / c` のような除算はこれらの文脈に現れないため誤って消費されない。
-  out = gensub(/(^|[~!(,=&|;{?:])[ \t]*\/(\\.|[^\/\\])*\//, "\\1//", "g", out)
+  out = gensub(/(^|[~!(,=&|;{?:]|\<return\>)[ \t]*\/(\\.|[^\/\\])*\//, "\\1//", "g", out)
   sub(/#.*$/, "", out)
   return out
+}
+
+# STRLIT テキストから `#{...}` 補間セグメントを抽出し、各セグメントの
+# 中身を v2_mut_check_text で検査する（F4）。emit.awk の v2_e_split_interp
+# と同様の深度カウントで `{`/`}` の対応を取るが、ここではネストした
+# `#{}` の展開までは追わない（既存の補間パーサの挙動同様スコープ外）。
+function v2_mut_scan_strlit(id,    text, i, n, c, depth, seg, line) {
+  text = AST[id,"text"]
+  n = length(text)
+  line = AST[id,"line"]
+  depth = 0
+  seg = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(text, i, 1)
+    if (depth == 0) {
+      if (c == "#" && i < n && substr(text, i + 1, 1) == "{") { depth = 1; seg = ""; i++ }
+    } else if (c == "{") {
+      depth++; seg = seg c
+    } else if (c == "}") {
+      depth--
+      if (depth == 0) v2_mut_check_text(v2_mut_strip(seg), line)
+      else seg = seg c
+    } else {
+      seg = seg c
+    }
+  }
 }
 
 # 素の awk 行に含まれる不変 let 変数への再束縛を検出する。
@@ -2149,13 +2187,23 @@ function v2_mut_strip(text,    out) {
 # v2_mut_scan_checks が BINOP(=) を木の全域から検出するため、右辺に現れる
 # 不変変数への再束縛も含めて捕捉できる。ここでの RAWLINE 正規表現検査は、
 # DSL パーサを経由せず生の awk 行としてそのまま出力される構文のみを対象とする。
-function v2_mut_scan_rawline(id,    text, name, pre) {
-  text = v2_mut_strip(AST[id,"text"])
+# F3/F4 対応: 三項演算子の腕（kind=RAW）や文字列補間 `#{...}` の中身も
+# 同じ正規表現検査を要するため、テキストと行番号を受け取る形に切り出す。
+function v2_mut_check_text(text, line,    name, pre) {
   pre = "(^|[^[:alnum:]_.$])"
   for (name in V2_MUT_DECL) {
     if (name in V2_MUT_OK) continue
     if (text ~ (pre name "[[:space:]]*(=([^=]|$)|(\\+|-|\\*|/|%|\\^)=|\\+\\+|--)") ||
         text ~ ("(\\+\\+|--)[[:space:]]*" name "([^[:alnum:]_]|$)"))
-      v2_diag(AST[id,"line"], 1, "cannot reassign immutable variable '" name "'; declare it with 'let mut " name "'")
+      v2_diag(line, 1, "cannot reassign immutable variable '" name "'; declare it with 'let mut " name "'")
+    # F2 対応: for-in はループ変数に各キーを代入するため、明示的な代入
+    # 演算子が現れない `for (x in arr) ...` も再束縛として検出する。
+    else if (text ~ ("\\<for[ \t]*\\([ \t]*\\<" name "\\>[ \t]+in\\>"))
+      v2_diag(line, 1, "cannot reassign immutable variable '" name "' via 'for (" name " in ...)'; declare it with 'let mut " name "'")
   }
+}
+
+function v2_mut_scan_rawline(id,    text) {
+  text = v2_mut_strip(AST[id,"text"])
+  v2_mut_check_text(text, AST[id,"line"])
 }
