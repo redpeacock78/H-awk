@@ -1903,6 +1903,7 @@ function v2_check() {
   v2_check_brand(1, 0)
   v2_mark_let_literal_ok(1)
   v2_check_bare_collection_lit(1)
+  v2_check_mut(1)
 }
 
 # LET/LETQ の直接の初期化式（最後の子）だけが空コレクションリテラル
@@ -2034,4 +2035,195 @@ function v2_check_alias_cycles(    i, name, visiting) {
     delete visiting
     v2_check_alias_cycle(name, ALIAS_DECL_LINE[name], visiting)
   }
+}
+
+# ─── let 不変性検査 ──────────────────────────────────────────────
+# FUNC ごとに let 宣言を収集し、(1) 同名 let の再宣言、(2) 初期化子なし
+# 裸 let の mut 欠落、(3) 不変 let への再束縛（EXPR/BINOP 代入・RAWLINE・
+# when アーム束縛）を検査する。let は関数スコープにホイストされるため、
+# ブロック単位ではなく FUNC 単位のフラット表で正しい。
+#
+# 宣言収集（v2_mut_scan_decls）と再代入検査（v2_mut_scan_checks）を 2 パスに
+# 分離している。1 パスの単純な木の巡回では、ソース上「代入が先・宣言が後」
+# という並び（`x = 1` の後に `let x = 2` が続く関数）で、代入を検査した
+# 時点ではまだ V2_MUT_DECL に x が登録されておらず検査をすり抜けてしまう
+# （let はブロック位置に関係なく関数全体にホイストされるため、本来はソース
+# 上の前後関係に関わらず検出すべき）。2 パスにすることで、宣言収集を全て
+# 終えた後に再代入検査を行い、この順序依存を解消する。
+function v2_check_mut(id,    k, kind) {
+  kind = AST[id,"kind"]
+  if (kind == "FUNC") {
+    delete V2_MUT_DECL
+    delete V2_MUT_OK
+    for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan_decls(AST[id,"c" k])
+    for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan_checks(AST[id,"c" k])
+    return
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_check_mut(AST[id,"c" k])
+}
+
+# LET ノードに TYPEANN 以外の子（= 初期化式）があるか
+function v2_let_has_init(id,    k) {
+  for (k = 1; k <= AST[id,"nc"]; k++)
+    if (AST[AST[id,"c" k],"kind"] != "TYPEANN") return 1
+  return 0
+}
+
+# パス 1: LET/LETQ/RECORDLIT 宣言を収集し、同名再宣言・裸 let の mut 欠落を
+# 診断する。診断は宣言行を指すべきなのでこのパスに残す。
+function v2_mut_scan_decls(id,    k, kind, name) {
+  kind = AST[id,"kind"]
+  if (kind == "LET" || kind == "LETQ" || kind == "RECORDLIT") {
+    name = AST[id,"text"]
+    if (name in V2_MUT_DECL) {
+      # 初回宣言が mut なら再代入で足りるためその案内を出すが、不変（非 mut）
+      # だった場合はその案内自体が不変性エラーに衝突するので出さない。
+      if (name in V2_MUT_OK)
+        v2_diag(AST[id,"line"], 1, "duplicate declaration of '" name "'; assign with '" name " = ...' or use a new name")
+      else
+        v2_diag(AST[id,"line"], 1, "duplicate declaration of '" name "'; use a new name")
+    }
+    V2_MUT_DECL[name] = 1
+    if (AST[id,"mut"]) V2_MUT_OK[name] = 1
+    # RECORDLIT は初期化子必須（field 代入を伴わない裸宣言構文が存在しない）ため、
+    # 裸 let の mut 欠落チェックは LET/LETQ のみ対象。
+    if (kind != "RECORDLIT" && !AST[id,"mut"] && !v2_let_has_init(id))
+      v2_diag(AST[id,"line"], 1, "'let " name "' without initializer must be declared 'let mut " name "'")
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan_decls(AST[id,"c" k])
+}
+
+# パス 2: 宣言収集が完了した V2_MUT_DECL/V2_MUT_OK を使って再代入を検査する。
+# BINOP(=) は EXPR の直接子に限らず木のどこに現れても代入であるため
+# （`return x = 2`、`let y = x = 2` の右辺など）、種別を問わず全探索する。
+# LET/LETQ/RECORDLIT 自身の宣言は BINOP では表現されないため、ここで
+# 自分自身の束縛を誤検知することはない。
+function v2_mut_scan_checks(id,    k, kind, name, lhs, binder) {
+  kind = AST[id,"kind"]
+  if (kind == "BINOP" && AST[id,"text"] == "=") {
+    lhs = AST[id,"c1"]
+    if (AST[lhs,"kind"] == "IDENT") {
+      name = AST[lhs,"text"]
+      if ((name in V2_MUT_DECL) && !(name in V2_MUT_OK))
+        v2_diag(AST[id,"line"], 1, "cannot reassign immutable variable '" name "'; declare it with 'let mut " name "'")
+    }
+  } else if (kind == "RAWLINE") {
+    v2_mut_scan_rawline(id)
+  } else if (kind == "RAW") {
+    # F3 対応: 三項演算子の腕（`c ? (x = 2) : 3` 等）は BINOP に分解されず
+    # RAW 葉ノードとしてテキストのまま残るため、RAWLINE と同じ正規表現
+    # 検査をテキストに直接適用する。
+    v2_mut_check_text(v2_mut_strip(AST[id,"text"]), AST[id,"line"])
+  } else if (kind == "STRLIT" && index(AST[id,"text"], "#{") > 0) {
+    # F4 対応: 文字列補間 `"#{x = 2}"` は emit 時に遅延パースされ check
+    # 時点では BINOP として現れないため、STRLIT テキストから `#{...}`
+    # セグメントを抽出して個別に検査する（ネストした #{} はスコープ外）。
+    v2_mut_scan_strlit(id)
+  } else if (kind == "PAT" && AST[id,"nc"] >= 1) {
+    # when アームの束縛（`ok x: ...` 等）。PAT の最初の子が IDENT のとき
+    # それが束縛変数名（ワイルドカード `_` は対象外）。desugar でこの
+    # 束縛は `x = result_val(...)` 相当の代入として展開されるため、
+    # 不変 let への束縛は再代入と同じ扱いで禁止する。
+    binder = AST[id,"c1"]
+    if (AST[binder,"kind"] == "IDENT" && AST[binder,"text"] != "_") {
+      name = AST[binder,"text"]
+      if ((name in V2_MUT_DECL) && !(name in V2_MUT_OK))
+        v2_diag(AST[id,"line"], 1, "when arm binder '" name "' rebinds immutable variable '" name "'; declare it with 'let mut " name "' or rename the binder")
+    }
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan_checks(AST[id,"c" k])
+}
+
+# RAWLINE から文字列リテラルと正規表現リテラル・行末コメントを除去した検査用テキストを返す
+function v2_mut_strip(text,    out) {
+  out = text
+  gsub(/"([^"\\]|\\.)*"/, "\"\"", out)
+  # 正規表現リテラル /.../ を "//" に潰すヒューリスティック。
+  # `/` は除算演算子でもあるため完全な awk 字句解析はスコープ外とし、
+  # `~` `!~` `(` `,` `=` `&&` `||` `!` `?` `:` の直後、または文頭・`;`/`{` の直後、
+  # あるいは `return` キーワード直後（単語境界。F1: `return /x =/` のような
+  # RAWLINE で正規表現本文が代入と誤認識されていた）に現れる `/` のみを
+  # 正規表現リテラルの開始とみなす（&&/|| は末尾の `&`/`|` 一文字で判定
+  # できるので個別に扱わなくてよい）。
+  # `a / b / c` のような除算はこれらの文脈に現れないため誤って消費されない。
+  out = gensub(/(^|[~!(,=&|;{?:]|\<return\>)[ \t]*\/(\\.|[^\/\\])*\//, "\\1//", "g", out)
+  sub(/#.*$/, "", out)
+  return out
+}
+
+# STRLIT テキストから `#{...}` 補間セグメントを抽出し、各セグメントの
+# 中身を v2_mut_check_text で検査する（F4）。emit.awk の v2_e_split_interp
+# と同様の深度カウントで `{`/`}` の対応を取るが、ここではネストした
+# `#{}` の展開までは追わない（既存の補間パーサの挙動同様スコープ外）。
+function v2_mut_scan_strlit(id,    text, i, n, c, depth, seg, line, in_str, in_regex, prevc) {
+  text = AST[id,"text"]
+  n = length(text)
+  line = AST[id,"line"]
+  depth = 0
+  seg = ""
+  in_str = 0
+  in_regex = 0
+  for (i = 1; i <= n; i++) {
+    c = substr(text, i, 1)
+    if (depth == 0) {
+      if (c == "#" && i < n && substr(text, i + 1, 1) == "{") { depth = 1; seg = ""; in_str = 0; in_regex = 0; i++ }
+    } else if (in_str) {
+      # 補間式内の文字列リテラル（`#{ f("}") }` 等）の `{`/`}` は深度計算
+      # から除外する（v2_e_split_interp と同じ規約。除外しないと文字列内の
+      # `}` が補間の終端と誤認され、後続の代入が未検査になる）。
+      seg = seg c
+      if (c == "\\" && i < n) { seg = seg substr(text, i + 1, 1); i++ }
+      else if (c == "\"") in_str = 0
+    } else if (in_regex) {
+      seg = seg c
+      if (c == "\\" && i < n) { seg = seg substr(text, i + 1, 1); i++ }
+      else if (c == "/") in_regex = 0
+    } else if (c == "\"") {
+      in_str = 1
+      seg = seg c
+    } else if (c == "/") {
+      prevc = v2_e_interp_prev_nonspace(text, i)
+      if (prevc !~ /[A-Za-z0-9_)\]"]/) in_regex = 1
+      seg = seg c
+    } else if (c == "{") {
+      depth++; seg = seg c
+    } else if (c == "}") {
+      depth--
+      if (depth == 0) v2_mut_check_text(v2_mut_strip(seg), line)
+      else seg = seg c
+    } else {
+      seg = seg c
+    }
+  }
+}
+
+# 素の awk 行に含まれる不変 let 変数への再束縛を検出する。
+# 対象: name = / name += -= *= /= %= ^= / name++ name-- / ++name --name。
+# name[ で始まる添字代入と ==（比較）は対象外。$name（フィールド参照）への
+# 代入・インクリメントは入力フィールドの変更であり変数 name の再束縛では
+# ないため対象外。正規表現照合であり
+# awk の完全構文解析ではない（getline var など未網羅、spec 参照）。
+# DSL としてパースされる式（`y = x = 2` のような連鎖代入を含む）側は
+# v2_mut_scan_checks が BINOP(=) を木の全域から検出するため、右辺に現れる
+# 不変変数への再束縛も含めて捕捉できる。ここでの RAWLINE 正規表現検査は、
+# DSL パーサを経由せず生の awk 行としてそのまま出力される構文のみを対象とする。
+# F3/F4 対応: 三項演算子の腕（kind=RAW）や文字列補間 `#{...}` の中身も
+# 同じ正規表現検査を要するため、テキストと行番号を受け取る形に切り出す。
+function v2_mut_check_text(text, line,    name, pre) {
+  pre = "(^|[^[:alnum:]_.$])"
+  for (name in V2_MUT_DECL) {
+    if (name in V2_MUT_OK) continue
+    if (text ~ (pre name "[[:space:]]*(=([^=]|$)|(\\+|-|\\*|/|%|\\^)=|\\+\\+|--)") ||
+        text ~ ("(\\+\\+|--)[[:space:]]*" name "([^[:alnum:]_]|$)"))
+      v2_diag(line, 1, "cannot reassign immutable variable '" name "'; declare it with 'let mut " name "'")
+    # F2 対応: for-in はループ変数に各キーを代入するため、明示的な代入
+    # 演算子が現れない `for (x in arr) ...` も再束縛として検出する。
+    else if (text ~ ("\\<for[ \t]*\\([ \t]*\\<" name "\\>[ \t]+in\\>"))
+      v2_diag(line, 1, "cannot reassign immutable variable '" name "' via 'for (" name " in ...)'; declare it with 'let mut " name "'")
+  }
+}
+
+function v2_mut_scan_rawline(id,    text) {
+  text = v2_mut_strip(AST[id,"text"])
+  v2_mut_check_text(text, AST[id,"line"])
 }

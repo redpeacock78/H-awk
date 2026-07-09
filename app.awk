@@ -35,8 +35,8 @@ function todo_list_html() -> Response {
   end
   let rows = []
   let n: Int = read_tsv("data/todos.tsv", rows)
-  let out: Str = ""
-  let i: Int
+  let mut out: Str = ""
+  let mut i: Int
   for (i = 1; i <= n; i++) {
     out = out _todo_tr(rows[i, "id"], rows[i, "title"])
   }
@@ -123,8 +123,8 @@ function todo_list_json() -> Response {
   let rows = []
   let n: Int = read_tsv("data/todos.tsv", rows)
   let item: Dict<Str, Str> = {}
-  let items_json: Str = ""
-  let i: Int
+  let mut items_json: Str = ""
+  let mut i: Int
   for (i = 1; i <= n; i++) {
     item["id"] = rows[i, "id"]
     item["title"] = rows[i, "title"]

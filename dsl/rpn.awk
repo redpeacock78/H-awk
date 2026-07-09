@@ -6,13 +6,17 @@
 # RPN[i,"kind"]  : OPERAND | OP | CALL | MARKER
 # RPN[i,"val"]   : マーカー名 or 演算子 or オペランドテキスト or 関数名
 # RPN[i,"line"]  : ソース行番号
-# RPN[i,"arity"] : CALL のみ。その他は空。
+# RPN[i,"arity"] : CALL では実引数の個数。MARKER val が LET / LETQ /
+#                  RECORDLIT の場合は `let mut` のときのみ "mut"、それ以外
+#                  （通常の let）は空文字列（不変性検査 v2_check_mut が参照）。
+#                  上記以外の MARKER・OPERAND・OP では空。
 #
 # MARKER val 語彙:
 #   FUNC_OPEN  FUNC_CLOSE
 #   LET  LETQ
 #   WHEN  OF  ARM_OPEN  ARM_CLOSE  WHEN_END
 #   RETURN  STMT_END  RAWLINE
+#   RECORDLIT
 
 # ─── 演算子テーブル初期化 ─────────────────────────────────────────
 
@@ -930,8 +934,8 @@ function v2_skip_balanced_braces(open_pos,    j, depth) {
   return j
 }
 
-function v2_rpn_record_literal(varname, typename, line, open_pos,    j, fname, fline, vstart, valline, depth, brace_depth) {
-  v2_emit_rpn("MARKER", "RECORDLIT", line, "")
+function v2_rpn_record_literal(varname, typename, line, open_pos, mut,    j, fname, fline, vstart, valline, depth, brace_depth) {
+  v2_emit_rpn("MARKER", "RECORDLIT", line, mut)
   v2_emit_rpn("OPERAND", varname, line, "")
   v2_emit_rpn("OPERAND", typename, line, "")
 
@@ -973,8 +977,17 @@ function v2_rpn_record_literal(varname, typename, line, open_pos,    j, fname, f
 # （wave 27）。`?=` の typed decode（`ctx.req.json<Todo>()`）は record
 # 型でも既存の generic 呼び出し経路（"_t" 接尾の CALL）でそのまま処理
 # できるため、ここでの分岐対象は `=` 形のみでよい。
-function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, k, rectype) {
+function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, k, rectype, mut) {
   line = TOK[i,"line"]
+  # let mut NAME ...: `mut` の次が IDENT か TYPE（大文字始まり識別子。
+  # 例: `let mut X: Int = 1`）なら mut キーワードとして消費する。
+  # （`let mut = 1` のような mut という名前の変数は従来どおり変数名扱い）
+  mut = ""
+  if (TOK[i+1,"kind"] == "IDENT" && TOK[i+1,"text"] == "mut" && \
+      (TOK[i+2,"kind"] == "IDENT" || TOK[i+2,"kind"] == "TYPE")) {
+    mut = "mut"
+    i++
+  }
   name = TOK[i+1,"text"]
 
   # LET / LETQ 判別 + 型注釈の先読み。record リテラル判定に使うため、
@@ -1002,7 +1015,7 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
       # （v2_check_index_assign）が一切働かない。
       V2_RPN_DSLVAR[name] = typetext
       V2_RPN_IDXVAR[name] = typetext
-      return v2_rpn_record_literal(name, rectype, line, j + 1)
+      return v2_rpn_record_literal(name, rectype, line, j + 1, mut)
     }
   }
 
@@ -1021,12 +1034,17 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
     return v2_skip_balanced_braces(j + 1)
   }
 
-  v2_emit_rpn("MARKER", marker, line, "")
+  v2_emit_rpn("MARKER", marker, line, mut)
   v2_emit_rpn("OPERAND", name, line, "")
 
   # 型注釈 [: TYPE]（Dict<Str, Str> / Str|Int のような複数トークンの型に対応）
+  # OPERAND に ":" を前置し、後続の初期化式先頭トークン（大文字始まり
+  # 識別子等）と区別できるようにする（parse.awk 側は PARAM の ":TYPE" と
+  # 同じ規約で判定する。F5: `:` の有無に依存しない大文字始まりヒューリ
+  # スティックだと `let mut x = Y`（Y は関数引数など）の RHS が型注釈と
+  # 誤認識され初期化式が消えていた）。
   if (typetext != "") {
-    v2_emit_rpn("OPERAND", typetext, TOK[typestart,"line"], "")
+    v2_emit_rpn("OPERAND", ":" typetext, TOK[typestart,"line"], "")
     # List</Dict< と宣言された変数は、後続の添字代入文（xs[k] = v）を RAWLINE
     # に吸収させず ASSIGN 系ノードとして構造化するための対象に記録する（CB）。
     # `type Ints = List<Int>` のようなエイリアス越しの宣言は typetext が

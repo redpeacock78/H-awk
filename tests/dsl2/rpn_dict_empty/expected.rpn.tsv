@@ -1,5 +1,5 @@
 1	MARKER	1	LET	
 2	OPERAND	1	x	
-3	OPERAND	1	Dict<Str, Str>	
+3	OPERAND	1	:Dict<Str, Str>	
 4	OPERAND	1	{}	
 5	MARKER	1	STMT_END	

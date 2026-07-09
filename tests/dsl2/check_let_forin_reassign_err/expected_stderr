@@ -1,0 +1,1 @@
+error: cannot reassign immutable variable 'x' via 'for (x in ...)'

@@ -25,7 +25,7 @@ Rule: `ns.a.b.c(args)` → `ns::dispatch("a.b.c", args)`. First segment is the d
 function handler() {
   let title = "hello"
   let items = []
-  let tmp
+  let mut tmp
   ...
 }
 
@@ -40,6 +40,28 @@ function handler(    title, items, tmp) {
 `let` declarations are hoisted to the function signature as gawk locals (4-space convention). `let name = []` becomes `delete name`. Bare `let name` is hoisted only (line removed).
 
 `let` is function-scoped, not block-scoped. A `let` inside `if`, `for`, or `while` is still hoisted to the function signature, so the variable remains visible after the block. In strict mode (`_DS_strict=1`), a warning is emitted when `let` appears inside a control-flow block.
+
+`let` bindings are immutable: reassigning (`x = ...`, `x += ...`, `x++`) or
+redeclaring the same name is a compile-time error. Declare with `let mut`
+when the variable needs reassignment:
+
+```awk
+function counter() -> Int {
+  let mut n = 0
+  n += 1
+  return n
+}
+```
+
+A bare declaration without an initializer (`let tmp`) must use `let mut`,
+since its only purpose is a later assignment. Element updates on
+collections (`xs[i] = v`) are allowed on immutable bindings; immutability
+covers rebinding only. Detection inside raw AWK lines is regex-based and
+may miss exotic forms such as `getline x`.
+
+**Breaking change:** code that reassigned a plain `let` binding compiled
+without error before this immutability check was introduced; it is now a
+compile-time error. Add `mut` to any `let` that is reassigned to migrate.
 
 **Type annotations on `let`**
 
@@ -61,7 +83,7 @@ function handler(    n) {
 # for coercion to apply; a literal like "42" is already known to be
 # NumericStr and is rejected outright by the static check below.
 function handler(v) {
-  let n: Int
+  let mut n: Int
   n = v
 }
 
