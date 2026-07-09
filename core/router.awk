@@ -29,6 +29,10 @@ function _route_add(method, path, handler,    pattern, params, parts, n, i, seg)
     if (substr(seg, 1, 1) == ":") {
       pattern = pattern "([^/]+)"
       params = params (params == "" ? "" : ",") substr(seg, 2)
+    } else if (i == n && substr(seg, 1, 1) == "*" && length(seg) > 1) {
+      # 末尾セグメント *name -- catch-all。残りパス全体を 1 パラメータで捕捉
+      pattern = pattern "(.+)"
+      params = params (params == "" ? "" : ",") substr(seg, 2)
     } else {
       pattern = pattern _route_escape_re(seg)
     }

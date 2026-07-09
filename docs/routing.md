@@ -88,6 +88,19 @@ BEGIN {
 }
 ```
 
+### Catch-all parameters
+
+A trailing segment of the form `*name` matches the rest of the path
+(one or more characters, including `/`):
+
+```awk
+hawk.app.get("/docs/*path", "docs_handler")
+# GET /docs/guide/routing -> req["params:path"] = "guide/routing"
+```
+
+`*name` is only special in the final segment. Anywhere else it is
+matched literally.
+
 ---
 
 *For the full routing method reference, see [API Reference](api.md).*
