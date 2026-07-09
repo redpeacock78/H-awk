@@ -2141,7 +2141,9 @@ function v2_mut_strip(text,    out) {
 
 # 素の awk 行に含まれる不変 let 変数への再束縛を検出する。
 # 対象: name = / name += -= *= /= %= ^= / name++ name-- / ++name --name。
-# name[ で始まる添字代入と ==（比較）は対象外。正規表現照合であり
+# name[ で始まる添字代入と ==（比較）は対象外。$name（フィールド参照）への
+# 代入・インクリメントは入力フィールドの変更であり変数 name の再束縛では
+# ないため対象外。正規表現照合であり
 # awk の完全構文解析ではない（getline var など未網羅、spec 参照）。
 # DSL としてパースされる式（`y = x = 2` のような連鎖代入を含む）側は
 # v2_mut_scan_checks が BINOP(=) を木の全域から検出するため、右辺に現れる
@@ -2149,7 +2151,7 @@ function v2_mut_strip(text,    out) {
 # DSL パーサを経由せず生の awk 行としてそのまま出力される構文のみを対象とする。
 function v2_mut_scan_rawline(id,    text, name, pre) {
   text = v2_mut_strip(AST[id,"text"])
-  pre = "(^|[^[:alnum:]_.])"
+  pre = "(^|[^[:alnum:]_.$])"
   for (name in V2_MUT_DECL) {
     if (name in V2_MUT_OK) continue
     if (text ~ (pre name "[[:space:]]*(=([^=]|$)|(\\+|-|\\*|/|%|\\^)=|\\+\\+|--)") ||
