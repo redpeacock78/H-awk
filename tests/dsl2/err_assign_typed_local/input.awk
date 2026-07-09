@@ -1,4 +1,4 @@
 function run() -> Void {
-  let n: Int
+  let mut n: Int
   n = "bad"
 }

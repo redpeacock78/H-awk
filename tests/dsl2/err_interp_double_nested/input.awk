@@ -3,5 +3,5 @@ function f(s: Str) -> Str {
 }
 function handler() {
   let g = "world"
-  let msg = "#{f("#{g}")}"
+  let mut msg = "#{f("#{g}")}"
 }

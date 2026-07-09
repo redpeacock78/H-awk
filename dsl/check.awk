@@ -2064,8 +2064,14 @@ function v2_mut_scan(id,    k, kind, name) {
   kind = AST[id,"kind"]
   if (kind == "LET" || kind == "LETQ" || kind == "RECORDLIT") {
     name = AST[id,"text"]
-    if (name in V2_MUT_DECL)
-      v2_diag(AST[id,"line"], 1, "duplicate declaration of '" name "'; assign with '" name " = ...' or use a new name")
+    if (name in V2_MUT_DECL) {
+      # 初回宣言が mut なら再代入で足りるためその案内を出すが、不変（非 mut）
+      # だった場合はその案内自体が不変性エラーに衝突するので出さない。
+      if (name in V2_MUT_OK)
+        v2_diag(AST[id,"line"], 1, "duplicate declaration of '" name "'; assign with '" name " = ...' or use a new name")
+      else
+        v2_diag(AST[id,"line"], 1, "duplicate declaration of '" name "'; use a new name")
+    }
     V2_MUT_DECL[name] = 1
     if (AST[id,"mut"]) V2_MUT_OK[name] = 1
     # RECORDLIT は初期化子必須（field 代入を伴わない裸宣言構文が存在しない）ため、
@@ -2086,10 +2092,17 @@ function v2_mut_scan(id,    k, kind, name) {
   for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan(AST[id,"c" k])
 }
 
-# RAWLINE から文字列リテラルと行末コメントを除去した検査用テキストを返す
+# RAWLINE から文字列リテラルと正規表現リテラル・行末コメントを除去した検査用テキストを返す
 function v2_mut_strip(text,    out) {
   out = text
   gsub(/"([^"\\]|\\.)*"/, "\"\"", out)
+  # 正規表現リテラル /.../ を "//" に潰すヒューリスティック。
+  # `/` は除算演算子でもあるため完全な awk 字句解析はスコープ外とし、
+  # `~` `!~` `(` `,` `=` `&&` `||` `!` の直後、または文頭・`;`/`{` の直後に
+  # 現れる `/` のみを正規表現リテラルの開始とみなす（&&/|| は末尾の
+  # `&`/`|` 一文字で判定できるので個別に扱わなくてよい）。
+  # `a / b / c` のような除算はこれらの文脈に現れないため誤って消費されない。
+  out = gensub(/(^|[~!(,=&|;{])[ \t]*\/(\\.|[^\/\\])*\//, "\\1//", "g", out)
   sub(/#.*$/, "", out)
   return out
 }
@@ -2098,6 +2111,8 @@ function v2_mut_strip(text,    out) {
 # 対象: name = / name += -= *= /= %= ^= / name++ name-- / ++name --name。
 # name[ で始まる添字代入と ==（比較）は対象外。正規表現照合であり
 # awk の完全構文解析ではない（getline var など未網羅、spec 参照）。
+# 同様に EXPR 側（v2_mut_scan の BINOP(=) 判定）も `y = x = 2` のような
+# 連鎖代入で右辺に現れる不変 x への再束縛は検出しない（仕様上許容、リーク方向は右→左のみ）。
 function v2_mut_scan_rawline(id,    text, name, pre) {
   text = v2_mut_strip(AST[id,"text"])
   pre = "(^|[^[:alnum:]_.])"

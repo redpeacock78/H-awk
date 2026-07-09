@@ -6,13 +6,17 @@
 # RPN[i,"kind"]  : OPERAND | OP | CALL | MARKER
 # RPN[i,"val"]   : マーカー名 or 演算子 or オペランドテキスト or 関数名
 # RPN[i,"line"]  : ソース行番号
-# RPN[i,"arity"] : CALL のみ。その他は空。
+# RPN[i,"arity"] : CALL では実引数の個数。MARKER val が LET / LETQ /
+#                  RECORDLIT の場合は `let mut` のときのみ "mut"、それ以外
+#                  （通常の let）は空文字列（不変性検査 v2_check_mut が参照）。
+#                  上記以外の MARKER・OPERAND・OP では空。
 #
 # MARKER val 語彙:
 #   FUNC_OPEN  FUNC_CLOSE
 #   LET  LETQ
 #   WHEN  OF  ARM_OPEN  ARM_CLOSE  WHEN_END
 #   RETURN  STMT_END  RAWLINE
+#   RECORDLIT
 
 # ─── 演算子テーブル初期化 ─────────────────────────────────────────
 

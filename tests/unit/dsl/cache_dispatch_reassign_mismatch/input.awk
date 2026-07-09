@@ -1,4 +1,4 @@
 function _() {
-    let v: Result<Bool, CacheError>
+    let mut v: Result<Bool, CacheError>
     v = cache.has("k")
 }

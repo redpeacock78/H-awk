@@ -59,6 +59,10 @@ collections (`xs[i] = v`) are allowed on immutable bindings; immutability
 covers rebinding only. Detection inside raw AWK lines is regex-based and
 may miss exotic forms such as `getline x`.
 
+**Breaking change:** code that reassigned a plain `let` binding compiled
+without error before this immutability check was introduced; it is now a
+compile-time error. Add `mut` to any `let` that is reassigned to migrate.
+
 **Type annotations on `let`**
 
 ```awk
