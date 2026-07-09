@@ -1,0 +1,1 @@
+error: 'let y' without initializer must be declared 'let mut y'

@@ -1,5 +1,5 @@
 function h(v) -> Response {
-  let n: Int
+  let mut n: Int
   n = v
   return ctx.res.status(n)
 }

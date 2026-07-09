@@ -1903,6 +1903,7 @@ function v2_check() {
   v2_check_brand(1, 0)
   v2_mark_let_literal_ok(1)
   v2_check_bare_collection_lit(1)
+  v2_check_mut(1)
 }
 
 # LET/LETQ の直接の初期化式（最後の子）だけが空コレクションリテラル
@@ -2034,4 +2035,43 @@ function v2_check_alias_cycles(    i, name, visiting) {
     delete visiting
     v2_check_alias_cycle(name, ALIAS_DECL_LINE[name], visiting)
   }
+}
+
+# ─── let 不変性検査 ──────────────────────────────────────────────
+# FUNC ごとに let 宣言を収集し、(1) 同名 let の再宣言、(2) 初期化子なし
+# 裸 let の mut 欠落、(3) 不変 let への再束縛（EXPR 代入 / RAWLINE、
+# Task 3 で追加）を検査する。let は関数スコープにホイストされるため、
+# ブロック単位ではなく FUNC 単位のフラット表で正しい。
+function v2_check_mut(id,    k, kind) {
+  kind = AST[id,"kind"]
+  if (kind == "FUNC") {
+    delete V2_MUT_DECL
+    delete V2_MUT_OK
+    for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan(AST[id,"c" k])
+    return
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_check_mut(AST[id,"c" k])
+}
+
+# LET ノードに TYPEANN 以外の子（= 初期化式）があるか
+function v2_let_has_init(id,    k) {
+  for (k = 1; k <= AST[id,"nc"]; k++)
+    if (AST[AST[id,"c" k],"kind"] != "TYPEANN") return 1
+  return 0
+}
+
+function v2_mut_scan(id,    k, kind, name) {
+  kind = AST[id,"kind"]
+  if (kind == "LET" || kind == "LETQ" || kind == "RECORDLIT") {
+    name = AST[id,"text"]
+    if (name in V2_MUT_DECL)
+      v2_diag(AST[id,"line"], 1, "duplicate declaration of '" name "'; assign with '" name " = ...' or use a new name")
+    V2_MUT_DECL[name] = 1
+    if (AST[id,"mut"]) V2_MUT_OK[name] = 1
+    # RECORDLIT は初期化子必須（field 代入を伴わない裸宣言構文が存在しない）ため、
+    # 裸 let の mut 欠落チェックは LET/LETQ のみ対象。
+    if (kind != "RECORDLIT" && !AST[id,"mut"] && !v2_let_has_init(id))
+      v2_diag(AST[id,"line"], 1, "'let " name "' without initializer must be declared 'let mut " name "'")
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan(AST[id,"c" k])
 }

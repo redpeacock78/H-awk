@@ -450,6 +450,7 @@ function v2_parse_recordlit(i, parent,    varname, typename, id, j, field_id) {
   typename = RPN[i+2,"val"]
   id = v2_node("RECORDLIT", RPN[i,"line"])
   AST[id,"text"] = varname
+  if (RPN[i,"arity"] == "mut") AST[id,"mut"] = 1
   v2_addchild(id, v2_leaf("TYPEANN", typename, RPN[i,"line"]))
 
   j = i + 3
