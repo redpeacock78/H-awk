@@ -979,10 +979,12 @@ function v2_rpn_record_literal(varname, typename, line, open_pos, mut,    j, fna
 # できるため、ここでの分岐対象は `=` 形のみでよい。
 function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, k, rectype, mut) {
   line = TOK[i,"line"]
-  # let mut NAME ...: `mut` の次も IDENT なら mut キーワードとして消費する。
+  # let mut NAME ...: `mut` の次が IDENT か TYPE（大文字始まり識別子。
+  # 例: `let mut X: Int = 1`）なら mut キーワードとして消費する。
   # （`let mut = 1` のような mut という名前の変数は従来どおり変数名扱い）
   mut = ""
-  if (TOK[i+1,"kind"] == "IDENT" && TOK[i+1,"text"] == "mut" && TOK[i+2,"kind"] == "IDENT") {
+  if (TOK[i+1,"kind"] == "IDENT" && TOK[i+1,"text"] == "mut" && \
+      (TOK[i+2,"kind"] == "IDENT" || TOK[i+2,"kind"] == "TYPE")) {
     mut = "mut"
     i++
   }

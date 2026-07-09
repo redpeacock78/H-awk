@@ -1,0 +1,1 @@
+error: when arm binder 'v' rebinds immutable variable 'v'; declare it with 'let mut v' or rename the binder

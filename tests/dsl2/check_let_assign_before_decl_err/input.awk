@@ -1,4 +1,4 @@
 function f() -> Void {
-  let mut x = 1
-  let y
+  x = 1
+  let x = 2
 }

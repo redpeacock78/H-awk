@@ -1,1 +1,1 @@
-error: cannot reassign immutable variable 'x'
+error: cannot reassign immutable variable 'x'; declare it with 'let mut x'

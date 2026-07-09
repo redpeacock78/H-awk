@@ -2039,15 +2039,24 @@ function v2_check_alias_cycles(    i, name, visiting) {
 
 # ─── let 不変性検査 ──────────────────────────────────────────────
 # FUNC ごとに let 宣言を収集し、(1) 同名 let の再宣言、(2) 初期化子なし
-# 裸 let の mut 欠落、(3) 不変 let への再束縛（EXPR 代入 / RAWLINE、
-# Task 3 で追加）を検査する。let は関数スコープにホイストされるため、
+# 裸 let の mut 欠落、(3) 不変 let への再束縛（EXPR/BINOP 代入・RAWLINE・
+# when アーム束縛）を検査する。let は関数スコープにホイストされるため、
 # ブロック単位ではなく FUNC 単位のフラット表で正しい。
+#
+# 宣言収集（v2_mut_scan_decls）と再代入検査（v2_mut_scan_checks）を 2 パスに
+# 分離している。1 パスの単純な木の巡回では、ソース上「代入が先・宣言が後」
+# という並び（`x = 1` の後に `let x = 2` が続く関数）で、代入を検査した
+# 時点ではまだ V2_MUT_DECL に x が登録されておらず検査をすり抜けてしまう
+# （let はブロック位置に関係なく関数全体にホイストされるため、本来はソース
+# 上の前後関係に関わらず検出すべき）。2 パスにすることで、宣言収集を全て
+# 終えた後に再代入検査を行い、この順序依存を解消する。
 function v2_check_mut(id,    k, kind) {
   kind = AST[id,"kind"]
   if (kind == "FUNC") {
     delete V2_MUT_DECL
     delete V2_MUT_OK
-    for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan(AST[id,"c" k])
+    for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan_decls(AST[id,"c" k])
+    for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan_checks(AST[id,"c" k])
     return
   }
   for (k = 1; k <= AST[id,"nc"]; k++) v2_check_mut(AST[id,"c" k])
@@ -2060,7 +2069,9 @@ function v2_let_has_init(id,    k) {
   return 0
 }
 
-function v2_mut_scan(id,    k, kind, name) {
+# パス 1: LET/LETQ/RECORDLIT 宣言を収集し、同名再宣言・裸 let の mut 欠落を
+# 診断する。診断は宣言行を指すべきなのでこのパスに残す。
+function v2_mut_scan_decls(id,    k, kind, name) {
   kind = AST[id,"kind"]
   if (kind == "LET" || kind == "LETQ" || kind == "RECORDLIT") {
     name = AST[id,"text"]
@@ -2078,18 +2089,39 @@ function v2_mut_scan(id,    k, kind, name) {
     # 裸 let の mut 欠落チェックは LET/LETQ のみ対象。
     if (kind != "RECORDLIT" && !AST[id,"mut"] && !v2_let_has_init(id))
       v2_diag(AST[id,"line"], 1, "'let " name "' without initializer must be declared 'let mut " name "'")
-  } else if (kind == "EXPR") {
-    # DSL として構文化されたスカラー代入: EXPR > BINOP(=) > IDENT, rhs
-    k = AST[id,"c1"]
-    if (AST[k,"kind"] == "BINOP" && AST[k,"text"] == "=") {
-      name = AST[AST[k,"c1"],"text"]
-      if (AST[AST[k,"c1"],"kind"] == "IDENT" && (name in V2_MUT_DECL) && !(name in V2_MUT_OK))
+  }
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan_decls(AST[id,"c" k])
+}
+
+# パス 2: 宣言収集が完了した V2_MUT_DECL/V2_MUT_OK を使って再代入を検査する。
+# BINOP(=) は EXPR の直接子に限らず木のどこに現れても代入であるため
+# （`return x = 2`、`let y = x = 2` の右辺など）、種別を問わず全探索する。
+# LET/LETQ/RECORDLIT 自身の宣言は BINOP では表現されないため、ここで
+# 自分自身の束縛を誤検知することはない。
+function v2_mut_scan_checks(id,    k, kind, name, lhs, binder) {
+  kind = AST[id,"kind"]
+  if (kind == "BINOP" && AST[id,"text"] == "=") {
+    lhs = AST[id,"c1"]
+    if (AST[lhs,"kind"] == "IDENT") {
+      name = AST[lhs,"text"]
+      if ((name in V2_MUT_DECL) && !(name in V2_MUT_OK))
         v2_diag(AST[id,"line"], 1, "cannot reassign immutable variable '" name "'; declare it with 'let mut " name "'")
     }
   } else if (kind == "RAWLINE") {
     v2_mut_scan_rawline(id)
+  } else if (kind == "PAT" && AST[id,"nc"] >= 1) {
+    # when アームの束縛（`ok x: ...` 等）。PAT の最初の子が IDENT のとき
+    # それが束縛変数名（ワイルドカード `_` は対象外）。desugar でこの
+    # 束縛は `x = result_val(...)` 相当の代入として展開されるため、
+    # 不変 let への束縛は再代入と同じ扱いで禁止する。
+    binder = AST[id,"c1"]
+    if (AST[binder,"kind"] == "IDENT" && AST[binder,"text"] != "_") {
+      name = AST[binder,"text"]
+      if ((name in V2_MUT_DECL) && !(name in V2_MUT_OK))
+        v2_diag(AST[id,"line"], 1, "when arm binder '" name "' rebinds immutable variable '" name "'; declare it with 'let mut " name "' or rename the binder")
+    }
   }
-  for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan(AST[id,"c" k])
+  for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan_checks(AST[id,"c" k])
 }
 
 # RAWLINE から文字列リテラルと正規表現リテラル・行末コメントを除去した検査用テキストを返す
@@ -2111,8 +2143,10 @@ function v2_mut_strip(text,    out) {
 # 対象: name = / name += -= *= /= %= ^= / name++ name-- / ++name --name。
 # name[ で始まる添字代入と ==（比較）は対象外。正規表現照合であり
 # awk の完全構文解析ではない（getline var など未網羅、spec 参照）。
-# 同様に EXPR 側（v2_mut_scan の BINOP(=) 判定）も `y = x = 2` のような
-# 連鎖代入で右辺に現れる不変 x への再束縛は検出しない（仕様上許容、リーク方向は右→左のみ）。
+# DSL としてパースされる式（`y = x = 2` のような連鎖代入を含む）側は
+# v2_mut_scan_checks が BINOP(=) を木の全域から検出するため、右辺に現れる
+# 不変変数への再束縛も含めて捕捉できる。ここでの RAWLINE 正規表現検査は、
+# DSL パーサを経由せず生の awk 行としてそのまま出力される構文のみを対象とする。
 function v2_mut_scan_rawline(id,    text, name, pre) {
   text = v2_mut_strip(AST[id,"text"])
   pre = "(^|[^[:alnum:]_.])"
