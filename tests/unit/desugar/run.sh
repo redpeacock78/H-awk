@@ -59,6 +59,19 @@ set -e
 if [[ "$st" -eq 1 ]]; then ok "parent_include_escape_rejected"; else ng "parent_include_escape_rejected" "exit=$st"; fi
 if [[ ! -e "$dist/../common.awk" && ! -e "$TMP/common.awk" ]]; then ok "parent_include_no_file_written_outside_dist"; else ng "parent_include_no_file_written_outside_dist" "escaped file found"; fi
 
+# --- HAWK_DIST が source と同じ場所を指すと in/out がエイリアスする問題 ---
+alias_dir="$TMP/alias"
+mkdir -p "$alias_dir"
+cp "$FIX/alias/main.awk" "$alias_dir/main.awk"
+before_hash=$(cksum < "$alias_dir/main.awk")
+set +e
+err=$(HAWK_DIST="$alias_dir" "$LIBS" desugar "$alias_dir/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 ]]; then ok "alias_dist_rejected"; else ng "alias_dist_rejected" "exit=$st"; fi
+after_hash=$(cksum < "$alias_dir/main.awk")
+if [[ "$before_hash" == "$after_hash" ]]; then ok "alias_dist_source_untouched"; else ng "alias_dist_source_untouched" "source file was modified"; fi
+
 # --- HAWK_DIST 未指定なら cwd の dist/ ---
 work="$TMP/work"; mkdir -p "$work"
 cp "$FIX/solo.awk" "$work/main.awk"

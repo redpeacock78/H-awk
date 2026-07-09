@@ -53,6 +53,8 @@ case "$subcmd" in
       exit 1
     fi
     dist="${HAWK_DIST:-dist}"
+    mkdir -p "$dist"
+    dist_abs="$(cd "$dist" && pwd)"
     src_root="$(cd "$(dirname "$src")" && pwd)"
     _seen=" "
 
@@ -70,6 +72,10 @@ case "$subcmd" in
       _seen="$_seen$rel "
       in="$src_root/$rel"
       out="$dist/$rel"
+      if [[ "$in" == "$dist_abs/$rel" ]]; then
+        echo "[hawk-libs] desugar failed: output path aliases source (HAWK_DIST resolves onto source tree): $in" >&2
+        exit 1
+      fi
       mkdir -p "$(dirname "$out")"
       # dsl/desugar.awk 自身が @include "dsl/util.awk" 等の相対パスを持ち、
       # gawk は '/' を含む @include をカレントディレクトリ相対で解決するため、
