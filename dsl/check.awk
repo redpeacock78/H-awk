@@ -2072,6 +2072,39 @@ function v2_mut_scan(id,    k, kind, name) {
     # 裸 let の mut 欠落チェックは LET/LETQ のみ対象。
     if (kind != "RECORDLIT" && !AST[id,"mut"] && !v2_let_has_init(id))
       v2_diag(AST[id,"line"], 1, "'let " name "' without initializer must be declared 'let mut " name "'")
+  } else if (kind == "EXPR") {
+    # DSL として構文化されたスカラー代入: EXPR > BINOP(=) > IDENT, rhs
+    k = AST[id,"c1"]
+    if (AST[k,"kind"] == "BINOP" && AST[k,"text"] == "=") {
+      name = AST[AST[k,"c1"],"text"]
+      if (AST[AST[k,"c1"],"kind"] == "IDENT" && (name in V2_MUT_DECL) && !(name in V2_MUT_OK))
+        v2_diag(AST[id,"line"], 1, "cannot reassign immutable variable '" name "'; declare it with 'let mut " name "'")
+    }
+  } else if (kind == "RAWLINE") {
+    v2_mut_scan_rawline(id)
   }
   for (k = 1; k <= AST[id,"nc"]; k++) v2_mut_scan(AST[id,"c" k])
+}
+
+# RAWLINE から文字列リテラルと行末コメントを除去した検査用テキストを返す
+function v2_mut_strip(text,    out) {
+  out = text
+  gsub(/"([^"\\]|\\.)*"/, "\"\"", out)
+  sub(/#.*$/, "", out)
+  return out
+}
+
+# 素の awk 行に含まれる不変 let 変数への再束縛を検出する。
+# 対象: name = / name += -= *= /= %= ^= / name++ name-- / ++name --name。
+# name[ で始まる添字代入と ==（比較）は対象外。正規表現照合であり
+# awk の完全構文解析ではない（getline var など未網羅、spec 参照）。
+function v2_mut_scan_rawline(id,    text, name, pre) {
+  text = v2_mut_strip(AST[id,"text"])
+  pre = "(^|[^[:alnum:]_.])"
+  for (name in V2_MUT_DECL) {
+    if (name in V2_MUT_OK) continue
+    if (text ~ (pre name "[[:space:]]*(=([^=]|$)|(\\+|-|\\*|/|%|\\^)=|\\+\\+|--)") ||
+        text ~ ("(\\+\\+|--)[[:space:]]*" name "([^[:alnum:]_]|$)"))
+      v2_diag(AST[id,"line"], 1, "cannot reassign immutable variable '" name "'; declare it with 'let mut " name "'")
+  }
 }
