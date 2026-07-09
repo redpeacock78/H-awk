@@ -75,15 +75,12 @@ shutdown() {
   for pid in "${WORKER_PIDS[@]}"; do
     wait "$pid" 2>/dev/null || true
   done
-  rm -f "$APP_AWK"
   rm -f "$HAWK_PIDFILE"
   exit 0
 }
 trap shutdown INT TERM
 
 APP_AWK="$("$LIBS" desugar "$APP")"
-# shellcheck disable=SC2064
-[[ -z "${HAWK_DEBUG}" ]] && trap "rm -f '$APP_AWK'" EXIT
 
 # --workers N かつ supervisor 利用可能な場合は hawk-supervise に委譲する
 if [[ "$EFFECTIVE_WORKERS" -gt 1 && "$HAS_NET" -eq 1 ]]; then
