@@ -930,8 +930,8 @@ function v2_skip_balanced_braces(open_pos,    j, depth) {
   return j
 }
 
-function v2_rpn_record_literal(varname, typename, line, open_pos,    j, fname, fline, vstart, valline, depth, brace_depth) {
-  v2_emit_rpn("MARKER", "RECORDLIT", line, "")
+function v2_rpn_record_literal(varname, typename, line, open_pos, mut,    j, fname, fline, vstart, valline, depth, brace_depth) {
+  v2_emit_rpn("MARKER", "RECORDLIT", line, mut)
   v2_emit_rpn("OPERAND", varname, line, "")
   v2_emit_rpn("OPERAND", typename, line, "")
 
@@ -973,8 +973,15 @@ function v2_rpn_record_literal(varname, typename, line, open_pos,    j, fname, f
 # （wave 27）。`?=` の typed decode（`ctx.req.json<Todo>()`）は record
 # 型でも既存の generic 呼び出し経路（"_t" 接尾の CALL）でそのまま処理
 # できるため、ここでの分岐対象は `=` 形のみでよい。
-function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, k, rectype) {
+function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, k, rectype, mut) {
   line = TOK[i,"line"]
+  # let mut NAME ...: `mut` の次も IDENT なら mut キーワードとして消費する。
+  # （`let mut = 1` のような mut という名前の変数は従来どおり変数名扱い）
+  mut = ""
+  if (TOK[i+1,"kind"] == "IDENT" && TOK[i+1,"text"] == "mut" && TOK[i+2,"kind"] == "IDENT") {
+    mut = "mut"
+    i++
+  }
   name = TOK[i+1,"text"]
 
   # LET / LETQ 判別 + 型注釈の先読み。record リテラル判定に使うため、
@@ -1002,7 +1009,7 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
       # （v2_check_index_assign）が一切働かない。
       V2_RPN_DSLVAR[name] = typetext
       V2_RPN_IDXVAR[name] = typetext
-      return v2_rpn_record_literal(name, rectype, line, j + 1)
+      return v2_rpn_record_literal(name, rectype, line, j + 1, mut)
     }
   }
 
@@ -1021,7 +1028,7 @@ function v2_rpn_let(i,    line, name, j, marker, expr_end, typestart, typetext, 
     return v2_skip_balanced_braces(j + 1)
   }
 
-  v2_emit_rpn("MARKER", marker, line, "")
+  v2_emit_rpn("MARKER", marker, line, mut)
   v2_emit_rpn("OPERAND", name, line, "")
 
   # 型注釈 [: TYPE]（Dict<Str, Str> / Str|Int のような複数トークンの型に対応）

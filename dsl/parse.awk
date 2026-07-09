@@ -363,6 +363,7 @@ function v2_parse_let(i, parent,    varname, let_id, typeann_id, j, expr_id) {
   # v2_stmt_dispatch 参照）。
   let_id  = v2_node(RPN[i,"val"], RPN[i,"line"])   # LET または LETQ
   AST[let_id,"text"] = varname
+  if (RPN[i,"arity"] == "mut") AST[let_id,"mut"] = 1
 
   # 型注釈: i+2 が大文字始まりの OPERAND、またはユーザー定義エイリアス名
   # （`type status = Int` のような小文字始まりを含む。lex の
