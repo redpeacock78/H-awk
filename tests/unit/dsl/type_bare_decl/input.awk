@@ -1,6 +1,6 @@
 function setup() {
-  let i: Int
-  let s: Str
+  let mut i: Int
+  let mut s: Str
   i = 42
   s = "hello"
 }
