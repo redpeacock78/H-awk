@@ -61,6 +61,12 @@ case "$subcmd" in
     _desugar_one() {
       local rel="$1" in out tmp inc incs
       case "$_seen" in *" $rel "*) return 0 ;; esac
+      case "$rel" in
+        ../*|*/../*)
+          echo "[hawk-libs] desugar failed: include escapes project root via '..': $rel" >&2
+          exit 1
+          ;;
+      esac
       _seen="$_seen$rel "
       in="$src_root/$rel"
       out="$dist/$rel"
@@ -80,7 +86,7 @@ case "$subcmd" in
         # gawk は '/' を含む @include パスを AWKPATH 探索しないため、
         # dist 接頭の実パスに書き換える
         tmp="$out.tmp"
-        gawk -v dist="$dist" -v list="$incs" '
+        if ! gawk -v dist="$dist" -v list="$incs" '
           BEGIN { n = split(list, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") L[a[i]] = 1 }
           {
             if (match($0, /^([[:space:]]*@include[[:space:]]+")([^"]+)(".*)$/, m) && (m[2] in L))
@@ -88,7 +94,12 @@ case "$subcmd" in
             else
               print
           }
-        ' "$out" > "$tmp" && mv "$tmp" "$out"
+        ' "$out" > "$tmp"; then
+          rm -f "$tmp"
+          echo "[hawk-libs] desugar failed: include rewrite failed: $out" >&2
+          exit 1
+        fi
+        mv "$tmp" "$out"
         while IFS= read -r inc; do
           [[ -n "$inc" ]] && _desugar_one "$inc"
         done <<< "$incs"

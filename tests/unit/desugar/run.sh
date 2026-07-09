@@ -50,6 +50,15 @@ set -e
 if [[ "$st" -eq 1 ]]; then ok "include_desugar_failure_exit1"; else ng "include_desugar_failure_exit1" "exit=$st"; fi
 if [[ "$err" == *"bad.awk"* ]]; then ok "failure_names_file"; else ng "failure_names_file" "$err"; fi
 
+# --- '..' で dist の外に出る include は exit 1（P1: dist 脱出防止） ---
+dist="$TMP/dist5"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/escape/sub/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 ]]; then ok "parent_include_escape_rejected"; else ng "parent_include_escape_rejected" "exit=$st"; fi
+if [[ ! -e "$dist/../common.awk" && ! -e "$TMP/common.awk" ]]; then ok "parent_include_no_file_written_outside_dist"; else ng "parent_include_no_file_written_outside_dist" "escaped file found"; fi
+
 # --- HAWK_DIST 未指定なら cwd の dist/ ---
 work="$TMP/work"; mkdir -p "$work"
 cp "$FIX/solo.awk" "$work/main.awk"
