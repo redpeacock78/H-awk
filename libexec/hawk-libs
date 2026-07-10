@@ -79,6 +79,18 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: output path aliases source (HAWK_DIST resolves onto source tree): $in" >&2
         exit 1
       fi
+      # 出力先がディレクトリだと mv がその中に移動してしまい exit 0 のまま壊れる
+      if [[ -d "$out" ]]; then
+        echo "[hawk-libs] desugar failed: output path is a directory: $out" >&2
+        exit 1
+      fi
+      # 過去の desugar が作った dist であることを .hawk-dist マーカーで確認する。
+      # マーカーのないディレクトリ内の既存ファイルは source とみなし上書きしない
+      # (HAWK_DIST が source 木の中を指すと -ef では検出できない別ファイルを潰すため)
+      if [[ -e "$out" && ! -e "$dist/.hawk-dist" ]]; then
+        echo "[hawk-libs] desugar failed: refusing to overwrite existing file in non-dist directory: $out (remove it or the whole directory if it is a stale dist)" >&2
+        exit 1
+      fi
       mkdir -p "$(dirname "$out")"
       # 稼働中の hawk-serve が dist の成果物を再ロードしうるため、
       # scratch (mktemp) 上で desugar と書き換えを済ませてから
@@ -99,17 +111,26 @@ case "$subcmd" in
       fi
       # @include パスの ./ を正規化する。生テキスト比較の
       # entry 循環検査・_seen 重複排除・書き換えの対応表が
-      # "./a.awk" と "a.awk" を同一視できるようにするため
+      # "./a.awk" と "a.awk" を同一視できるようにするため。
+      # 正規化は src_root 相対で実在するファイルに限る
+      # ("./x.awk" はローカル解決のみだが "x.awk" は AWKPATH に落ちるため、
+      # 実在しないパスを書き換えると挙動が変わってしまう)
       tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
       _scratches="$_scratches $tmp2"
       # shellcheck disable=SC2064
       trap "rm -f$_scratches" EXIT
-      if ! gawk '
+      if ! gawk -v root="$src_root" '
+        function exists(f,   t, r) {
+          r = (getline t < f)
+          if (r >= 0) { close(f); return 1 }
+          return 0
+        }
         {
           if (match($0, /^([[:space:]]*@include[[:space:]]+")([^"]+)(".*)$/, m)) {
             p = m[2]
             sub(/^(\.\/)+/, "", p)
             while (gsub(/\/\.\//, "/", p)) {}
+            if (p != m[2] && !exists(root "/" p)) p = m[2]
             print m[1] p m[3]
           } else print
         }
@@ -125,7 +146,8 @@ case "$subcmd" in
         # "cannot include `X' and use it as a program file" で fatal になるため
         # desugar 時点で拒否する (entry を経由しない循環は gawk が重複 include を
         # スキップするので許容)
-        if [[ "$inc" == "$entry_rel" ]]; then
+        # -ef で symlink/hardlink 経由の entry エイリアスも検出する
+        if [[ "$inc" == "$entry_rel" || "$src_root/$inc" -ef "$src_root/$entry_rel" ]]; then
           rm -f "$tmp"
           echo "[hawk-libs] desugar failed: include cycle back to entry: $rel includes $inc" >&2
           exit 1
@@ -173,6 +195,7 @@ case "$subcmd" in
       chmod 644 "$t"
       mv "$t" "$o"
     done <<< "$_publish"
+    : > "$dist/.hawk-dist"
     echo "$dist/$entry_rel"
     ;;
   *)

@@ -42,6 +42,26 @@ st=$?
 set -e
 if [[ "$st" -eq 1 && "$err" == *"cycle back to entry"* ]]; then ok "entry_cycle_dotslash_rejected"; else ng "entry_cycle_dotslash_rejected" "exit=$st: $err"; fi
 
+# --- symlink 経由の entry 循環も検出する ---
+symcyc="$TMP/symcyc"
+mkdir -p "$symcyc"
+cp "$FIX/symcyc/a.awk" "$FIX/symcyc/b.awk" "$symcyc/"
+ln -s a.awk "$symcyc/alias.awk"
+dist="$TMP/dist2d"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$symcyc/a.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"cycle back to entry"* ]]; then ok "entry_cycle_symlink_rejected"; else ng "entry_cycle_symlink_rejected" "exit=$st: $err"; fi
+
+# --- 実在しない "./x.awk" は正規化せずそのまま残す (AWKPATH 落ち防止) ---
+dist="$TMP/distdm"
+if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/dotmiss/main.awk" >/dev/null; then
+  if grep -qF '@include "./nosuch.awk"' "$dist/main.awk"; then ok "unresolved_dotslash_kept"; else ng "unresolved_dotslash_kept"; fi
+else
+  ng "unresolved_dotslash_kept" "exit != 0"
+fi
+
 # --- "./x.awk" 形式の include は正規化されて dist に書き換わる ---
 dist="$TMP/distds"
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/dotslash/main.awk" >/dev/null; then
@@ -159,6 +179,34 @@ fi
 # --- scratch ファイルが dist に残らない ---
 leftovers=$(find "$TMP/dist1" "$TMP/dist6" -name ".hawk-desugar.*" 2>/dev/null | wc -l)
 if [[ "$leftovers" -eq 0 ]]; then ok "no_scratch_leftovers"; else ng "no_scratch_leftovers" "$leftovers scratch files remain"; fi
+
+# --- 出力先が既存ディレクトリなら exit 1 (mv がディレクトリ内へ移動してしまうため) ---
+dist="$TMP/distdir"
+mkdir -p "$dist/solo.awk"
+set +e
+HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" >/dev/null 2>&1
+st=$?
+set -e
+if [[ "$st" -eq 1 && -d "$dist/solo.awk" ]]; then ok "dir_output_rejected"; else ng "dir_output_rejected" "exit=$st"; fi
+
+# --- HAWK_DIST が source 木の中の別ファイルを指すと拒否 (marker 保護) ---
+srctree="$TMP/srctree"
+mkdir -p "$srctree/sub"
+cp "$FIX/solo.awk" "$srctree/main.awk"
+printf 'BEGIN { print "another source" }\n' > "$srctree/sub/main.awk"
+before_hash=$(cksum < "$srctree/sub/main.awk")
+set +e
+err=$(HAWK_DIST="$srctree/sub" "$LIBS" desugar "$srctree/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* ]]; then ok "dist_over_source_rejected"; else ng "dist_over_source_rejected" "exit=$st: $err"; fi
+after_hash=$(cksum < "$srctree/sub/main.awk")
+if [[ "$before_hash" == "$after_hash" ]]; then ok "dist_over_source_untouched"; else ng "dist_over_source_untouched" "source file was modified"; fi
+
+# --- marker のある dist への再実行 (上書き) は成功する ---
+dist="$TMP/distrerun"
+HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
+if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then ok "rerun_over_marker_ok"; else ng "rerun_over_marker_ok" "exit != 0"; fi
 
 # --- HAWK_DIST 未指定なら cwd の dist/ ---
 work="$TMP/work"; mkdir -p "$work"
