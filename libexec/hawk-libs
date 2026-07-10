@@ -54,8 +54,10 @@ case "$subcmd" in
     fi
     dist="${HAWK_DIST:-dist}"
     mkdir -p "$dist"
-    dist_abs="$(cd "$dist" && pwd)"
-    src_root="$(cd "$(dirname "$src")" && pwd)"
+    # pwd -P で symlink を解決した物理パスに正規化する
+    # (論理パス比較だと symlink 経由の source エイリアスを見逃す)
+    dist_abs="$(cd "$dist" && pwd -P)"
+    src_root="$(cd "$(dirname "$src")" && pwd -P)"
     _seen=" "
 
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
@@ -77,21 +79,27 @@ case "$subcmd" in
         exit 1
       fi
       mkdir -p "$(dirname "$out")"
+      # 稼働中の hawk-serve が dist の成果物を再ロードしうるため、
+      # scratch (mktemp) 上で desugar と書き換えを済ませてから
+      # mv でアトミックに配置する。scratch を mktemp にすることで
+      # 固定名 ($out.tmp) が実在する成果物と衝突する問題も避ける。
+      tmp="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
       # dsl/desugar.awk 自身が @include "dsl/util.awk" 等の相対パスを持ち、
       # gawk は '/' を含む @include をカレントディレクトリ相対で解決するため、
       # HAWK_LIB (リポジトリルート) に cd してから実行する。
-      if ! ( cd "$HAWK_LIB" && gawk -f dsl/desugar.awk "$in" ) > "$out"; then
+      if ! ( cd "$HAWK_LIB" && gawk -f dsl/desugar.awk "$in" ) > "$tmp"; then
+        rm -f "$tmp"
         echo "[hawk-libs] desugar failed: $in" >&2
         exit 1
       fi
       incs=""
       while IFS= read -r inc; do
         [[ -f "$src_root/$inc" ]] && incs="$incs$inc"$'\n'
-      done < <(gawk 'match($0, /^[[:space:]]*@include[[:space:]]+"([^"]+)"/, m) { print m[1] }' "$out") || true
+      done < <(gawk 'match($0, /^[[:space:]]*@include[[:space:]]+"([^"]+)"/, m) { print m[1] }' "$tmp") || true
       if [[ -n "$incs" ]]; then
         # gawk は '/' を含む @include パスを AWKPATH 探索しないため、
         # dist 接頭の実パスに書き換える
-        tmp="$out.tmp"
+        tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
         if ! gawk -v dist="$dist" -v list="$incs" '
           BEGIN { n = split(list, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") L[a[i]] = 1 }
           {
@@ -100,12 +108,16 @@ case "$subcmd" in
             else
               print
           }
-        ' "$out" > "$tmp"; then
-          rm -f "$tmp"
-          echo "[hawk-libs] desugar failed: include rewrite failed: $out" >&2
+        ' "$tmp" > "$tmp2"; then
+          rm -f "$tmp" "$tmp2"
+          echo "[hawk-libs] desugar failed: include rewrite failed: $in" >&2
           exit 1
         fi
-        mv "$tmp" "$out"
+        mv "$tmp2" "$tmp"
+      fi
+      chmod 644 "$tmp"
+      mv "$tmp" "$out"
+      if [[ -n "$incs" ]]; then
         while IFS= read -r inc; do
           [[ -n "$inc" ]] && _desugar_one "$inc"
         done <<< "$incs"

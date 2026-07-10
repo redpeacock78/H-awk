@@ -72,6 +72,36 @@ if [[ "$st" -eq 1 ]]; then ok "alias_dist_rejected"; else ng "alias_dist_rejecte
 after_hash=$(cksum < "$alias_dir/main.awk")
 if [[ "$before_hash" == "$after_hash" ]]; then ok "alias_dist_source_untouched"; else ng "alias_dist_source_untouched" "source file was modified"; fi
 
+# --- symlink 経由の source エイリアスも検出する ---
+alias2_dir="$TMP/alias2"
+mkdir -p "$alias2_dir"
+cp "$FIX/alias/main.awk" "$alias2_dir/main.awk"
+ln -s "$alias2_dir" "$TMP/alias2-link"
+before_hash=$(cksum < "$alias2_dir/main.awk")
+set +e
+err=$(HAWK_DIST="$TMP/alias2-link" "$LIBS" desugar "$alias2_dir/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 ]]; then ok "alias_dist_symlink_rejected"; else ng "alias_dist_symlink_rejected" "exit=$st"; fi
+after_hash=$(cksum < "$alias2_dir/main.awk")
+if [[ "$before_hash" == "$after_hash" ]]; then ok "alias_dist_symlink_source_untouched"; else ng "alias_dist_symlink_source_untouched" "source file was modified"; fi
+
+# --- include 名が .tmp で終わっても scratch と衝突しない ---
+dist="$TMP/dist6"
+if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/tmpcol/main.awk" >/dev/null; then
+  if [[ -f "$dist/a.awk.tmp" ]] && grep -q "tc_tmp" "$dist/a.awk.tmp"; then
+    ok "tmp_suffix_include_survives_rewrite"
+  else
+    ng "tmp_suffix_include_survives_rewrite" "dist/a.awk.tmp missing or clobbered"
+  fi
+else
+  ng "tmp_suffix_include_survives_rewrite" "exit != 0"
+fi
+
+# --- scratch ファイルが dist に残らない ---
+leftovers=$(find "$TMP/dist1" "$TMP/dist6" -name ".hawk-desugar.*" 2>/dev/null | wc -l)
+if [[ "$leftovers" -eq 0 ]]; then ok "no_scratch_leftovers"; else ng "no_scratch_leftovers" "$leftovers scratch files remain"; fi
+
 # --- HAWK_DIST 未指定なら cwd の dist/ ---
 work="$TMP/work"; mkdir -p "$work"
 cp "$FIX/solo.awk" "$work/main.awk"
