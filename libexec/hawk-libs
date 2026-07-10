@@ -57,12 +57,14 @@ case "$subcmd" in
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
     _seen=" "
     _scratches=""
-    _publish=""
+    # publish キューは配列で持つ (パスに空白が入っても壊れないように)
+    _pub_tmp=()
+    _pub_out=()
 
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
     _desugar_one() {
-      local rel="$1" in out tmp inc incs
+      local rel="$1" in out tmp inc incs prior
       case "$_seen" in *" $rel "*) return 0 ;; esac
       case "$rel" in
         ../*|*/../*)
@@ -70,6 +72,15 @@ case "$subcmd" in
           exit 1
           ;;
       esac
+      # 同一実体 (symlink/hardlink) を別名で include すると、mirror 後は
+      # 別 inode になり gawk の重複 include 排除が効かず定義が二重実行される。
+      # 別名での include は拒否する
+      for prior in $_seen; do
+        if [[ "$src_root/$rel" -ef "$src_root/$prior" ]]; then
+          echo "[hawk-libs] desugar failed: include aliases already-included file: $rel (same file as $prior)" >&2
+          exit 1
+        fi
+      done
       _seen="$_seen$rel "
       in="$src_root/$rel"
       out="$dist/$rel"
@@ -183,18 +194,18 @@ case "$subcmd" in
           [[ -n "$inc" ]] && _desugar_one "$inc"
         done <<< "$incs"
       fi
-      _publish="$_publish$tmp $out"$'\n'
+      _pub_tmp+=("$tmp")
+      _pub_out+=("$out")
       return 0
     }
 
     entry_rel="$(basename "$src")"
     _desugar_one "$entry_rel"
     # closure 全体が成功してから一括 publish (深い子から、entry が最後)
-    while read -r t o; do
-      [[ -n "$t" ]] || continue
-      chmod 644 "$t"
-      mv "$t" "$o"
-    done <<< "$_publish"
+    for ((i = 0; i < ${#_pub_tmp[@]}; i++)); do
+      chmod 644 "${_pub_tmp[$i]}"
+      mv "${_pub_tmp[$i]}" "${_pub_out[$i]}"
+    done
     : > "$dist/.hawk-dist"
     echo "$dist/$entry_rel"
     ;;

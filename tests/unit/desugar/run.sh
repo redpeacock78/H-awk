@@ -180,6 +180,26 @@ fi
 leftovers=$(find "$TMP/dist1" "$TMP/dist6" -name ".hawk-desugar.*" 2>/dev/null | wc -l)
 if [[ "$leftovers" -eq 0 ]]; then ok "no_scratch_leftovers"; else ng "no_scratch_leftovers" "$leftovers scratch files remain"; fi
 
+# --- 同一実体を別名で include すると exit 1 (mirror 後に定義が二重実行されるため) ---
+aliasinc="$TMP/aliasinc"
+mkdir -p "$aliasinc"
+cp "$FIX/aliasinc/main.awk" "$FIX/aliasinc/x.awk" "$aliasinc/"
+ln -s x.awk "$aliasinc/alias.awk"
+dist="$TMP/distai"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$aliasinc/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"aliases already-included file"* ]]; then ok "alias_include_rejected"; else ng "alias_include_rejected" "exit=$st: $err"; fi
+
+# --- 空白入り HAWK_DIST でも publish が壊れない ---
+dist="$TMP/dist with spaces"
+if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then
+  if [[ -f "$dist/main.awk" && -f "$dist/app/page.awk" ]]; then ok "spaced_dist_publishes"; else ng "spaced_dist_publishes" "missing outputs"; fi
+else
+  ng "spaced_dist_publishes" "exit != 0"
+fi
+
 # --- 出力先が既存ディレクトリなら exit 1 (mv がディレクトリ内へ移動してしまうため) ---
 dist="$TMP/distdir"
 mkdir -p "$dist/solo.awk"
