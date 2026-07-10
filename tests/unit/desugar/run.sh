@@ -34,6 +34,24 @@ set -e
 if [[ "$st" -eq 1 ]]; then ok "entry_cycle_rejected"; else ng "entry_cycle_rejected" "exit=$st"; fi
 if [[ "$err" == *"cycle back to entry"* ]]; then ok "entry_cycle_names_cause"; else ng "entry_cycle_names_cause" "$err"; fi
 
+# --- "./entry" 形式の back-edge も正規化して検出する ---
+dist="$TMP/dist2c"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/cyc3/a.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"cycle back to entry"* ]]; then ok "entry_cycle_dotslash_rejected"; else ng "entry_cycle_dotslash_rejected" "exit=$st: $err"; fi
+
+# --- "./x.awk" 形式の include は正規化されて dist に書き換わる ---
+dist="$TMP/distds"
+if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/dotslash/main.awk" >/dev/null; then
+  if grep -qF "@include \"$dist/x.awk\"" "$dist/main.awk"; then ok "dotslash_include_normalized"; else ng "dotslash_include_normalized"; fi
+  run_out=$(gawk -f "$dist/main.awk" </dev/null)
+  if [[ "$run_out" == "dotslash-x" ]]; then ok "dotslash_tree_runs"; else ng "dotslash_tree_runs" "$run_out"; fi
+else
+  ng "dotslash_include_normalized" "exit != 0"
+fi
+
 # --- entry を経由しない循環は 1 回ずつで停止し、実行も通る ---
 dist="$TMP/dist2b"
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/cyc2/main.awk" >/dev/null; then
@@ -63,6 +81,18 @@ if [[ "$err" == *"bad.awk"* ]]; then ok "failure_names_file"; else ng "failure_n
 if [[ ! -e "$dist/main.awk" ]]; then ok "parent_not_published_on_child_failure"; else ng "parent_not_published_on_child_failure" "dist/main.awk exists"; fi
 leftovers=$(find "$dist" -name ".hawk-desugar.*" 2>/dev/null | wc -l)
 if [[ "$leftovers" -eq 0 ]]; then ok "no_scratch_leftovers_on_failure"; else ng "no_scratch_leftovers_on_failure" "$leftovers scratch files remain"; fi
+
+# --- 兄弟 include の失敗時は closure 全体を publish しない ---
+dist="$TMP/dist4b"
+set +e
+HAWK_DIST="$dist" "$LIBS" desugar "$FIX/sib/main.awk" >/dev/null 2>&1
+st=$?
+set -e
+if [[ "$st" -eq 1 && ! -e "$dist/a_good.awk" && ! -e "$dist/main.awk" ]]; then
+  ok "sibling_failure_publishes_nothing"
+else
+  ng "sibling_failure_publishes_nothing" "exit=$st, a_good=$([[ -e "$dist/a_good.awk" ]] && echo yes || echo no)"
+fi
 
 # --- '..' で dist の外に出る include は exit 1（P1: dist 脱出防止） ---
 dist="$TMP/dist5"

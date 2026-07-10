@@ -57,6 +57,7 @@ case "$subcmd" in
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
     _seen=" "
     _scratches=""
+    _publish=""
 
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
@@ -96,6 +97,28 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: $in" >&2
         exit 1
       fi
+      # @include パスの ./ を正規化する。生テキスト比較の
+      # entry 循環検査・_seen 重複排除・書き換えの対応表が
+      # "./a.awk" と "a.awk" を同一視できるようにするため
+      tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
+      _scratches="$_scratches $tmp2"
+      # shellcheck disable=SC2064
+      trap "rm -f$_scratches" EXIT
+      if ! gawk '
+        {
+          if (match($0, /^([[:space:]]*@include[[:space:]]+")([^"]+)(".*)$/, m)) {
+            p = m[2]
+            sub(/^(\.\/)+/, "", p)
+            while (gsub(/\/\.\//, "/", p)) {}
+            print m[1] p m[3]
+          } else print
+        }
+      ' "$tmp" > "$tmp2"; then
+        rm -f "$tmp" "$tmp2"
+        echo "[hawk-libs] desugar failed: include normalize failed: $in" >&2
+        exit 1
+      fi
+      mv "$tmp2" "$tmp"
       incs=""
       while IFS= read -r inc; do
         # entry への back-edge は gawk が実行時に
@@ -131,20 +154,25 @@ case "$subcmd" in
         fi
         mv "$tmp2" "$tmp"
       fi
-      # 子を先に desugar し、全て成功してから親を publish する (post-order)。
-      # 子の失敗時に「存在しない子を参照する新しい親」が dist に残るのを防ぐ
+      # 子を先に desugar し、closure 全体が成功するまで publish しない。
+      # 途中失敗時に新旧の成果物が dist に混在するのを防ぐ
       if [[ -n "$incs" ]]; then
         while IFS= read -r inc; do
           [[ -n "$inc" ]] && _desugar_one "$inc"
         done <<< "$incs"
       fi
-      chmod 644 "$tmp"
-      mv "$tmp" "$out"
+      _publish="$_publish$tmp $out"$'\n'
       return 0
     }
 
     entry_rel="$(basename "$src")"
     _desugar_one "$entry_rel"
+    # closure 全体が成功してから一括 publish (深い子から、entry が最後)
+    while read -r t o; do
+      [[ -n "$t" ]] || continue
+      chmod 644 "$t"
+      mv "$t" "$o"
+    done <<< "$_publish"
     echo "$dist/$entry_rel"
     ;;
   *)
