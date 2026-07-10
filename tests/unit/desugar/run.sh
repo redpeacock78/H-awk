@@ -191,6 +191,7 @@ err=$(HAWK_DIST="$dist" "$LIBS" desugar "$aliasinc/main.awk" 2>&1 >/dev/null)
 st=$?
 set -e
 if [[ "$st" -eq 1 && "$err" == *"aliases already-included file"* ]]; then ok "alias_include_rejected"; else ng "alias_include_rejected" "exit=$st: $err"; fi
+if [[ ! -e "$dist/main.awk" ]]; then ok "alias_include_publishes_nothing"; else ng "alias_include_publishes_nothing" "dist/main.awk exists"; fi
 
 # --- 空白入り HAWK_DIST でも publish が壊れない ---
 dist="$TMP/dist with spaces"
