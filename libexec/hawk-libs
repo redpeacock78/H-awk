@@ -84,6 +84,7 @@ case "$subcmd" in
     trap _cleanup_scratches EXIT
     _pub_tmp=()
     _pub_out=()
+    _pub_rel=()
 
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
@@ -104,13 +105,20 @@ case "$subcmd" in
       esac
       # 同一実体 (symlink/hardlink) を別名で include すると、mirror 後は
       # 別 inode になり gawk の重複 include 排除が効かず定義が二重実行される。
-      # 別名での include は拒否する
+      # 別名での include は拒否する。
+      # _seen は空白区切りの未クォート展開なので、include 名に glob 文字
+      # (例: "x*.awk") が含まれるとカレントディレクトリに対してパス名展開され、
+      # 無関係な同名ファイルを誤って alias 扱いしてしまう。glob 文字はファイル名として
+      # 正当なため、比較対象は文字列のまま扱いたい。noglob で展開だけを止める
+      set -f
       for prior in $_seen; do
         if [[ "$src_root/$rel" -ef "$src_root/$prior" ]]; then
+          set +f
           echo "[hawk-libs] desugar failed: include aliases already-included file: $rel (same file as $prior)" >&2
           exit 1
         fi
       done
+      set +f
       _seen="$_seen$rel "
       in="$src_root/$rel"
       out="$dist/$rel"
@@ -125,12 +133,16 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: output path is a directory: $out" >&2
         exit 1
       fi
-      # 過去の desugar が作った dist であることを .hawk-dist マーカーで確認する。
-      # マーカーのないディレクトリ内の既存ファイルは source とみなし上書きしない
-      # (HAWK_DIST が source 木の中を指すと -ef では検出できない別ファイルを潰すため)
-      if [[ -e "$out" && ! -e "$dist/.hawk-dist" ]]; then
-        echo "[hawk-libs] desugar failed: refusing to overwrite existing file in non-dist directory: $out (remove it or the whole directory if it is a stale dist)" >&2
-        exit 1
+      # 過去の desugar が publish した rel パスであることを .hawk-dist マーカーで確認する。
+      # マーカーが無い、または rel が記録されていない既存ファイルは source とみなし
+      # 上書きしない (HAWK_DIST が source 木の中を指すと -ef では検出できない別ファイルを
+      # 潰すため。marker を空ファイルにするだけだと最初の成功後はディレクトリ全体を
+      # 信頼してしまい、無関係な source ファイルまで上書き対象になる)
+      if [[ -e "$out" ]]; then
+        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF "$rel" "$dist/.hawk-dist"; then
+          echo "[hawk-libs] desugar failed: refusing to overwrite existing file in non-dist directory: $out (remove it or the whole directory if it is a stale dist)" >&2
+          exit 1
+        fi
       fi
       mkdir -p "$(dirname "$out")"
       # 稼働中の hawk-serve が dist の成果物を再ロードしうるため、
@@ -220,6 +232,7 @@ case "$subcmd" in
       fi
       _pub_tmp+=("$tmp")
       _pub_out+=("$out")
+      _pub_rel+=("$rel")
       return 0
     }
 
@@ -230,7 +243,17 @@ case "$subcmd" in
       chmod 644 "${_pub_tmp[$i]}"
       mv "${_pub_tmp[$i]}" "${_pub_out[$i]}"
     done
-    : > "$dist/.hawk-dist"
+    # marker は「今回 publish した rel」を既存の記録に追記して保持する。
+    # 空ファイルのままだと最初の成功後にディレクトリ全体を信頼してしまうため、
+    # rel を1行1件記録し、次回以降の上書き可否を rel 単位で判定できるようにする。
+    # 更新も稼働中の hawk-serve と競合しないよう mktemp + mv でアトミックに行う
+    _marker_tmp="$(mktemp "$dist/.hawk-dist.XXXXXX")"
+    _scratch_arr+=("$_marker_tmp")
+    {
+      [[ -f "$dist/.hawk-dist" ]] && cat "$dist/.hawk-dist"
+      printf '%s\n' "${_pub_rel[@]}"
+    } | sort -u > "$_marker_tmp"
+    mv "$_marker_tmp" "$dist/.hawk-dist"
     echo "$dist/$entry_rel"
     ;;
   *)

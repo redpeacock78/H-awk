@@ -9,6 +9,12 @@ FIX=tests/unit/desugar/fixtures
 
 ok() { printf "  PASS: %s\n" "$1"; PASS=$((PASS+1)); }
 ng() { printf "  FAIL: %s%s\n" "$1" "${2:+ ($2)}"; FAIL=$((FAIL+1)); }
+skip() { printf "  SKIP: %s%s\n" "$1" "${2:+ ($2)}"; }
+
+# root では chmod a-w が -w 判定にも truncate 阻止にも効かないため、
+# root 専用フィクスチャを別途用意するまでは該当アサーションを SKIP する
+IS_ROOT=0
+[[ "$(id -u)" -eq 0 ]] && IS_ROOT=1
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -213,18 +219,25 @@ if [[ "$st" -eq 1 && "$err" == *"contains spaces"* ]]; then ok "spaced_include_r
 if [[ ! -e "$dist/main.awk" ]]; then ok "spaced_include_publishes_nothing"; else ng "spaced_include_publishes_nothing" "dist/main.awk exists"; fi
 
 # --- marker が書込不可なら staging 前に exit 1 (publish 後の更新失敗を防ぐ) ---
-dist="$TMP/distmkw"
-HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" >/dev/null
-before_hash=$(cksum < "$dist/solo.awk")
-chmod a-w "$dist/.hawk-dist"
-set +e
-err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" 2>&1 >/dev/null)
-st=$?
-set -e
-chmod u+w "$dist/.hawk-dist"
-if [[ "$st" -eq 1 && "$err" == *"not writable"* ]]; then ok "unwritable_marker_rejected"; else ng "unwritable_marker_rejected" "exit=$st: $err"; fi
-after_hash=$(cksum < "$dist/solo.awk")
-if [[ "$before_hash" == "$after_hash" && ! -e "$dist/main.awk" ]]; then ok "unwritable_marker_publishes_nothing"; else ng "unwritable_marker_publishes_nothing"; fi
+# root (id -u == 0) では chmod a-w が -w 判定にも truncate 阻止にも効かず
+# exit=0 になってしまうため、root 実行時はこの2アサーションを SKIP する
+if [[ "$IS_ROOT" -eq 1 ]]; then
+  skip "unwritable_marker_rejected" "running as root, chmod a-w has no effect"
+  skip "unwritable_marker_publishes_nothing" "running as root, chmod a-w has no effect"
+else
+  dist="$TMP/distmkw"
+  HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" >/dev/null
+  before_hash=$(cksum < "$dist/solo.awk")
+  chmod a-w "$dist/.hawk-dist"
+  set +e
+  err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" 2>&1 >/dev/null)
+  st=$?
+  set -e
+  chmod u+w "$dist/.hawk-dist"
+  if [[ "$st" -eq 1 && "$err" == *"not writable"* ]]; then ok "unwritable_marker_rejected"; else ng "unwritable_marker_rejected" "exit=$st: $err"; fi
+  after_hash=$(cksum < "$dist/solo.awk")
+  if [[ "$before_hash" == "$after_hash" && ! -e "$dist/main.awk" ]]; then ok "unwritable_marker_publishes_nothing"; else ng "unwritable_marker_publishes_nothing"; fi
+fi
 
 # --- marker が symlink なら staging 前に exit 1 (上書き保護の偽装を防ぐ) ---
 dist="$TMP/distmks"
@@ -275,6 +288,46 @@ if [[ "$before_hash" == "$after_hash" ]]; then ok "dist_over_source_untouched"; 
 dist="$TMP/distrerun"
 HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then ok "rerun_over_marker_ok"; else ng "rerun_over_marker_ok" "exit != 0"; fi
+
+# --- marker は publish 済み rel のみ信頼し、同じ dist 配下の無関係な既存ファイルは
+#     引き続き上書き保護される (marker が空ファイルだと最初の成功後に
+#     ディレクトリ全体を信頼してしまう問題の再現) ---
+srcsub2="$TMP/srcsub2"
+mkdir -p "$srcsub2/sub"
+cp "$FIX/solo.awk" "$srcsub2/main.awk"
+HAWK_DIST="$srcsub2/sub" "$LIBS" desugar "$srcsub2/main.awk" >/dev/null
+printf 'BEGIN { print "other-source" }\n' > "$srcsub2/sub/other.awk"
+before_hash=$(cksum < "$srcsub2/sub/other.awk")
+cp "$FIX/solo.awk" "$srcsub2/other.awk"
+set +e
+err=$(HAWK_DIST="$srcsub2/sub" "$LIBS" desugar "$srcsub2/other.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* ]]; then ok "marker_does_not_bless_unrelated_files"; else ng "marker_does_not_bless_unrelated_files" "exit=$st: $err"; fi
+after_hash=$(cksum < "$srcsub2/sub/other.awk")
+if [[ "$before_hash" == "$after_hash" ]]; then ok "marker_does_not_bless_unrelated_files_untouched"; else ng "marker_does_not_bless_unrelated_files_untouched" "source file was modified"; fi
+
+# --- include 名に glob 文字が含まれても、_seen の未クォート展開で
+#     カレントディレクトリの同名ファイルと誤って alias 判定されない ---
+globinc="$TMP/globinc"
+mkdir -p "$globinc"
+cat > "$globinc/main.awk" <<'EOF'
+@include "x*.awk"
+@include "xfoo.awk"
+BEGIN { print "glob-ok" }
+EOF
+printf 'BEGIN { }\n' > "$globinc/x*.awk"
+printf 'BEGIN { }\n' > "$globinc/xfoo.awk"
+dist="$TMP/distglob"
+set +e
+out=$(cd "$globinc" && HAWK_DIST="$dist" "$LIBS_ABS" desugar main.awk 2>&1)
+st=$?
+set -e
+if [[ "$st" -eq 0 && -f "$dist/x*.awk" && -f "$dist/xfoo.awk" ]]; then
+  ok "glob_include_names_not_confused"
+else
+  ng "glob_include_names_not_confused" "exit=$st: $out"
+fi
 
 # --- HAWK_DIST 未指定なら cwd の dist/ ---
 work="$TMP/work"; mkdir -p "$work"
