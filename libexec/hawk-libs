@@ -54,6 +54,12 @@ case "$subcmd" in
     fi
     dist="${HAWK_DIST:-dist}"
     mkdir -p "$dist"
+    # marker が regular file 以外だと publish 後の作成で失敗し
+    # 「exit 1 なのに成果物は更新済み」になるため、staging 前に検証する
+    if [[ -e "$dist/.hawk-dist" && ! -f "$dist/.hawk-dist" ]]; then
+      echo "[hawk-libs] desugar failed: $dist/.hawk-dist exists but is not a regular file" >&2
+      exit 1
+    fi
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
     _seen=" "
     _scratches=""
@@ -69,6 +75,12 @@ case "$subcmd" in
       case "$rel" in
         ../*|*/../*)
           echo "[hawk-libs] desugar failed: include escapes project root via '..': $rel" >&2
+          exit 1
+          ;;
+        *" "*)
+          # _seen は空白区切りなので空白入りパスは訪問済み判定を誤り、
+          # dist に欠けたファイルを黙って作る。非サポートとして明示的に失敗させる
+          echo "[hawk-libs] desugar failed: include path contains spaces (unsupported): $rel" >&2
           exit 1
           ;;
       esac

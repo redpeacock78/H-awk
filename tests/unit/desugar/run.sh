@@ -200,6 +200,25 @@ else
   ng "spaced_dist_publishes" "exit != 0"
 fi
 
+# --- 空白入り include パスは exit 1 (_seen の区切りと衝突するため非サポート) ---
+dist="$TMP/distsn"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/spacename/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"contains spaces"* ]]; then ok "spaced_include_rejected"; else ng "spaced_include_rejected" "exit=$st: $err"; fi
+if [[ ! -e "$dist/main.awk" ]]; then ok "spaced_include_publishes_nothing"; else ng "spaced_include_publishes_nothing" "dist/main.awk exists"; fi
+
+# --- marker が regular file 以外なら staging 前に exit 1 ---
+dist="$TMP/distmk"
+mkdir -p "$dist/.hawk-dist"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"not a regular file"* ]]; then ok "invalid_marker_rejected"; else ng "invalid_marker_rejected" "exit=$st: $err"; fi
+if [[ ! -e "$dist/solo.awk" ]]; then ok "invalid_marker_publishes_nothing"; else ng "invalid_marker_publishes_nothing" "dist/solo.awk exists"; fi
+
 # --- 出力先が既存ディレクトリなら exit 1 (mv がディレクトリ内へ移動してしまうため) ---
 dist="$TMP/distdir"
 mkdir -p "$dist/solo.awk"
