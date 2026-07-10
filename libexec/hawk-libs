@@ -54,11 +54,9 @@ case "$subcmd" in
     fi
     dist="${HAWK_DIST:-dist}"
     mkdir -p "$dist"
-    # pwd -P で symlink を解決した物理パスに正規化する
-    # (論理パス比較だと symlink 経由の source エイリアスを見逃す)
-    dist_abs="$(cd "$dist" && pwd -P)"
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
     _seen=" "
+    _scratches=""
 
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
@@ -74,7 +72,9 @@ case "$subcmd" in
       _seen="$_seen$rel "
       in="$src_root/$rel"
       out="$dist/$rel"
-      if [[ "$in" == "$dist_abs/$rel" ]]; then
+      # -ef は device/inode 比較。symlink 経由 (HAWK_DIST・source どちら側でも)
+      # の source エイリアスを文字列比較より確実に検出する
+      if [[ -e "$out" && "$in" -ef "$out" ]]; then
         echo "[hawk-libs] desugar failed: output path aliases source (HAWK_DIST resolves onto source tree): $in" >&2
         exit 1
       fi
@@ -84,6 +84,10 @@ case "$subcmd" in
       # mv でアトミックに配置する。scratch を mktemp にすることで
       # 固定名 ($out.tmp) が実在する成果物と衝突する問題も避ける。
       tmp="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
+      # 途中失敗時の scratch 残留を防ぐ (mv 済みの名前への rm -f は no-op)
+      _scratches="$_scratches $tmp"
+      # shellcheck disable=SC2064
+      trap "rm -f$_scratches" EXIT
       # dsl/desugar.awk 自身が @include "dsl/util.awk" 等の相対パスを持ち、
       # gawk は '/' を含む @include をカレントディレクトリ相対で解決するため、
       # HAWK_LIB (リポジトリルート) に cd してから実行する。
@@ -94,12 +98,24 @@ case "$subcmd" in
       fi
       incs=""
       while IFS= read -r inc; do
+        # entry への back-edge は gawk が実行時に
+        # "cannot include `X' and use it as a program file" で fatal になるため
+        # desugar 時点で拒否する (entry を経由しない循環は gawk が重複 include を
+        # スキップするので許容)
+        if [[ "$inc" == "$entry_rel" ]]; then
+          rm -f "$tmp"
+          echo "[hawk-libs] desugar failed: include cycle back to entry: $rel includes $inc" >&2
+          exit 1
+        fi
         [[ -f "$src_root/$inc" ]] && incs="$incs$inc"$'\n'
       done < <(gawk 'match($0, /^[[:space:]]*@include[[:space:]]+"([^"]+)"/, m) { print m[1] }' "$tmp") || true
       if [[ -n "$incs" ]]; then
         # gawk は '/' を含む @include パスを AWKPATH 探索しないため、
         # dist 接頭の実パスに書き換える
         tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
+        _scratches="$_scratches $tmp2"
+        # shellcheck disable=SC2064
+        trap "rm -f$_scratches" EXIT
         if ! gawk -v dist="$dist" -v list="$incs" '
           BEGIN { n = split(list, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") L[a[i]] = 1 }
           {
@@ -115,13 +131,15 @@ case "$subcmd" in
         fi
         mv "$tmp2" "$tmp"
       fi
-      chmod 644 "$tmp"
-      mv "$tmp" "$out"
+      # 子を先に desugar し、全て成功してから親を publish する (post-order)。
+      # 子の失敗時に「存在しない子を参照する新しい親」が dist に残るのを防ぐ
       if [[ -n "$incs" ]]; then
         while IFS= read -r inc; do
           [[ -n "$inc" ]] && _desugar_one "$inc"
         done <<< "$incs"
       fi
+      chmod 644 "$tmp"
+      mv "$tmp" "$out"
       return 0
     }
 

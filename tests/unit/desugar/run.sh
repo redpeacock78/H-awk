@@ -25,10 +25,21 @@ if ! grep -q "let " "$dist/app/page.awk"; then ok "included_file_desugared"; els
 run_out=$(gawk -f "$dist/main.awk" </dev/null)
 if [[ "$run_out" == "hello from page" ]]; then ok "desugared_tree_runs"; else ng "desugared_tree_runs" "$run_out"; fi
 
-# --- 循環 include は 1 回ずつで停止 ---
+# --- entry に戻る循環は exit 1 (gawk が実行時 fatal になるため desugar 時点で拒否) ---
 dist="$TMP/dist2"
-if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/cyc/a.awk" >/dev/null; then
-  if [[ -f "$dist/a.awk" && -f "$dist/b.awk" ]]; then ok "cycle_terminates"; else ng "cycle_terminates" "missing outputs"; fi
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/cyc/a.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 ]]; then ok "entry_cycle_rejected"; else ng "entry_cycle_rejected" "exit=$st"; fi
+if [[ "$err" == *"cycle back to entry"* ]]; then ok "entry_cycle_names_cause"; else ng "entry_cycle_names_cause" "$err"; fi
+
+# --- entry を経由しない循環は 1 回ずつで停止し、実行も通る ---
+dist="$TMP/dist2b"
+if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/cyc2/main.awk" >/dev/null; then
+  if [[ -f "$dist/x.awk" && -f "$dist/y.awk" ]]; then ok "cycle_terminates"; else ng "cycle_terminates" "missing outputs"; fi
+  run_out=$(gawk -f "$dist/main.awk" </dev/null)
+  if [[ "$run_out" == "cyc2" ]]; then ok "cycle_tree_runs"; else ng "cycle_tree_runs" "$run_out"; fi
 else
   ng "cycle_terminates" "exit != 0"
 fi
@@ -49,6 +60,9 @@ st=$?
 set -e
 if [[ "$st" -eq 1 ]]; then ok "include_desugar_failure_exit1"; else ng "include_desugar_failure_exit1" "exit=$st"; fi
 if [[ "$err" == *"bad.awk"* ]]; then ok "failure_names_file"; else ng "failure_names_file" "$err"; fi
+if [[ ! -e "$dist/main.awk" ]]; then ok "parent_not_published_on_child_failure"; else ng "parent_not_published_on_child_failure" "dist/main.awk exists"; fi
+leftovers=$(find "$dist" -name ".hawk-desugar.*" 2>/dev/null | wc -l)
+if [[ "$leftovers" -eq 0 ]]; then ok "no_scratch_leftovers_on_failure"; else ng "no_scratch_leftovers_on_failure" "$leftovers scratch files remain"; fi
 
 # --- '..' で dist の外に出る include は exit 1（P1: dist 脱出防止） ---
 dist="$TMP/dist5"
@@ -85,6 +99,20 @@ set -e
 if [[ "$st" -eq 1 ]]; then ok "alias_dist_symlink_rejected"; else ng "alias_dist_symlink_rejected" "exit=$st"; fi
 after_hash=$(cksum < "$alias2_dir/main.awk")
 if [[ "$before_hash" == "$after_hash" ]]; then ok "alias_dist_symlink_source_untouched"; else ng "alias_dist_symlink_source_untouched" "source file was modified"; fi
+
+# --- source 側が symlink で dist に解決するケースも検出する ---
+symsrc="$TMP/symsrc"
+mkdir -p "$symsrc/srcdir" "$symsrc/linkdir"
+cp "$FIX/symsrc/srcdir/main.awk" "$symsrc/srcdir/main.awk"
+ln -s ../srcdir/main.awk "$symsrc/linkdir/main.awk"
+before_hash=$(cksum < "$symsrc/srcdir/main.awk")
+set +e
+err=$(HAWK_DIST="$symsrc/srcdir" "$LIBS" desugar "$symsrc/linkdir/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 ]]; then ok "symlinked_source_alias_rejected"; else ng "symlinked_source_alias_rejected" "exit=$st"; fi
+after_hash=$(cksum < "$symsrc/srcdir/main.awk")
+if [[ "$before_hash" == "$after_hash" ]]; then ok "symlinked_source_untouched"; else ng "symlinked_source_untouched" "source file was modified"; fi
 
 # --- include 名が .tmp で終わっても scratch と衝突しない ---
 dist="$TMP/dist6"
