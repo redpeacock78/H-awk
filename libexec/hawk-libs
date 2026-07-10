@@ -54,16 +54,34 @@ case "$subcmd" in
     fi
     dist="${HAWK_DIST:-dist}"
     mkdir -p "$dist"
-    # marker が regular file 以外だと publish 後の作成で失敗し
-    # 「exit 1 なのに成果物は更新済み」になるため、staging 前に検証する
-    if [[ -e "$dist/.hawk-dist" && ! -f "$dist/.hawk-dist" ]]; then
-      echo "[hawk-libs] desugar failed: $dist/.hawk-dist exists but is not a regular file" >&2
+    # marker の異常 (symlink / 非 regular file / 書込不可) は publish 後の
+    # 作成・更新で失敗し「exit 1 なのに成果物は更新済み」になるため、
+    # staging 前に検証する。-f は symlink を辿るので -L を先に見る
+    # (symlink marker は上書き保護の偽装と外部ターゲットの truncate を許すため拒否)
+    if [[ -L "$dist/.hawk-dist" ]]; then
+      echo "[hawk-libs] desugar failed: $dist/.hawk-dist is a symlink" >&2
       exit 1
+    fi
+    if [[ -e "$dist/.hawk-dist" ]]; then
+      if [[ ! -f "$dist/.hawk-dist" ]]; then
+        echo "[hawk-libs] desugar failed: $dist/.hawk-dist exists but is not a regular file" >&2
+        exit 1
+      fi
+      if [[ ! -w "$dist/.hawk-dist" ]]; then
+        echo "[hawk-libs] desugar failed: $dist/.hawk-dist is not writable" >&2
+        exit 1
+      fi
     fi
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
     _seen=" "
-    _scratches=""
-    # publish キューは配列で持つ (パスに空白が入っても壊れないように)
+    # scratch と publish キューは配列で持つ
+    # (空白入りパスが word splitting で別引数に化けるのを防ぐ)
+    _scratch_arr=()
+    _cleanup_scratches() {
+      local f
+      for f in "${_scratch_arr[@]}"; do rm -f "$f"; done
+    }
+    trap _cleanup_scratches EXIT
     _pub_tmp=()
     _pub_out=()
 
@@ -121,9 +139,7 @@ case "$subcmd" in
       # 固定名 ($out.tmp) が実在する成果物と衝突する問題も避ける。
       tmp="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
       # 途中失敗時の scratch 残留を防ぐ (mv 済みの名前への rm -f は no-op)
-      _scratches="$_scratches $tmp"
-      # shellcheck disable=SC2064
-      trap "rm -f$_scratches" EXIT
+      _scratch_arr+=("$tmp")
       # dsl/desugar.awk 自身が @include "dsl/util.awk" 等の相対パスを持ち、
       # gawk は '/' を含む @include をカレントディレクトリ相対で解決するため、
       # HAWK_LIB (リポジトリルート) に cd してから実行する。
@@ -139,9 +155,7 @@ case "$subcmd" in
       # ("./x.awk" はローカル解決のみだが "x.awk" は AWKPATH に落ちるため、
       # 実在しないパスを書き換えると挙動が変わってしまう)
       tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
-      _scratches="$_scratches $tmp2"
-      # shellcheck disable=SC2064
-      trap "rm -f$_scratches" EXIT
+      _scratch_arr+=("$tmp2")
       if ! gawk -v root="$src_root" '
         function exists(f,   t, r) {
           r = (getline t < f)
@@ -181,9 +195,7 @@ case "$subcmd" in
         # gawk は '/' を含む @include パスを AWKPATH 探索しないため、
         # dist 接頭の実パスに書き換える
         tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
-        _scratches="$_scratches $tmp2"
-        # shellcheck disable=SC2064
-        trap "rm -f$_scratches" EXIT
+        _scratch_arr+=("$tmp2")
         if ! gawk -v dist="$dist" -v list="$incs" '
           BEGIN { n = split(list, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") L[a[i]] = 1 }
           {

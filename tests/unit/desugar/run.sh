@@ -197,6 +197,8 @@ if [[ ! -e "$dist/main.awk" ]]; then ok "alias_include_publishes_nothing"; else 
 dist="$TMP/dist with spaces"
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then
   if [[ -f "$dist/main.awk" && -f "$dist/app/page.awk" ]]; then ok "spaced_dist_publishes"; else ng "spaced_dist_publishes" "missing outputs"; fi
+  leftovers=$(find "$dist" -name ".hawk-desugar.*" 2>/dev/null | wc -l)
+  if [[ "$leftovers" -eq 0 ]]; then ok "spaced_dist_no_scratch_leftovers"; else ng "spaced_dist_no_scratch_leftovers" "$leftovers scratch files remain"; fi
 else
   ng "spaced_dist_publishes" "exit != 0"
 fi
@@ -209,6 +211,32 @@ st=$?
 set -e
 if [[ "$st" -eq 1 && "$err" == *"contains spaces"* ]]; then ok "spaced_include_rejected"; else ng "spaced_include_rejected" "exit=$st: $err"; fi
 if [[ ! -e "$dist/main.awk" ]]; then ok "spaced_include_publishes_nothing"; else ng "spaced_include_publishes_nothing" "dist/main.awk exists"; fi
+
+# --- marker が書込不可なら staging 前に exit 1 (publish 後の更新失敗を防ぐ) ---
+dist="$TMP/distmkw"
+HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" >/dev/null
+before_hash=$(cksum < "$dist/solo.awk")
+chmod a-w "$dist/.hawk-dist"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+chmod u+w "$dist/.hawk-dist"
+if [[ "$st" -eq 1 && "$err" == *"not writable"* ]]; then ok "unwritable_marker_rejected"; else ng "unwritable_marker_rejected" "exit=$st: $err"; fi
+after_hash=$(cksum < "$dist/solo.awk")
+if [[ "$before_hash" == "$after_hash" && ! -e "$dist/main.awk" ]]; then ok "unwritable_marker_publishes_nothing"; else ng "unwritable_marker_publishes_nothing"; fi
+
+# --- marker が symlink なら staging 前に exit 1 (上書き保護の偽装を防ぐ) ---
+dist="$TMP/distmks"
+mkdir -p "$dist"
+printf 'marker target\n' > "$TMP/ext-marker"
+ln -s "$TMP/ext-marker" "$dist/.hawk-dist"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"is a symlink"* ]]; then ok "symlink_marker_rejected"; else ng "symlink_marker_rejected" "exit=$st: $err"; fi
+if [[ "$(cat "$TMP/ext-marker")" == "marker target" ]]; then ok "symlink_marker_target_untouched"; else ng "symlink_marker_target_untouched"; fi
 
 # --- marker が regular file 以外なら staging 前に exit 1 ---
 dist="$TMP/distmk"
