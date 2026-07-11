@@ -374,5 +374,72 @@ st=$?
 set -e
 if [[ "$st" -eq 1 ]]; then ok "entry_not_found_exit1"; else ng "entry_not_found_exit1" "exit=$st"; fi
 
+# --- marker が書込可だが読込不可なら staging 前に exit 1
+#     (publish 後の marker 読込失敗を防ぐ) ---
+if [[ "$IS_ROOT" -eq 1 ]]; then
+  skip "unreadable_marker_rejected" "running as root, chmod a-r has no effect"
+else
+  dist="$TMP/distmkr"
+  HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" >/dev/null
+  before_hash=$(cksum < "$dist/solo.awk")
+  chmod a-r "$dist/.hawk-dist"
+  set +e
+  err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" 2>&1 >/dev/null)
+  st=$?
+  set -e
+  chmod u+r "$dist/.hawk-dist"
+  if [[ "$st" -eq 1 && "$err" == *"not readable"* ]]; then ok "unreadable_marker_rejected"; else ng "unreadable_marker_rejected" "exit=$st: $err"; fi
+  after_hash=$(cksum < "$dist/solo.awk")
+  if [[ "$before_hash" == "$after_hash" && ! -e "$dist/main.awk" ]]; then ok "unreadable_marker_publishes_nothing"; else ng "unreadable_marker_publishes_nothing"; fi
+fi
+
+# --- rel が "-" で始まっても marker 照合の grep がオプションと誤解釈せず
+#     再実行できる ---
+dashinc="$TMP/dashinc"
+mkdir -p "$dashinc"
+cat > "$dashinc/-main.awk" << 'AWKEOF'
+BEGIN { print "dash" }
+AWKEOF
+dist="$TMP/distdash"
+set +e
+out1=$(cd "$dashinc" && HAWK_DIST="$dist" "$LIBS_ABS" desugar ./-main.awk 2>&1)
+st1=$?
+out2=$(cd "$dashinc" && HAWK_DIST="$dist" "$LIBS_ABS" desugar ./-main.awk 2>&1)
+st2=$?
+set -e
+if [[ "$st1" -eq 0 && "$st2" -eq 0 ]]; then ok "dash_prefixed_entry_rerunnable"; else ng "dash_prefixed_entry_rerunnable" "exit1=$st1 exit2=$st2: $out1 / $out2"; fi
+
+# --- プロジェクト外の絶対パス include が、実はプロジェクト内ファイルへの
+#     symlink である場合は拒否 (dist と source の二重定義を防ぐ) ---
+abssym="$TMP/abssym"
+mkdir -p "$abssym/project" "$abssym/outside"
+cat > "$abssym/project/x.awk" << AWKEOF
+@include "$abssym/outside/alias.awk"
+function proj_x() { return 1 }
+AWKEOF
+cat > "$abssym/project/main.awk" << 'AWKEOF'
+@include "x.awk"
+BEGIN { print "abssym" }
+AWKEOF
+ln -s "$abssym/project/x.awk" "$abssym/outside/alias.awk"
+dist="$TMP/distabssym"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$abssym/project/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"absolute include points inside project root"* ]]; then ok "abs_symlink_include_to_project_rejected"; else ng "abs_symlink_include_to_project_rejected" "exit=$st: $err"; fi
+
+# --- 出力先がダングリング symlink でも -e だけでなく -L も見て
+#     上書き保護される (置き換えられずに残る) ---
+dist="$TMP/distdangle"
+mkdir -p "$dist"
+ln -s "$TMP/missing-target" "$dist/solo.awk"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 ]]; then ok "dangling_symlink_output_rejected"; else ng "dangling_symlink_output_rejected" "exit=$st: $err"; fi
+if [[ -L "$dist/solo.awk" && ! -e "$dist/solo.awk" ]]; then ok "dangling_symlink_output_untouched"; else ng "dangling_symlink_output_untouched"; fi
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

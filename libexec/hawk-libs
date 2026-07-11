@@ -71,6 +71,14 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: $dist/.hawk-dist is not writable" >&2
         exit 1
       fi
+      # 書込可だが読込不可だと、末尾の marker 更新時の cat が
+      # パイプライン内で失敗しても sort 側の exit 0 に隠れ、
+      # staging 済みの成果物はそのまま marker だけが空/不完全になる。
+      # publish 前に読めることを確認しておく
+      if [[ ! -r "$dist/.hawk-dist" ]]; then
+        echo "[hawk-libs] desugar failed: $dist/.hawk-dist is not readable" >&2
+        exit 1
+      fi
     fi
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
     _seen=" "
@@ -144,8 +152,10 @@ case "$subcmd" in
       # 上書きしない (HAWK_DIST が source 木の中を指すと -ef では検出できない別ファイルを
       # 潰すため。marker を空ファイルにするだけだと最初の成功後はディレクトリ全体を
       # 信頼してしまい、無関係な source ファイルまで上書き対象になる)
-      if [[ -e "$out" ]]; then
-        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF "$rel" "$dist/.hawk-dist"; then
+      # -e はダングリング symlink で false になるため、-L も見ないと
+      # 出力先に残った古い source symlink が保護をすり抜けて上書きされる
+      if [[ -e "$out" || -L "$out" ]]; then
+        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$rel" "$dist/.hawk-dist"; then
           echo "[hawk-libs] desugar failed: refusing to overwrite existing file in non-dist directory: $out (remove it or the whole directory if it is a stale dist)" >&2
           exit 1
         fi
@@ -202,10 +212,31 @@ case "$subcmd" in
         # プロジェクト内は相対パスに限定し、外部の絶対パス (共有ライブラリ等) は
         # 従来どおり素通りで残す
         if [[ "$inc" == /* ]]; then
-          if [[ -f "$inc" && "$(cd "$(dirname "$inc")" && pwd -P)/" == "$src_root/"* ]]; then
-            rm -f "$tmp"
-            echo "[hawk-libs] desugar failed: absolute include points inside project root (use a relative path): $inc" >&2
-            exit 1
+          if [[ -f "$inc" ]]; then
+            # ディレクトリだけでなくファイル自体も symlink 経由でプロジェクト内を
+            # 指せるため (例: /tmp/outside/alias.awk -> $src_root/x.awk)、
+            # symlink チェーンをファイル自体まで辿ってから判定する
+            _abs_inc_resolved="$inc"
+            _abs_inc_hops=0
+            while [[ -L "$_abs_inc_resolved" ]]; do
+              _abs_inc_hops=$((_abs_inc_hops + 1))
+              if [[ $_abs_inc_hops -gt 40 ]]; then
+                rm -f "$tmp"
+                echo "[hawk-libs] desugar failed: symlink loop resolving absolute include: $inc" >&2
+                exit 1
+              fi
+              _abs_inc_target="$(readlink "$_abs_inc_resolved")"
+              if [[ "$_abs_inc_target" == /* ]]; then
+                _abs_inc_resolved="$_abs_inc_target"
+              else
+                _abs_inc_resolved="$(dirname "$_abs_inc_resolved")/$_abs_inc_target"
+              fi
+            done
+            if [[ "$(cd "$(dirname "$_abs_inc_resolved")" && pwd -P)/" == "$src_root/"* ]]; then
+              rm -f "$tmp"
+              echo "[hawk-libs] desugar failed: absolute include points inside project root (use a relative path): $inc" >&2
+              exit 1
+            fi
           fi
           continue
         fi
