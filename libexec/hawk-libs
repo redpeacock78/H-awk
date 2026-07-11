@@ -102,6 +102,12 @@ case "$subcmd" in
           echo "[hawk-libs] desugar failed: include path contains spaces (unsupported): $rel" >&2
           exit 1
           ;;
+        .hawk-dist)
+          # dist ルートの marker と同じパスに publish されると、
+          # publish 後の marker 更新が成果物を書き潰すため予約名として拒否
+          echo "[hawk-libs] desugar failed: '.hawk-dist' is reserved for the dist marker: $rel" >&2
+          exit 1
+          ;;
       esac
       # 同一実体 (symlink/hardlink) を別名で include すると、mirror 後は
       # 別 inode になり gawk の重複 include 排除が効かず定義が二重実行される。
@@ -191,6 +197,18 @@ case "$subcmd" in
       mv "$tmp2" "$tmp"
       incs=""
       while IFS= read -r inc; do
+        # 絶対パス include がプロジェクト内のファイルを指すと、mirror 後も
+        # 原本 (未 desugar) を直接ロードして定義が二重実行される。
+        # プロジェクト内は相対パスに限定し、外部の絶対パス (共有ライブラリ等) は
+        # 従来どおり素通りで残す
+        if [[ "$inc" == /* ]]; then
+          if [[ -f "$inc" && "$(cd "$(dirname "$inc")" && pwd -P)/" == "$src_root/"* ]]; then
+            rm -f "$tmp"
+            echo "[hawk-libs] desugar failed: absolute include points inside project root (use a relative path): $inc" >&2
+            exit 1
+          fi
+          continue
+        fi
         # entry への back-edge は gawk が実行時に
         # "cannot include `X' and use it as a program file" で fatal になるため
         # desugar 時点で拒否する (entry を経由しない循環は gawk が重複 include を

@@ -218,6 +218,38 @@ set -e
 if [[ "$st" -eq 1 && "$err" == *"contains spaces"* ]]; then ok "spaced_include_rejected"; else ng "spaced_include_rejected" "exit=$st: $err"; fi
 if [[ ! -e "$dist/main.awk" ]]; then ok "spaced_include_publishes_nothing"; else ng "spaced_include_publishes_nothing" "dist/main.awk exists"; fi
 
+# --- ".hawk-dist" という include 名は marker の予約名として exit 1 ---
+dist="$TMP/distrn"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/resname/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"reserved for the dist marker"* ]]; then ok "marker_name_include_rejected"; else ng "marker_name_include_rejected" "exit=$st: $err"; fi
+
+# --- プロジェクト内を指す絶対パス include は exit 1、外部の絶対パスは素通り ---
+absinc="$TMP/absinc"
+mkdir -p "$absinc"
+cat > "$absinc/x.awk" << 'AWKEOF'
+function abs_x() { return 1 }
+AWKEOF
+printf '@include "%s/x.awk"\nBEGIN { print "absinc" }\n' "$absinc" > "$absinc/main.awk"
+dist="$TMP/distabs"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$absinc/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"absolute include points inside project root"* ]]; then ok "abs_include_inside_root_rejected"; else ng "abs_include_inside_root_rejected" "exit=$st: $err"; fi
+
+absext="$TMP/absext"
+mkdir -p "$absext"
+printf '@include "/no/such/external.awk"\nBEGIN { print "absext" }\n' > "$absext/main.awk"
+dist="$TMP/distabse"
+if HAWK_DIST="$dist" "$LIBS" desugar "$absext/main.awk" >/dev/null; then
+  if grep -qF '@include "/no/such/external.awk"' "$dist/main.awk"; then ok "abs_include_external_passthrough"; else ng "abs_include_external_passthrough"; fi
+else
+  ng "abs_include_external_passthrough" "exit != 0"
+fi
+
 # --- marker が書込不可なら staging 前に exit 1 (publish 後の更新失敗を防ぐ) ---
 # root (id -u == 0) では chmod a-w が -w 判定にも truncate 阻止にも効かず
 # exit=0 になってしまうため、root 実行時はこの2アサーションを SKIP する
