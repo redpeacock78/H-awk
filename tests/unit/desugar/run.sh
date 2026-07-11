@@ -250,6 +250,20 @@ else
   ng "abs_include_external_passthrough" "exit != 0"
 fi
 
+# --- プロジェクト内のファイルへの hard link を指す絶対パス include も exit 1 ---
+abshard="$TMP/abshard"
+outside2="$TMP/outside2"
+mkdir -p "$abshard" "$outside2"
+printf '@include "x.awk"\nBEGIN { print "abshard" }\n' > "$abshard/main.awk"
+printf '@include "%s/alias.awk"\nfunction ah_x() { return 1 }\n' "$outside2" > "$abshard/x.awk"
+ln "$abshard/x.awk" "$outside2/alias.awk"
+dist="$TMP/distah"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$abshard/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"same file as"* ]]; then ok "abs_hardlink_include_to_project_rejected"; else ng "abs_hardlink_include_to_project_rejected" "exit=$st: $err"; fi
+
 # --- marker が書込不可なら staging 前に exit 1 (publish 後の更新失敗を防ぐ) ---
 # root (id -u == 0) では chmod a-w が -w 判定にも truncate 阻止にも効かず
 # exit=0 になってしまうため、root 実行時はこの2アサーションを SKIP する

@@ -237,6 +237,19 @@ case "$subcmd" in
               echo "[hawk-libs] desugar failed: absolute include points inside project root (use a relative path): $inc" >&2
               exit 1
             fi
+            # hard link は readlink で辿れずパス名も外部のままなので、
+            # パス比較では検出できない。訪問済みプロジェクトファイルとの
+            # device/inode 比較 (-ef) で同一実体を検出する
+            set -f
+            for prior in $_seen; do
+              if [[ "$inc" -ef "$src_root/$prior" ]]; then
+                set +f
+                rm -f "$tmp"
+                echo "[hawk-libs] desugar failed: absolute include is the same file as project file: $inc (same file as $prior)" >&2
+                exit 1
+              fi
+            done
+            set +f
           fi
           continue
         fi
