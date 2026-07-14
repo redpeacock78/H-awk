@@ -857,6 +857,7 @@ function v2_rpn_typedecl(i,    line, name, j, typestart, typetext) {
   if (j <= TOK["n"] && TOK[j,"kind"] == "OP" && TOK[j,"text"] == "=" && \
       TOK[j+1,"kind"] == "LBRACE") {
     V2_RECORD_TYPE[name] = 1
+    if (V2_INDEX_MODE) V2_INDEX_RUN_RECORDS[name] = 1
     return v2_rpn_record_fields(name, j + 1)
   }
 
@@ -899,6 +900,7 @@ function v2_rpn_record_fields(typename, open_pos,    j, fname, typestart, typete
     for (k = typestart; k < j; k++)
       typetext = typetext ((TOK[k,"kind"] == "COMMA") ? ", " : TOK[k,"text"])
     V2_RECORD_FIELDS[typename, fname] = typetext
+    if (V2_INDEX_MODE) V2_INDEX_RUN_FIELDS[typename, fname] = typetext
     if (TOK[j,"kind"] == "COMMA") j++   # inline 形の区切り
   }
   # v1 は record 宣言ブロック全体と直後の空行 1 行をまとめてスキップし、
@@ -1490,6 +1492,7 @@ function v2_rpn(    i) {
   # ファイル先頭から順に埋める。プログラム全体で 1 つの表（関数スコープでは
   # クリアしない）。
   delete V2_RPN_ALIAS
+  for (i in V2_SHARED_ALIAS) V2_RPN_ALIAS[i] = V2_SHARED_ALIAS[i]
 
   v2_rpn_prescan_records()
 

@@ -82,6 +82,62 @@ case "$subcmd" in
     fi
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
     dist_phys="$(cd "$dist" && pwd -P)"
+    cwd_phys="$(pwd -P)"
+    case "$src" in
+      /*)
+        src_abs="$src"
+        ;;
+      *)
+        src_abs="$cwd_phys/$src"
+        ;;
+    esac
+    _src_resolved="$src_abs"
+    _src_hops=0
+    while [[ -L "$_src_resolved" ]]; do
+      _src_hops=$((_src_hops + 1))
+      if [[ $_src_hops -gt 40 ]]; then
+        echo "[hawk-libs] desugar failed: symlink loop resolving source: $src" >&2
+        exit 1
+      fi
+      _src_target="$(readlink "$_src_resolved")"
+      if [[ "$_src_target" == /* ]]; then
+        _src_resolved="$_src_target"
+      else
+        _src_resolved="$(dirname "$_src_resolved")/$_src_target"
+      fi
+    done
+    src_abs="$(cd "$(dirname "$_src_resolved")" && pwd -P)/$(basename "$_src_resolved")"
+    case "$src_abs" in
+      "$cwd_phys"/*) entry_key="${src_abs#"$cwd_phys"/}" ;;
+      *) entry_key="external-$(printf '%s' "$src_root" | cksum | awk '{print $1}')/$(basename "$src")" ;;
+    esac
+    while [[ "$entry_key" == ./* ]]; do entry_key="${entry_key#./}"; done
+    while [[ "$entry_key" == */./* ]]; do entry_key="${entry_key/\/\.\//\/}"; done
+    case "$entry_key" in ../*|*/../*|*" "*)
+      echo "[hawk-libs] desugar failed: invalid entry path: $entry_key" >&2
+      exit 1
+      ;;
+    esac
+    if [[ "$entry_key" == */* ]]; then
+      namespace="${entry_key%/*}"
+    else
+      namespace=""
+    fi
+    _dist_has_source=0
+    if [[ "$dist_phys/" == "$src_root/"* ]]; then
+      while IFS= read -r _existing; do
+        [[ "$_existing" == "$dist/.hawk-dist" || "$_existing" == "$dist/.hawk-generations/"* ]] || { _dist_has_source=1; break; }
+      done < <(find "$dist" -type f -print)
+    fi
+    if [[ "$src_abs" == "$dist_phys" || "$src_abs" == "$dist_phys/"* || $_dist_has_source -eq 1 ]]; then
+      echo "[hawk-libs] desugar failed: refusing to overwrite source tree (dist and source trees overlap)" >&2
+      exit 1
+    fi
+    mkdir -p "$dist/.hawk-generations"
+    stage_root="$(mktemp -d "$dist/.hawk-generations/gen.XXXXXX")"
+    if [[ "$dist" = /* ]]; then runtime_root="$dist/current"; else runtime_root="$dist_phys/current"; fi
+    runtime_ns="$runtime_root"
+    [[ -n "$namespace" ]] && runtime_ns="$runtime_ns/$namespace"
     _seen=" "
     # scratch と publish キューは配列で持つ
     # (空白入りパスが word splitting で別引数に化けるのを防ぐ)
@@ -98,6 +154,43 @@ case "$subcmd" in
     # まとめて照合するための保留キュー (staging 中は _seen が未確定のため、後続 sibling
     # を hard link 経由で見逃す。詳細は下の post-closure 検査を参照)
     _abs_ext=()
+
+    declare -A _index_seen=()
+    _index_files=()
+    _index_one() {
+      local rel="$1" inc p
+      [[ -n "${_index_seen[$rel]+x}" ]] && return 0
+      case "$rel" in
+        ../*|*/../*)
+          echo "[hawk-libs] desugar failed: include escapes project root via '..': $rel" >&2
+          exit 1
+          ;;
+        *" "*)
+          echo "[hawk-libs] desugar failed: include path contains spaces (unsupported): $rel" >&2
+          exit 1
+          ;;
+        .hawk-dist|.hawk-dist/*)
+          echo "[hawk-libs] desugar failed: '.hawk-dist' is reserved for the dist marker: $rel" >&2
+          exit 1
+          ;;
+      esac
+      _index_seen["$rel"]=1
+      p="$src_root/$rel"
+      [[ -f "$p" ]] || return 0
+      _index_files+=("$p")
+      while IFS= read -r inc; do
+        [[ -n "$inc" && "$inc" != /* ]] || continue
+        p="$inc"
+        while [[ "$p" == ./* ]]; do p="${p#./}"; done
+        while [[ "$p" == */./* ]]; do p="${p/\/\.\//\/}"; done
+        [[ "$p" == "$entry_rel" || "$src_root/$p" -ef "$src_root/$entry_rel" ]] && {
+          echo "[hawk-libs] desugar failed: include cycle back to entry: $rel includes $inc" >&2
+          exit 1
+        }
+        [[ -f "$src_root/$p" ]] && _index_one "$p"
+      done < <(gawk 'match($0, /^[[:space:]]*@include[[:space:]]+"([^"]+)"/, m) { print m[1] }' "$p")
+      return 0
+    }
 
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
@@ -140,7 +233,34 @@ case "$subcmd" in
       set +f
       _seen="$_seen$rel "
       in="$src_root/$rel"
-      out="$dist/$rel"
+      out="$stage_root/${namespace:+$namespace/}$rel"
+      stable="$dist/${namespace:+$namespace/}$rel"
+      compat="$dist/$rel"
+      compat_parent="$(dirname "$compat")"
+      while [[ ! -e "$compat_parent" && ! -L "$compat_parent" && "$compat_parent" != "." && "$compat_parent" != "/" ]]; do
+        compat_parent="$(dirname "$compat_parent")"
+      done
+      compat_parent_phys="$(cd "$compat_parent" && pwd -P)"
+      if [[ "$compat_parent_phys/" != "$dist_phys/"* ]]; then
+        echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $compat_parent_phys" >&2
+        exit 1
+      fi
+      if [[ -d "$stable" || ( -e "$stable" && ! -L "$stable" ) || -d "$compat" ]]; then
+        echo "[hawk-libs] desugar failed: output path is not replaceable: $stable" >&2
+        exit 1
+      fi
+      if [[ -L "$compat" && ! -e "$compat" ]]; then
+        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$rel" "$dist/.hawk-dist"; then
+          echo "[hawk-libs] desugar failed: dangling output symlink: $compat" >&2
+          exit 1
+        fi
+      fi
+      if [[ -e "$stable" || -L "$stable" ]]; then
+        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$rel" "$dist/.hawk-dist"; then
+          echo "[hawk-libs] desugar failed: refusing to overwrite existing namespaced output: $stable" >&2
+          exit 1
+        fi
+      fi
       # -ef は device/inode 比較。symlink 経由 (HAWK_DIST・source どちら側でも)
       # の source エイリアスを文字列比較より確実に検出する
       if [[ -e "$out" && "$in" -ef "$out" ]]; then
@@ -213,7 +333,7 @@ case "$subcmd" in
       # dsl/desugar.awk 自身が @include "dsl/util.awk" 等の相対パスを持ち、
       # gawk は '/' を含む @include をカレントディレクトリ相対で解決するため、
       # HAWK_LIB (リポジトリルート) に cd してから実行する。
-      if ! ( cd "$HAWK_LIB" && gawk -f dsl/desugar.awk "$in" ) > "$tmp"; then
+      if ! ( cd "$HAWK_LIB" && gawk -f "$_index_tmp" -f dsl/desugar.awk "$in" ) > "$tmp"; then
         rm -f "$tmp"
         echo "[hawk-libs] desugar failed: $in" >&2
         exit 1
@@ -304,7 +424,7 @@ case "$subcmd" in
         # dist 接頭の実パスに書き換える
         tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
         _scratch_arr+=("$tmp2")
-        if ! gawk -v dist="$dist" -v list="$incs" '
+        if ! gawk -v dist="$runtime_ns" -v list="$incs" '
           BEGIN { n = split(list, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") L[a[i]] = 1 }
           {
             if (match($0, /^([[:space:]]*@include[[:space:]]+")([^"]+)(".*)$/, m) && (m[2] in L))
@@ -333,6 +453,17 @@ case "$subcmd" in
     }
 
     entry_rel="$(basename "$src")"
+    _index_one "$entry_rel"
+    _index_tmp="$(mktemp "$dist/.hawk-index.XXXXXX")"
+    _scratch_arr+=("$_index_tmp")
+    _index_list=""
+    for _index_file in "${_index_files[@]}"; do
+      _index_list="${_index_list}${_index_list:+$'\034'}${_index_file}"
+    done
+    if ! ( cd "$HAWK_LIB" && gawk -v V2_INDEX_LIST="$_index_list" -v V2_INDEX_OUT="$_index_tmp" -f dsl/index.awk ); then
+      echo "[hawk-libs] desugar failed: shared declaration index failed" >&2
+      exit 1
+    fi
     _desugar_one "$entry_rel"
     # 絶対パス include の hard link 検査は closure 全体の _seen が確定してから行う
     # (staging 中に照合すると未訪問の後続 sibling を見逃す)。publish の前に置き、
@@ -357,14 +488,37 @@ case "$subcmd" in
     # 空ファイルのままだと最初の成功後にディレクトリ全体を信頼してしまうため、
     # rel を1行1件記録し、次回以降の上書き可否を rel 単位で判定できるようにする。
     # 更新も稼働中の hawk-serve と競合しないよう mktemp + mv でアトミックに行う
-    _marker_tmp="$(mktemp "$dist/.hawk-dist.XXXXXX")"
+    _marker_tmp="$(mktemp "$stage_root/.hawk-dist.XXXXXX")"
     _scratch_arr+=("$_marker_tmp")
     {
       [[ -f "$dist/.hawk-dist" ]] && cat "$dist/.hawk-dist"
       for _rel in "${_pub_rel[@]}"; do printf '%s\t%s\n' "$src_root" "$_rel"; done
     } | sort -u > "$_marker_tmp"
-    mv "$_marker_tmp" "$dist/.hawk-dist"
-    echo "$dist/$entry_rel"
+    mv "$_marker_tmp" "$stage_root/.hawk-dist"
+    _current_tmp="$(mktemp "$dist/.current.XXXXXX")"
+    rm -f "$_current_tmp"
+    ln -s "${stage_root#"$dist/"}" "$_current_tmp"
+    mv -f -h "$_current_tmp" "$dist/current"
+    _root_marker_tmp="$(mktemp "$dist/.hawk-dist.XXXXXX")"
+    cp "$stage_root/.hawk-dist" "$_root_marker_tmp"
+    mv -f "$_root_marker_tmp" "$dist/.hawk-dist"
+    for ((i = 0; i < ${#_pub_rel[@]}; i++)); do
+      _rel="${_pub_rel[$i]}"
+      _stable="$dist/${namespace:+$namespace/}$_rel"
+      _compat="$dist/$_rel"
+      mkdir -p "$(dirname "$_stable")" "$(dirname "$_compat")"
+      if [[ -e "$_stable" && ! -L "$_stable" ]]; then
+        echo "[hawk-libs] desugar failed: stable output is not a symlink: $_stable" >&2
+        exit 1
+      fi
+      if [[ ! -e "$_stable" && ! -L "$_stable" ]]; then
+        ln -s "$runtime_ns/$_rel" "$_stable"
+      fi
+      if [[ "$_compat" != "$_stable" && ! -e "$_compat" && ! -L "$_compat" ]]; then
+        ln -s "$runtime_ns/$_rel" "$_compat"
+      fi
+    done
+    echo "$dist/${namespace:+$namespace/}$entry_rel"
     ;;
   *)
     echo "[hawk-libs] unknown subcommand: $subcmd" >&2

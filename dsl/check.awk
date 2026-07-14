@@ -1887,11 +1887,13 @@ function v2_prescan_expr_type(id,    kind, name, inner, ret_sig, typearg) {
 
 function v2_check() {
   v2_init_builtins()
+  v2_merge_shared()
   VARIANTS["Result"] = "ok" SUBSEP "ng"
   VARIANTS["Option"]  = "some" SUBSEP "none"
 
   v2_collect_raw_funcs()
   v2_collect(1)
+  v2_check_shared_consistency()
   v2_infer_unannotated_returns(1)
   v2_check_alias_cycles()
   v2_check_record_return_type(1)
@@ -1904,6 +1906,37 @@ function v2_check() {
   v2_mark_let_literal_ok(1)
   v2_check_bare_collection_lit(1)
   v2_check_mut(1)
+}
+
+function v2_check_shared_consistency(    k) {
+  for (k in V2_SHARED_ALIAS)
+    if (ALIAS[k] != V2_SHARED_ALIAS[k]) v2_diag(1, 1, "conflicting shared type alias: " k)
+  for (k in V2_SHARED_SIG)
+    if (SIG[k] != V2_SHARED_SIG[k]) v2_diag(1, 1, "conflicting shared function signature")
+  for (k in V2_SHARED_RECORD_FIELDS)
+    if (V2_RECORD_FIELDS[k] != V2_SHARED_RECORD_FIELDS[k]) v2_diag(1, 1, "conflicting shared record field")
+}
+
+function v2_merge_shared(    k, p) {
+  for (k in V2_SHARED_ALIAS) {
+    if ((k in ALIAS) && ALIAS[k] != V2_SHARED_ALIAS[k])
+      v2_diag(1, 1, "conflicting shared type alias: " k)
+    ALIAS[k] = V2_SHARED_ALIAS[k]
+  }
+  for (k in V2_SHARED_SIG) {
+    split(k, p, SUBSEP)
+    if ((k in SIG) && SIG[k] != V2_SHARED_SIG[k])
+      v2_diag(1, 1, "conflicting shared function signature: " p[1])
+    SIG[k] = V2_SHARED_SIG[k]
+  }
+  for (k in V2_SHARED_RECORD_TYPE) V2_RECORD_TYPE[k] = 1
+  for (k in V2_SHARED_RECORD_FIELDS) {
+    split(k, p, SUBSEP)
+    if ((k in V2_RECORD_FIELDS) && V2_RECORD_FIELDS[k] != V2_SHARED_RECORD_FIELDS[k])
+      v2_diag(1, 1, "conflicting shared record field: " p[1] "." p[2])
+    V2_RECORD_FIELDS[k] = V2_SHARED_RECORD_FIELDS[k]
+  }
+  for (k in V2_SHARED_RAW_FUNC) V2_RAW_FUNC[k] = 1
 }
 
 # LET/LETQ の直接の初期化式（最後の子）だけが空コレクションリテラル

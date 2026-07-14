@@ -22,14 +22,27 @@ trap 'rm -rf "$TMP"' EXIT
 # --- 再帰 desugar + @include 書き換え + 実行 ---
 dist="$TMP/dist1"
 out=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk")
-if [[ "$out" == "$dist/main.awk" ]]; then ok "entry_path_echoed"; else ng "entry_path_echoed" "$out"; fi
+if [[ "$out" == "$dist/tests/unit/desugar/fixtures/proj/main.awk" ]]; then ok "entry_path_echoed"; else ng "entry_path_echoed" "$out"; fi
 if [[ -f "$dist/app/page.awk" ]]; then ok "included_file_mirrored"; else ng "included_file_mirrored"; fi
 if [[ -f "$dist/app/sub/util.awk" ]]; then ok "nested_include_mirrored"; else ng "nested_include_mirrored"; fi
-if grep -qF "@include \"$dist/app/page.awk\"" "$dist/main.awk"; then ok "include_rewritten"; else ng "include_rewritten"; fi
-if grep -qF "@include \"$dist/app/sub/util.awk\"" "$dist/app/page.awk"; then ok "nested_include_rewritten"; else ng "nested_include_rewritten"; fi
+if grep -qF "@include \"$dist/current/" "$dist/main.awk" && grep -qF "app/page.awk\"" "$dist/main.awk"; then ok "include_rewritten"; else ng "include_rewritten"; fi
+if grep -qF "@include \"$dist/current/" "$dist/app/page.awk" && grep -qF "app/sub/util.awk\"" "$dist/app/page.awk"; then ok "nested_include_rewritten"; else ng "nested_include_rewritten"; fi
 if ! grep -q "let " "$dist/app/page.awk"; then ok "included_file_desugared"; else ng "included_file_desugared"; fi
 run_out=$(gawk -f "$dist/main.awk" </dev/null)
 if [[ "$run_out" == "hello from page" ]]; then ok "desugared_tree_runs"; else ng "desugared_tree_runs" "$run_out"; fi
+
+shared="$TMP/shared"
+mkdir -p "$shared"
+printf 'type User = { name: Str }\nfunction get_name() -> Str { return "shared" }\n' > "$shared/types.awk"
+printf '@include "types.awk"\nfunction main() -> Response { let u: User = { name: get_name() }; return ctx.res.text(get_name()) }\n' > "$shared/main.awk"
+if HAWK_DIST="$TMP/distshared" "$LIBS" desugar "$shared/main.awk" >/dev/null; then ok "shared_declarations_compile"; else ng "shared_declarations_compile"; fi
+
+gen="$TMP/generation"
+HAWK_DIST="$gen" "$LIBS" desugar "$FIX/solo.awk" >/dev/null
+old_gen=$(readlink "$gen/current")
+HAWK_DIST="$gen" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
+new_gen=$(readlink "$gen/current")
+if [[ "$old_gen" != "$new_gen" && $(find -L "$gen/current" -type f -name main.awk | wc -l | tr -d ' ') -eq 1 && $(find "$gen/$old_gen" -type f -name solo.awk | wc -l | tr -d ' ') -eq 1 ]]; then ok "generation_switch_is_atomic"; else ng "generation_switch_is_atomic"; fi
 
 # --- entry に戻る循環は exit 1 (gawk が実行時 fatal になるため desugar 時点で拒否) ---
 dist="$TMP/dist2"
@@ -71,7 +84,7 @@ fi
 # --- "./x.awk" 形式の include は正規化されて dist に書き換わる ---
 dist="$TMP/distds"
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/dotslash/main.awk" >/dev/null; then
-  if grep -qF "@include \"$dist/x.awk\"" "$dist/main.awk"; then ok "dotslash_include_normalized"; else ng "dotslash_include_normalized"; fi
+  if grep -qF "@include \"$dist/current/" "$dist/main.awk" && grep -qF "x.awk\"" "$dist/main.awk"; then ok "dotslash_include_normalized"; else ng "dotslash_include_normalized"; fi
   run_out=$(gawk -f "$dist/main.awk" </dev/null)
   if [[ "$run_out" == "dotslash-x" ]]; then ok "dotslash_tree_runs"; else ng "dotslash_tree_runs" "$run_out"; fi
 else
@@ -366,8 +379,7 @@ dist="$TMP/distrerun"
 HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then ok "rerun_over_marker_ok"; else ng "rerun_over_marker_ok" "exit != 0"; fi
 
-# --- 異なる source の同名 basename entry (dist/main.awk が衝突) は marker に別 source
-#     として上書き拒否され、先に publish した成果物が生き残る ---
+# --- 異なる source の同名 basename entry は namespace で分離される ---
 appsA="$TMP/appsA"
 appsB="$TMP/appsB"
 mkdir -p "$appsA" "$appsB"
@@ -375,16 +387,12 @@ printf 'BEGIN { print "from-a" }\n' > "$appsA/main.awk"
 printf 'BEGIN { print "from-b" }\n' > "$appsB/main.awk"
 dist="$TMP/distcs"
 HAWK_DIST="$dist" "$LIBS" desugar "$appsA/main.awk" >/dev/null
-before_hash=$(cksum < "$dist/main.awk")
-set +e
-err=$(HAWK_DIST="$dist" "$LIBS" desugar "$appsB/main.awk" 2>&1 >/dev/null)
-st=$?
-set -e
-after_hash=$(cksum < "$dist/main.awk")
-if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* && "$before_hash" == "$after_hash" ]]; then
-  ok "cross_source_same_basename_rejected"
+HAWK_DIST="$dist" "$LIBS" desugar "$appsB/main.awk" >/dev/null
+entries=$(find "$dist/.hawk-generations" -type f -name main.awk | wc -l | tr -d ' ')
+if [[ "$entries" -eq 2 ]] && grep -R -q "from-a" "$dist/.hawk-generations" && grep -R -q "from-b" "$dist/.hawk-generations"; then
+  ok "cross_source_same_basename_isolated"
 else
-  ng "cross_source_same_basename_rejected" "exit=$st: $err"
+  ng "cross_source_same_basename_isolated" "entries=$entries"
 fi
 
 # --- marker は publish 済み rel のみ信頼し、同じ dist 配下の無関係な既存ファイルは
@@ -393,17 +401,10 @@ fi
 srcsub2="$TMP/srcsub2"
 mkdir -p "$srcsub2/sub"
 cp "$FIX/solo.awk" "$srcsub2/main.awk"
-HAWK_DIST="$srcsub2/sub" "$LIBS" desugar "$srcsub2/main.awk" >/dev/null
-printf 'BEGIN { print "other-source" }\n' > "$srcsub2/sub/other.awk"
-before_hash=$(cksum < "$srcsub2/sub/other.awk")
-cp "$FIX/solo.awk" "$srcsub2/other.awk"
-set +e
-err=$(HAWK_DIST="$srcsub2/sub" "$LIBS" desugar "$srcsub2/other.awk" 2>&1 >/dev/null)
-st=$?
-set -e
-if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* ]]; then ok "marker_does_not_bless_unrelated_files"; else ng "marker_does_not_bless_unrelated_files" "exit=$st: $err"; fi
-after_hash=$(cksum < "$srcsub2/sub/other.awk")
-if [[ "$before_hash" == "$after_hash" ]]; then ok "marker_does_not_bless_unrelated_files_untouched"; else ng "marker_does_not_bless_unrelated_files_untouched" "source file was modified"; fi
+before_hash=$(cksum < "$srcsub2/main.awk")
+if HAWK_DIST="$srcsub2/sub" "$LIBS" desugar "$srcsub2/main.awk" >/dev/null; then ok "source_tree_dist_published"; else ng "source_tree_dist_published"; fi
+after_hash=$(cksum < "$srcsub2/main.awk")
+if [[ "$before_hash" == "$after_hash" && $(find -L "$srcsub2/sub/current" -type f -name main.awk | wc -l | tr -d ' ') -eq 1 ]]; then ok "source_tree_dist_source_untouched"; else ng "source_tree_dist_source_untouched"; fi
 
 # --- include 名に glob 文字が含まれても、_seen の未クォート展開で
 #     カレントディレクトリの同名ファイルと誤って alias 判定されない ---
