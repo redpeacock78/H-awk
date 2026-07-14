@@ -226,6 +226,19 @@ st=$?
 set -e
 if [[ "$st" -eq 1 && "$err" == *"reserved for the dist marker"* ]]; then ok "marker_name_include_rejected"; else ng "marker_name_include_rejected" "exit=$st: $err"; fi
 
+resns="$TMP/resname"
+mkdir -p "$resns/.hawk-dist"
+cp "$FIX/resname/main.awk" "$resns/main.awk"
+printf 'function rn_x() { return 1 }\n' > "$resns/.hawk-dist/x.awk"
+sed -i.bak 's/\.hawk-dist"/.hawk-dist\/x.awk"/' "$resns/main.awk"
+rm "$resns/main.awk.bak"
+dist="$TMP/distns"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$resns/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"reserved for the dist marker"* && ! -e "$dist/main.awk" && ! -e "$dist/.hawk-dist" ]]; then ok "marker_namespace_include_rejected"; else ng "marker_namespace_include_rejected" "exit=$st: $err"; fi
+
 # --- プロジェクト内を指す絶対パス include は exit 1、外部の絶対パスは素通り ---
 absinc="$TMP/absinc"
 mkdir -p "$absinc"

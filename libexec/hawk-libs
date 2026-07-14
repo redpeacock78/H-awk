@@ -115,7 +115,7 @@ case "$subcmd" in
           echo "[hawk-libs] desugar failed: include path contains spaces (unsupported): $rel" >&2
           exit 1
           ;;
-        .hawk-dist)
+        .hawk-dist|.hawk-dist/*)
           # dist ルートの marker と同じパスに publish されると、
           # publish 後の marker 更新が成果物を書き潰すため予約名として拒否
           echo "[hawk-libs] desugar failed: '.hawk-dist' is reserved for the dist marker: $rel" >&2
