@@ -264,6 +264,24 @@ st=$?
 set -e
 if [[ "$st" -eq 1 && "$err" == *"same file as"* ]]; then ok "abs_hardlink_include_to_project_rejected"; else ng "abs_hardlink_include_to_project_rejected" "exit=$st: $err"; fi
 
+# --- 絶対パス hard link が、その absolute include より後で relative include される sibling を指す場合も exit 1 ---
+abshard2="$TMP/abshard2"
+outside3="$TMP/outside3"
+mkdir -p "$abshard2" "$outside3"
+printf 'function ah2_x() { return 1 }\n' > "$abshard2/x.awk"
+ln "$abshard2/x.awk" "$outside3/alias.awk"
+printf '@include "%s/alias.awk"\n@include "x.awk"\nBEGIN { print "abshard2" }\n' "$outside3" > "$abshard2/main.awk"
+dist="$TMP/distah2"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$abshard2/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"same file as"* && ! -e "$dist/main.awk" && ! -e "$dist/x.awk" ]]; then
+  ok "abs_hardlink_to_later_sibling_rejected"
+else
+  ng "abs_hardlink_to_later_sibling_rejected" "exit=$st: $err"
+fi
+
 # --- marker が書込不可なら staging 前に exit 1 (publish 後の更新失敗を防ぐ) ---
 # root (id -u == 0) では chmod a-w が -w 判定にも truncate 阻止にも効かず
 # exit=0 になってしまうため、root 実行時はこの2アサーションを SKIP する
@@ -334,6 +352,27 @@ if [[ "$before_hash" == "$after_hash" ]]; then ok "dist_over_source_untouched"; 
 dist="$TMP/distrerun"
 HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then ok "rerun_over_marker_ok"; else ng "rerun_over_marker_ok" "exit != 0"; fi
+
+# --- 異なる source の同名 basename entry (dist/main.awk が衝突) は marker に別 source
+#     として上書き拒否され、先に publish した成果物が生き残る ---
+appsA="$TMP/appsA"
+appsB="$TMP/appsB"
+mkdir -p "$appsA" "$appsB"
+printf 'BEGIN { print "from-a" }\n' > "$appsA/main.awk"
+printf 'BEGIN { print "from-b" }\n' > "$appsB/main.awk"
+dist="$TMP/distcs"
+HAWK_DIST="$dist" "$LIBS" desugar "$appsA/main.awk" >/dev/null
+before_hash=$(cksum < "$dist/main.awk")
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$appsB/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+after_hash=$(cksum < "$dist/main.awk")
+if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* && "$before_hash" == "$after_hash" ]]; then
+  ok "cross_source_same_basename_rejected"
+else
+  ng "cross_source_same_basename_rejected" "exit=$st: $err"
+fi
 
 # --- marker は publish 済み rel のみ信頼し、同じ dist 配下の無関係な既存ファイルは
 #     引き続き上書き保護される (marker が空ファイルだと最初の成功後に
@@ -454,6 +493,24 @@ st=$?
 set -e
 if [[ "$st" -eq 1 ]]; then ok "dangling_symlink_output_rejected"; else ng "dangling_symlink_output_rejected" "exit=$st: $err"; fi
 if [[ -L "$dist/solo.awk" && ! -e "$dist/solo.awk" ]]; then ok "dangling_symlink_output_untouched"; else ng "dangling_symlink_output_untouched"; fi
+
+# --- marker 登録済みディレクトリが symlink に差し替わっていると、再 desugar は
+#     symlink 先 (dist の外) に publish せず exit 1 ---
+dist="$TMP/distsymout"
+HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
+outside_symout="$TMP/outside_symout"
+mkdir -p "$outside_symout"
+rm -rf "$dist/app"
+ln -s "$outside_symout" "$dist/app"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"escapes dist via symlink"* && ! -e "$outside_symout/page.awk" ]]; then
+  ok "symlinked_output_dir_rejected"
+else
+  ng "symlinked_output_dir_rejected" "exit=$st: $err"
+fi
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

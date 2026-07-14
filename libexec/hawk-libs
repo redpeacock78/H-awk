@@ -81,6 +81,7 @@ case "$subcmd" in
       fi
     fi
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
+    dist_phys="$(cd "$dist" && pwd -P)"
     _seen=" "
     # scratch と publish キューは配列で持つ
     # (空白入りパスが word splitting で別引数に化けるのを防ぐ)
@@ -93,6 +94,10 @@ case "$subcmd" in
     _pub_tmp=()
     _pub_out=()
     _pub_rel=()
+    # プロジェクト内ファイルへの hard link を指す絶対パス include を、closure 完了後に
+    # まとめて照合するための保留キュー (staging 中は _seen が未確定のため、後続 sibling
+    # を hard link 経由で見逃す。詳細は下の post-closure 検査を参照)
+    _abs_ext=()
 
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
@@ -155,12 +160,25 @@ case "$subcmd" in
       # -e はダングリング symlink で false になるため、-L も見ないと
       # 出力先に残った古い source symlink が保護をすり抜けて上書きされる
       if [[ -e "$out" || -L "$out" ]]; then
-        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$rel" "$dist/.hawk-dist"; then
+        # marker は src_root と rel のペアで記録する。rel だけで照合すると、別ディレクトリの
+        # 別 source が同じ basename の rel (例: 複数 app の main.awk) を偶然共有したとき、
+        # 後勝ちの desugar が前の source の成果物を無警告で上書きしてしまう。
+        # dist パス自体の一意化は dist レイアウト規約の再設計 (#119) 側の課題であり、
+        # ここでは異なる source からの同名 rel 上書きを拒否するだけに留める
+        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$rel" "$dist/.hawk-dist"; then
           echo "[hawk-libs] desugar failed: refusing to overwrite existing file in non-dist directory: $out (remove it or the whole directory if it is a stale dist)" >&2
           exit 1
         fi
       fi
       mkdir -p "$(dirname "$out")"
+      # dist 配下のディレクトリが外部への symlink に差し替わっていると、mkdir -p はそれを
+      # 素通りし、後続の mv は symlink 先 (dist の外) に publish してしまう。
+      # 出力先の親を実パスまで解決して dist の実パス配下であることを都度確認する
+      out_parent_phys="$(cd "$(dirname "$out")" && pwd -P)"
+      if [[ "$out_parent_phys/" != "$dist_phys/"* ]]; then
+        echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $out_parent_phys" >&2
+        exit 1
+      fi
       # 稼働中の hawk-serve が dist の成果物を再ロードしうるため、
       # scratch (mktemp) 上で desugar と書き換えを済ませてから
       # mv でアトミックに配置する。scratch を mktemp にすることで
@@ -237,19 +255,11 @@ case "$subcmd" in
               echo "[hawk-libs] desugar failed: absolute include points inside project root (use a relative path): $inc" >&2
               exit 1
             fi
-            # hard link は readlink で辿れずパス名も外部のままなので、
-            # パス比較では検出できない。訪問済みプロジェクトファイルとの
-            # device/inode 比較 (-ef) で同一実体を検出する
-            set -f
-            for prior in $_seen; do
-              if [[ "$inc" -ef "$src_root/$prior" ]]; then
-                set +f
-                rm -f "$tmp"
-                echo "[hawk-libs] desugar failed: absolute include is the same file as project file: $inc (same file as $prior)" >&2
-                exit 1
-              fi
-            done
-            set +f
+            # hard link は readlink で辿れずパス名も外部のままなので、パス比較では検出できない。
+            # ただし staging 中の _seen には後続 sibling がまだ載っておらず、この時点で
+            # 照合すると hard link 元がまだ未訪問の後続 sibling を見逃す。closure 全体が
+            # 確定してからまとめて照合するため、ここではキューに積むだけに留める
+            _abs_ext+=("$inc")
           fi
           continue
         fi
@@ -300,6 +310,20 @@ case "$subcmd" in
 
     entry_rel="$(basename "$src")"
     _desugar_one "$entry_rel"
+    # 絶対パス include の hard link 検査は closure 全体の _seen が確定してから行う
+    # (staging 中に照合すると未訪問の後続 sibling を見逃す)。publish の前に置き、
+    # 検出時は何も publish しない
+    set -f
+    for _abs in "${_abs_ext[@]}"; do
+      for prior in $_seen; do
+        if [[ "$_abs" -ef "$src_root/$prior" ]]; then
+          set +f
+          echo "[hawk-libs] desugar failed: absolute include is the same file as project file: $_abs (same file as $prior)" >&2
+          exit 1
+        fi
+      done
+    done
+    set +f
     # closure 全体が成功してから一括 publish (深い子から、entry が最後)
     for ((i = 0; i < ${#_pub_tmp[@]}; i++)); do
       chmod 644 "${_pub_tmp[$i]}"
@@ -313,7 +337,7 @@ case "$subcmd" in
     _scratch_arr+=("$_marker_tmp")
     {
       [[ -f "$dist/.hawk-dist" ]] && cat "$dist/.hawk-dist"
-      printf '%s\n' "${_pub_rel[@]}"
+      for _rel in "${_pub_rel[@]}"; do printf '%s\t%s\n' "$src_root" "$_rel"; done
     } | sort -u > "$_marker_tmp"
     mv "$_marker_tmp" "$dist/.hawk-dist"
     echo "$dist/$entry_rel"
