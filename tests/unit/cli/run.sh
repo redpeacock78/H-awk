@@ -60,5 +60,23 @@ else
   FAIL=$((FAIL+1))
 fi
 
+# check/emit は隔離した一時 dist を使い、cwd の永続 dist を作らない・更新しない
+HAWK_ABS="$(pwd)/bin/hawk"
+VALID_ABS="$(pwd)/$VALID"
+work=$(mktemp -d)
+( cd "$work" && HAWK_NO_LIBS=1 "$HAWK_ABS" check --strict "$VALID_ABS" >/dev/null 2>&1 )
+if [[ ! -e "$work/dist" ]]; then
+  printf "  PASS: check_leaves_no_cwd_dist\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: check_leaves_no_cwd_dist (dist/ created)\n"; FAIL=$((FAIL+1))
+fi
+( cd "$work" && HAWK_NO_LIBS=1 "$HAWK_ABS" emit "$VALID_ABS" >/dev/null 2>&1 )
+if [[ ! -e "$work/dist" ]]; then
+  printf "  PASS: emit_leaves_no_cwd_dist\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: emit_leaves_no_cwd_dist (dist/ created)\n"; FAIL=$((FAIL+1))
+fi
+rm -rf "$work"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

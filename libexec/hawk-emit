@@ -27,6 +27,13 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+# emit は desugar 結果の出力のみが目的。永続 dist に publish した後で strict 検証が
+# 走ると、検証失敗でも成果物が更新済みになり、稼働中の hawk-serve が失敗した emit の
+# 出力を読んでしまう。呼び出し元の HAWK_DIST も使わず隔離した一時 dist に出す
+HAWK_DIST="$(mktemp -d /tmp/hawk-emit.XXXXXX)"
+export HAWK_DIST
+trap 'rm -rf "$HAWK_DIST"' EXIT
+
 APP_AWK="$("$LIBS" desugar "$APP")"
 
 if [[ "$STRICT" -eq 1 ]]; then

@@ -27,6 +27,13 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+# check は検証のみが目的。永続 dist に publish した後で strict 検証が走ると、
+# 検証失敗でも成果物が更新済みになり、稼働中の hawk-serve が失敗した check の
+# 出力を読んでしまう。呼び出し元の HAWK_DIST も使わず隔離した一時 dist に出す
+HAWK_DIST="$(mktemp -d /tmp/hawk-check.XXXXXX)"
+export HAWK_DIST
+trap 'rm -rf "$HAWK_DIST"' EXIT
+
 APP_AWK="$("$LIBS" desugar "$APP")"
 
 if [[ "$STRICT" -eq 1 ]]; then
