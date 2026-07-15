@@ -525,5 +525,24 @@ else
   ng "symlinked_output_dir_rejected" "exit=$st: $err"
 fi
 
+# --- 出力先の親 symlink は mkdir -p より前に拒否し、外部にディレクトリを作らない ---
+symlink_parent_src="$TMP/symlink-parent-src"
+mkdir -p "$symlink_parent_src/app/sub"
+printf '@include "app/sub/x.awk"\nBEGIN { print "symlink-parent" }\n' > "$symlink_parent_src/main.awk"
+printf 'function symlink_parent_x() { return 1 }\n' > "$symlink_parent_src/app/sub/x.awk"
+symlink_parent_dist="$TMP/symlink-parent-dist"
+symlink_parent_outside="$TMP/symlink-parent-outside"
+mkdir -p "$symlink_parent_dist" "$symlink_parent_outside"
+ln -s "$symlink_parent_outside" "$symlink_parent_dist/app"
+set +e
+err=$(HAWK_DIST="$symlink_parent_dist" "$LIBS" desugar "$symlink_parent_src/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && ! -e "$symlink_parent_outside/sub" ]]; then
+  ok "symlinked_parent_no_external_mkdir"
+else
+  ng "symlinked_parent_no_external_mkdir" "exit=$st, outside_sub=$([[ -e "$symlink_parent_outside/sub" ]] && echo yes || echo no): $err"
+fi
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

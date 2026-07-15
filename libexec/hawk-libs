@@ -102,7 +102,7 @@ case "$subcmd" in
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
     _desugar_one() {
-      local rel="$1" in out tmp inc incs prior
+      local rel="$1" in out out_parent out_rel probe part tmp inc incs prior
       case "$_seen" in *" $rel "*) return 0 ;; esac
       case "$rel" in
         ../*|*/../*)
@@ -170,7 +170,31 @@ case "$subcmd" in
           exit 1
         fi
       fi
-      mkdir -p "$(dirname "$out")"
+      # mkdir -p は既存の symlink を辿るため、先に dist 配下の既存コンポーネントを
+      # 検査する。例えば dist/app -> 外部 の状態で app/sub を作ると、dist 外に
+      # sub/ が作られてから下の実パス検査に到達してしまう。
+      out_parent="$(dirname "$out")"
+      probe="$dist"
+      if [[ "$out_parent" == "$dist"/* ]]; then
+        out_rel="${out_parent#"$dist"/}"
+        while [[ -n "$out_rel" ]]; do
+          if [[ "$out_rel" == */* ]]; then
+            part="${out_rel%%/*}"
+            out_rel="${out_rel#*/}"
+          else
+            part="$out_rel"
+            out_rel=
+          fi
+          [[ -n "$part" ]] || continue
+          probe="$probe/$part"
+          if [[ -L "$probe" ]]; then
+            echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $probe" >&2
+            exit 1
+          fi
+          [[ -e "$probe" ]] || break
+        done
+      fi
+      mkdir -p "$out_parent"
       # dist 配下のディレクトリが外部への symlink に差し替わっていると、mkdir -p はそれを
       # 素通りし、後続の mv は symlink 先 (dist の外) に publish してしまう。
       # 出力先の親を実パスまで解決して dist の実パス配下であることを都度確認する
