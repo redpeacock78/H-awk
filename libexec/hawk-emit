@@ -46,13 +46,13 @@ fi
 # desugar はローカル include を隔離 dist 内の絶対パスへ書き換えるが、
 # emit の stdout は一時 dist を trap で削除した後も単独で実行できる必要がある。
 # dist 内の include だけを再帰展開し、外部 include は gawk に任せてそのまま残す。
-declare -A EMIT_SEEN=()
+EMIT_SEEN=" "
 EMIT_INCLUDE_RE='^[[:space:]]*@include[[:space:]]+"([^"]+)"'
 
 emit_file() {
   local file="$1" line inc
-  [[ -n "${EMIT_SEEN["$file"]+seen}" ]] && return 0
-  EMIT_SEEN["$file"]=1
+  case "$EMIT_SEEN" in *" $file "*) return 0 ;; esac
+  EMIT_SEEN="$EMIT_SEEN$file "
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ $EMIT_INCLUDE_RE ]]; then
       inc="${BASH_REMATCH[1]}"
