@@ -410,6 +410,20 @@ dist="$TMP/distrerun"
 HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then ok "rerun_over_marker_ok"; else ng "rerun_over_marker_ok" "exit != 0"; fi
 
+# --- marker 未登録の compat symlink は上書きしない ---
+compat_src="$TMP/unowned-compat-src"
+dist="$TMP/unowned-compat-dist"
+mkdir -p "$compat_src/apps/a" "$dist"
+printf 'BEGIN { print "compat" }\n' > "$compat_src/apps/a/main.awk"
+compat_target="$TMP/unowned-compat-target"
+printf 'user file\n' > "$compat_target"
+ln -s "$compat_target" "$dist/main.awk"
+set +e
+err=$(cd "$compat_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/a/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && -L "$dist/main.awk" && "$(readlink "$dist/main.awk")" == "$compat_target" && ! -e "$dist/current" ]]; then ok "unowned_compat_symlink_rejected"; else ng "unowned_compat_symlink_rejected" "exit=$st, target=$(readlink "$dist/main.awk" 2>/dev/null): $err"; fi
+
 # --- 改ざんされた stable symlink は現行 generation へ戻す ---
 stale_src="$TMP/stale-stable-src"
 mkdir -p "$stale_src"
@@ -454,9 +468,10 @@ printf 'BEGIN { print "from-b" }\n' > "$multi_entry/apps/b/main.awk"
 dist="$TMP/distcs"
 ( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
 first_a="$dist/$(readlink "$dist/current")/apps/a/main.awk"
+compat_a="$(readlink "$dist/main.awk")"
 ( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/b/main.awk >/dev/null )
 entries=$(find -L "$dist/current" -type f -name main.awk | wc -l | tr -d ' ')
-if [[ "$entries" -eq 2 ]] && grep -q "from-a" "$dist/apps/a/main.awk" && grep -q "from-b" "$dist/apps/b/main.awk"; then
+if [[ "$entries" -eq 2 && "$(readlink "$dist/main.awk")" == "$compat_a" ]] && grep -q "from-a" "$dist/apps/a/main.awk" && grep -q "from-b" "$dist/apps/b/main.awk"; then
   ok "cross_source_same_basename_isolated"
 else
   ng "cross_source_same_basename_isolated" "entries=$entries"

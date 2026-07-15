@@ -281,6 +281,7 @@ case "$subcmd" in
     _pub_tmp=()
     _pub_out=()
     _pub_rel=()
+    _compat_skip=()
     # プロジェクト内ファイルへの hard link を指す絶対パス include を、closure 完了後に
     # まとめて照合するための保留キュー (staging 中は _seen が未確定のため、後続 sibling
     # を hard link 経由で見逃す。詳細は下の post-closure 検査を参照)
@@ -326,7 +327,7 @@ case "$subcmd" in
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
     _desugar_one() {
-      local rel="$1" in out out_parent tmp inc incs prior
+      local rel="$1" in out out_parent tmp inc incs prior marker_src marker_rel compat_owned
       case "$_seen" in *" $rel "*) return 0 ;; esac
       case "$rel" in
         ../*|*/../*)
@@ -384,10 +385,20 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: output path is not replaceable: $stable" >&2
         exit 1
       fi
-      if [[ -L "$compat" && ! -e "$compat" ]]; then
+      if [[ -e "$compat" || -L "$compat" ]]; then
         if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$rel" "$dist/.hawk-dist"; then
-          echo "[hawk-libs] desugar failed: dangling output symlink: $compat" >&2
-          exit 1
+          compat_owned=0
+          if [[ -f "$dist/.hawk-dist" ]]; then
+            while IFS=$'\t' read -r marker_src marker_rel; do
+              if [[ "$marker_rel" == "$rel" ]]; then compat_owned=1; break; fi
+            done < "$dist/.hawk-dist"
+          fi
+          if [[ "$compat_owned" -eq 1 ]]; then
+            _compat_skip+=("$rel")
+          else
+            echo "[hawk-libs] desugar failed: refusing to overwrite existing compatibility output: $compat" >&2
+            exit 1
+          fi
         fi
       fi
       if [[ -e "$stable" || -L "$stable" ]]; then
@@ -620,7 +631,13 @@ case "$subcmd" in
       _stable="$dist/${namespace:+$namespace/}$_rel"
       _compat="$dist/$_rel"
       _refresh_output_link "$_stable" "$runtime_ns/$_rel"
-      [[ "$_compat" == "$_stable" ]] || _refresh_output_link "$_compat" "$runtime_ns/$_rel"
+      if [[ "$_compat" != "$_stable" ]]; then
+        _refresh_compat=1
+        for _skip_rel in "${_compat_skip[@]}"; do
+          [[ "$_skip_rel" == "$_rel" ]] && { _refresh_compat=0; break; }
+        done
+        [[ "$_refresh_compat" -eq 0 ]] || _refresh_output_link "$_compat" "$runtime_ns/$_rel"
+      fi
     done
     echo "$dist/${namespace:+$namespace/}$entry_rel"
     ;;
