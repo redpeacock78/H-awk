@@ -454,7 +454,9 @@ case "$subcmd" in
 
     entry_rel="$(basename "$src")"
     _index_one "$entry_rel"
-    _index_tmp="$(mktemp "$dist/.hawk-index.XXXXXX")"
+    # dsl/index.awk は HAWK_LIB へ cd して実行するため、相対 dist をそのまま渡すと
+    # work/dist ではなくリポジトリ直下へ出力しようとして失敗する。
+    _index_tmp="$(mktemp "$dist_phys/.hawk-index.XXXXXX")"
     _scratch_arr+=("$_index_tmp")
     _index_list=""
     for _index_file in "${_index_files[@]}"; do
@@ -498,7 +500,16 @@ case "$subcmd" in
     _current_tmp="$(mktemp "$dist/.current.XXXXXX")"
     rm -f "$_current_tmp"
     ln -s "${stage_root#"$dist/"}" "$_current_tmp"
-    mv -f -h "$_current_tmp" "$dist/current"
+    # BSD mv の -h と GNU mv の -T は同じ「symlink 自体を置換」だが、片方しかない。
+    # 実行時に -h の実移動を確認し、非対応なら -T へ切り替える（Why not: rm+mv は非 atomic）。
+    if mv -f -h "$_current_tmp" "$dist/current" 2>/dev/null && [[ ! -e "$_current_tmp" && ! -L "$_current_tmp" ]]; then
+      :
+    elif mv -f -T "$_current_tmp" "$dist/current"; then
+      :
+    else
+      echo "[hawk-libs] desugar failed: no portable symlink replacement command (mv -h or mv -T)" >&2
+      exit 1
+    fi
     _root_marker_tmp="$(mktemp "$dist/.hawk-dist.XXXXXX")"
     cp "$stage_root/.hawk-dist" "$_root_marker_tmp"
     mv -f "$_root_marker_tmp" "$dist/.hawk-dist"
