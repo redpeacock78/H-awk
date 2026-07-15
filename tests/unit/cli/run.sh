@@ -100,7 +100,9 @@ rm -rf "$work"
 
 # framework 外の cwd でも framework 本体・plugin・native lib を HAWK_LIB から解決する
 work=$(mktemp -d)
-printf 'BEGIN { print "outside-cwd-ok" }\n' > "$work/app.awk"
+mkdir -p "$work/data"
+printf 'name\noutside-cwd-ok\n' > "$work/data/items.tsv"
+printf 'BEGIN { if (read_tsv("data/items.tsv", rows) == 1) print rows[1, "name"] }\n' > "$work/app.awk"
 serve_out=$(cd "$work" && HAWK_NO_LIBS=1 HAWK_NO_SERVE=1 HAWK_WORKERS=1 "$HAWK_ABS" serve app.awk 2>/dev/null)
 if [[ "$serve_out" == *"outside-cwd-ok"* ]]; then
   printf "  PASS: serve_outside_hawk_lib\n"; PASS=$((PASS+1))

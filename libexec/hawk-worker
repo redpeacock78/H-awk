@@ -23,5 +23,4 @@ fi
 eval "$("$LIBS" libs)"
 
 # shellcheck disable=SC2086
-cd "$HAWK_LIB"
-exec gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_LIB/hawk.awk" "${PLUGIN_ARGS[@]}" -f "$APP_AWK"
+exec gawk -b $LIBS_ARGS $LIBS_VARS -f <("$LIBS" runtime-awk) "${PLUGIN_ARGS[@]}" -f "$APP_AWK"

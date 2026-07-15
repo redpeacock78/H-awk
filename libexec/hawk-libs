@@ -46,6 +46,34 @@ case "$subcmd" in
     printf 'LIBS_VARS=%s\n' "$(printf '%q' "$libs_vars")"
     printf 'HAS_NET=%d\n' "$has_net"
     ;;
+  runtime-awk)
+    _runtime_seen=$'\n'
+    _runtime_include_re='^[[:space:]]*@include[[:space:]]+"([^"]+)"'
+    _runtime_namespace_re='^[[:space:]]*@namespace[[:space:]]+"([^"]+)"'
+    _emit_runtime_awk() {
+      local file="$1" namespace="$2" line inc
+      case "$_runtime_seen" in *$'\n'"$file"$'\n'*) return 0 ;; esac
+      _runtime_seen="${_runtime_seen}${file}"$'\n'
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ $_runtime_namespace_re ]]; then
+          namespace="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ $_runtime_include_re ]]; then
+          inc="${BASH_REMATCH[1]}"
+          if [[ "$inc" != /* ]]; then
+            if [[ ! -f "$HAWK_LIB/$inc" ]]; then
+              echo "[hawk-libs] runtime-awk: include not found: $inc" >&2
+              return 1
+            fi
+            _emit_runtime_awk "$HAWK_LIB/$inc" "$namespace"
+            printf '@namespace "%s"\n' "$namespace"
+            continue
+          fi
+        fi
+        printf '%s\n' "$line"
+      done < "$file"
+    }
+    _emit_runtime_awk "$HAWK_LIB/hawk.awk" awk
+    ;;
   desugar)
     src="${1:-}"
     if [[ ! -f "$src" ]]; then

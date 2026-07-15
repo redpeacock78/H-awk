@@ -101,9 +101,13 @@ if [[ "$EFFECTIVE_WORKERS" -gt 1 && "$HAS_NET" -eq 1 ]]; then
   exit 0
 fi
 
+RUNTIME_AWK="$(mktemp "${TMPDIR:-/tmp}/hawk-runtime.XXXXXX")"
+trap 'rm -f "$RUNTIME_AWK"' EXIT
+"$LIBS" runtime-awk > "$RUNTIME_AWK"
+
 for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do
   # shellcheck disable=SC2086
-  ( cd "$HAWK_LIB" && LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_LIB/hawk.awk" "${_plugin_args[@]}" -f "$APP_AWK" ) &
+  LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f "$RUNTIME_AWK" "${_plugin_args[@]}" -f "$APP_AWK" &
   WORKER_PIDS+=($!)
 done
 
@@ -125,7 +129,7 @@ while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
         echo "[hawk] worker $pid exited $status, restart in 1s" >&2
         sleep 1
         # shellcheck disable=SC2086
-        ( cd "$HAWK_LIB" && LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_LIB/hawk.awk" "${_plugin_args[@]}" -f "$APP_AWK" ) &
+        LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f "$RUNTIME_AWK" "${_plugin_args[@]}" -f "$APP_AWK" &
         new_pids+=($!)
       fi
     fi
