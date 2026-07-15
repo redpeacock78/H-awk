@@ -14,12 +14,12 @@ HAWK_MAX_BODY_SIZE=1024 \
 SERVER=$!
 trap 'kill -TERM "$SERVER" 2>/dev/null || true; wait "$SERVER" 2>/dev/null || true' EXIT INT TERM
 
-# 起動待ち (最大 3 秒)
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -s -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
-    break
-  fi
-  sleep 0.3
+# 起動待ち (最大 5 秒)
+attempt=0
+until curl -s -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; do
+  attempt=$((attempt + 1))
+  [ "$attempt" -ge 50 ] && break
+  sleep 0.1
 done
 
 PASS=0

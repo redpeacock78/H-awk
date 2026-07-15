@@ -22,5 +22,14 @@ fi
 
 eval "$("$LIBS" libs)"
 
+if [[ "${HAWK_SUPERVISED:-}" == 1 ]]; then
+  if [[ ! -f "${HAWK_RUNTIME_AWK:-}" ]]; then
+    echo "[hawk-worker] supervised runtime bundle not found: ${HAWK_RUNTIME_AWK:-<unset>}" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC2086
+  exec gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_RUNTIME_AWK" "${PLUGIN_ARGS[@]}" -f "$APP_AWK"
+fi
+
 # shellcheck disable=SC2086
 exec gawk -b $LIBS_ARGS $LIBS_VARS -f <("$LIBS" runtime-awk) "${PLUGIN_ARGS[@]}" -f "$APP_AWK"

@@ -42,6 +42,16 @@ _setup_run_dir() {
 
 _setup_run_dir
 
+HAWK_RUNTIME_AWK="$HAWK_RUN_DIR/runtime.awk"
+_runtime_tmp="$(mktemp "$HAWK_RUN_DIR/.runtime.XXXXXX")"
+if ! "$LIBS" runtime-awk > "$_runtime_tmp"; then
+  rm -f "$_runtime_tmp"
+  exit 1
+fi
+chmod 0600 "$_runtime_tmp"
+mv -f "$_runtime_tmp" "$HAWK_RUNTIME_AWK"
+export HAWK_RUNTIME_AWK
+
 eval "$("$LIBS" libs)"
 mapfile -t _plugin_paths < <("$LIBS" plugins)
 _plugin_args=()
