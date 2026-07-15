@@ -27,8 +27,14 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+# emit は desugar 結果の出力のみが目的。永続 dist に publish した後で strict 検証が
+# 走ると、検証失敗でも成果物が更新済みになり、稼働中の hawk-serve が失敗した emit の
+# 出力を読んでしまう。呼び出し元の HAWK_DIST も使わず隔離した一時 dist に出す
+HAWK_DIST="$(mktemp -d /tmp/hawk-emit.XXXXXX)"
+export HAWK_DIST
+trap 'rm -rf "$HAWK_DIST"' EXIT
+
 APP_AWK="$("$LIBS" desugar "$APP")"
-trap "rm -f '$APP_AWK'" EXIT
 
 if [[ "$STRICT" -eq 1 ]]; then
   if ! gawk --sandbox -f "${HAWK_LIB}/dsl/adt.awk" -f "${HAWK_LIB}/dsl/type.awk" -f "${HAWK_LIB}/dsl/strict_stubs.awk" -f "$APP_AWK" < /dev/null >/dev/null 2>&1; then
@@ -37,4 +43,26 @@ if [[ "$STRICT" -eq 1 ]]; then
   fi
 fi
 
-cat "$APP_AWK"
+# desugar はローカル include を隔離 dist 内の絶対パスへ書き換えるが、
+# emit の stdout は一時 dist を trap で削除した後も単独で実行できる必要がある。
+# dist 内の include だけを再帰展開し、外部 include は gawk に任せてそのまま残す。
+EMIT_SEEN=" "
+EMIT_INCLUDE_RE='^[[:space:]]*@include[[:space:]]+"([^"]+)"'
+
+emit_file() {
+  local file="$1" line inc
+  case "$EMIT_SEEN" in *" $file "*) return 0 ;; esac
+  EMIT_SEEN="$EMIT_SEEN$file "
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ $EMIT_INCLUDE_RE ]]; then
+      inc="${BASH_REMATCH[1]}"
+      if [[ "$inc" == "$HAWK_DIST"/* && -f "$inc" ]]; then
+        emit_file "$inc"
+        continue
+      fi
+    fi
+    printf '%s\n' "$line"
+  done < "$file"
+}
+
+emit_file "$APP_AWK"

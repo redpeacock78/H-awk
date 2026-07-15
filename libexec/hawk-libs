@@ -52,13 +52,319 @@ case "$subcmd" in
       echo "[hawk-libs] desugar: file not found: $src" >&2
       exit 1
     fi
-    tmp=$(mktemp /tmp/hawk.XXXXXX)
-    if ! gawk -f "${HAWK_LIB}/dsl/desugar.awk" "$src" > "$tmp"; then
-      echo "[hawk-libs] desugar failed: $src" >&2
-      rm -f "$tmp"
+    dist="${HAWK_DIST:-dist}"
+    mkdir -p "$dist"
+    # marker の異常 (symlink / 非 regular file / 書込不可) は publish 後の
+    # 作成・更新で失敗し「exit 1 なのに成果物は更新済み」になるため、
+    # staging 前に検証する。-f は symlink を辿るので -L を先に見る
+    # (symlink marker は上書き保護の偽装と外部ターゲットの truncate を許すため拒否)
+    if [[ -L "$dist/.hawk-dist" ]]; then
+      echo "[hawk-libs] desugar failed: $dist/.hawk-dist is a symlink" >&2
       exit 1
     fi
-    echo "$tmp"
+    if [[ -e "$dist/.hawk-dist" ]]; then
+      if [[ ! -f "$dist/.hawk-dist" ]]; then
+        echo "[hawk-libs] desugar failed: $dist/.hawk-dist exists but is not a regular file" >&2
+        exit 1
+      fi
+      if [[ ! -w "$dist/.hawk-dist" ]]; then
+        echo "[hawk-libs] desugar failed: $dist/.hawk-dist is not writable" >&2
+        exit 1
+      fi
+      # 書込可だが読込不可だと、末尾の marker 更新時の cat が
+      # パイプライン内で失敗しても sort 側の exit 0 に隠れ、
+      # staging 済みの成果物はそのまま marker だけが空/不完全になる。
+      # publish 前に読めることを確認しておく
+      if [[ ! -r "$dist/.hawk-dist" ]]; then
+        echo "[hawk-libs] desugar failed: $dist/.hawk-dist is not readable" >&2
+        exit 1
+      fi
+    fi
+    src_root="$(cd "$(dirname "$src")" && pwd -P)"
+    dist_phys="$(cd "$dist" && pwd -P)"
+    _seen=" "
+    # scratch と publish キューは配列で持つ
+    # (空白入りパスが word splitting で別引数に化けるのを防ぐ)
+    _scratch_arr=()
+    _cleanup_scratches() {
+      local f
+      for f in "${_scratch_arr[@]}"; do rm -f "$f"; done
+    }
+    trap _cleanup_scratches EXIT
+    _pub_tmp=()
+    _pub_out=()
+    _pub_rel=()
+    # プロジェクト内ファイルへの hard link を指す絶対パス include を、closure 完了後に
+    # まとめて照合するための保留キュー (staging 中は _seen が未確定のため、後続 sibling
+    # を hard link 経由で見逃す。詳細は下の post-closure 検査を参照)
+    _abs_ext=()
+
+    # rel: src_root からの相対パス。desugar して dist/rel に出力し、
+    # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
+    _desugar_one() {
+      local rel="$1" in out out_parent out_rel probe part tmp inc incs prior
+      case "$_seen" in *" $rel "*) return 0 ;; esac
+      case "$rel" in
+        ../*|*/../*)
+          echo "[hawk-libs] desugar failed: include escapes project root via '..': $rel" >&2
+          exit 1
+          ;;
+        *" "*)
+          # _seen は空白区切りなので空白入りパスは訪問済み判定を誤り、
+          # dist に欠けたファイルを黙って作る。非サポートとして明示的に失敗させる
+          echo "[hawk-libs] desugar failed: include path contains spaces (unsupported): $rel" >&2
+          exit 1
+          ;;
+        .hawk-dist|.hawk-dist/*)
+          # dist ルートの marker と同じパスに publish されると、
+          # publish 後の marker 更新が成果物を書き潰すため予約名として拒否
+          echo "[hawk-libs] desugar failed: '.hawk-dist' is reserved for the dist marker: $rel" >&2
+          exit 1
+          ;;
+      esac
+      # 同一実体 (symlink/hardlink) を別名で include すると、mirror 後は
+      # 別 inode になり gawk の重複 include 排除が効かず定義が二重実行される。
+      # 別名での include は拒否する。
+      # _seen は空白区切りの未クォート展開なので、include 名に glob 文字
+      # (例: "x*.awk") が含まれるとカレントディレクトリに対してパス名展開され、
+      # 無関係な同名ファイルを誤って alias 扱いしてしまう。glob 文字はファイル名として
+      # 正当なため、比較対象は文字列のまま扱いたい。noglob で展開だけを止める
+      set -f
+      for prior in $_seen; do
+        if [[ "$src_root/$rel" -ef "$src_root/$prior" ]]; then
+          set +f
+          echo "[hawk-libs] desugar failed: include aliases already-included file: $rel (same file as $prior)" >&2
+          exit 1
+        fi
+      done
+      set +f
+      _seen="$_seen$rel "
+      in="$src_root/$rel"
+      out="$dist/$rel"
+      # -ef は device/inode 比較。symlink 経由 (HAWK_DIST・source どちら側でも)
+      # の source エイリアスを文字列比較より確実に検出する
+      if [[ -e "$out" && "$in" -ef "$out" ]]; then
+        echo "[hawk-libs] desugar failed: output path aliases source (HAWK_DIST resolves onto source tree): $in" >&2
+        exit 1
+      fi
+      # 出力先がディレクトリだと mv がその中に移動してしまい exit 0 のまま壊れる
+      if [[ -d "$out" ]]; then
+        echo "[hawk-libs] desugar failed: output path is a directory: $out" >&2
+        exit 1
+      fi
+      # 過去の desugar が publish した rel パスであることを .hawk-dist マーカーで確認する。
+      # マーカーが無い、または rel が記録されていない既存ファイルは source とみなし
+      # 上書きしない (HAWK_DIST が source 木の中を指すと -ef では検出できない別ファイルを
+      # 潰すため。marker を空ファイルにするだけだと最初の成功後はディレクトリ全体を
+      # 信頼してしまい、無関係な source ファイルまで上書き対象になる)
+      # -e はダングリング symlink で false になるため、-L も見ないと
+      # 出力先に残った古い source symlink が保護をすり抜けて上書きされる
+      if [[ -e "$out" || -L "$out" ]]; then
+        # marker は src_root と rel のペアで記録する。rel だけで照合すると、別ディレクトリの
+        # 別 source が同じ basename の rel (例: 複数 app の main.awk) を偶然共有したとき、
+        # 後勝ちの desugar が前の source の成果物を無警告で上書きしてしまう。
+        # dist パス自体の一意化は dist レイアウト規約の再設計 (#119) 側の課題であり、
+        # ここでは異なる source からの同名 rel 上書きを拒否するだけに留める
+        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$rel" "$dist/.hawk-dist"; then
+          echo "[hawk-libs] desugar failed: refusing to overwrite existing file in non-dist directory: $out (remove it or the whole directory if it is a stale dist)" >&2
+          exit 1
+        fi
+      fi
+      # mkdir -p は既存の symlink を辿るため、先に dist 配下の既存コンポーネントを
+      # 検査する。例えば dist/app -> 外部 の状態で app/sub を作ると、dist 外に
+      # sub/ が作られてから下の実パス検査に到達してしまう。
+      out_parent="$(dirname "$out")"
+      probe="$dist"
+      if [[ "$out_parent" == "$dist"/* ]]; then
+        out_rel="${out_parent#"$dist"/}"
+        while [[ -n "$out_rel" ]]; do
+          if [[ "$out_rel" == */* ]]; then
+            part="${out_rel%%/*}"
+            out_rel="${out_rel#*/}"
+          else
+            part="$out_rel"
+            out_rel=
+          fi
+          [[ -n "$part" ]] || continue
+          probe="$probe/$part"
+          if [[ -L "$probe" ]]; then
+            echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $probe" >&2
+            exit 1
+          fi
+          [[ -e "$probe" ]] || break
+        done
+      fi
+      mkdir -p "$out_parent"
+      # dist 配下のディレクトリが外部への symlink に差し替わっていると、mkdir -p はそれを
+      # 素通りし、後続の mv は symlink 先 (dist の外) に publish してしまう。
+      # 出力先の親を実パスまで解決して dist の実パス配下であることを都度確認する
+      out_parent_phys="$(cd "$(dirname "$out")" && pwd -P)"
+      if [[ "$out_parent_phys/" != "$dist_phys/"* ]]; then
+        echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $out_parent_phys" >&2
+        exit 1
+      fi
+      # 稼働中の hawk-serve が dist の成果物を再ロードしうるため、
+      # scratch (mktemp) 上で desugar と書き換えを済ませてから
+      # mv でアトミックに配置する。scratch を mktemp にすることで
+      # 固定名 ($out.tmp) が実在する成果物と衝突する問題も避ける。
+      tmp="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
+      # 途中失敗時の scratch 残留を防ぐ (mv 済みの名前への rm -f は no-op)
+      _scratch_arr+=("$tmp")
+      # dsl/desugar.awk 自身が @include "dsl/util.awk" 等の相対パスを持ち、
+      # gawk は '/' を含む @include をカレントディレクトリ相対で解決するため、
+      # HAWK_LIB (リポジトリルート) に cd してから実行する。
+      if ! ( cd "$HAWK_LIB" && gawk -f dsl/desugar.awk "$in" ) > "$tmp"; then
+        rm -f "$tmp"
+        echo "[hawk-libs] desugar failed: $in" >&2
+        exit 1
+      fi
+      # @include パスの ./ を正規化する。生テキスト比較の
+      # entry 循環検査・_seen 重複排除・書き換えの対応表が
+      # "./a.awk" と "a.awk" を同一視できるようにするため。
+      # 正規化は src_root 相対で実在するファイルに限る
+      # ("./x.awk" はローカル解決のみだが "x.awk" は AWKPATH に落ちるため、
+      # 実在しないパスを書き換えると挙動が変わってしまう)
+      tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
+      _scratch_arr+=("$tmp2")
+      if ! gawk -v root="$src_root" '
+        function exists(f,   t, r) {
+          r = (getline t < f)
+          if (r >= 0) { close(f); return 1 }
+          return 0
+        }
+        {
+          if (match($0, /^([[:space:]]*@include[[:space:]]+")([^"]+)(".*)$/, m)) {
+            p = m[2]
+            sub(/^(\.\/)+/, "", p)
+            while (gsub(/\/\.\//, "/", p)) {}
+            if (p != m[2] && !exists(root "/" p)) p = m[2]
+            print m[1] p m[3]
+          } else print
+        }
+      ' "$tmp" > "$tmp2"; then
+        rm -f "$tmp" "$tmp2"
+        echo "[hawk-libs] desugar failed: include normalize failed: $in" >&2
+        exit 1
+      fi
+      mv "$tmp2" "$tmp"
+      incs=""
+      while IFS= read -r inc; do
+        # 絶対パス include がプロジェクト内のファイルを指すと、mirror 後も
+        # 原本 (未 desugar) を直接ロードして定義が二重実行される。
+        # プロジェクト内は相対パスに限定し、外部の絶対パス (共有ライブラリ等) は
+        # 従来どおり素通りで残す
+        if [[ "$inc" == /* ]]; then
+          if [[ -f "$inc" ]]; then
+            # ディレクトリだけでなくファイル自体も symlink 経由でプロジェクト内を
+            # 指せるため (例: /tmp/outside/alias.awk -> $src_root/x.awk)、
+            # symlink チェーンをファイル自体まで辿ってから判定する
+            _abs_inc_resolved="$inc"
+            _abs_inc_hops=0
+            while [[ -L "$_abs_inc_resolved" ]]; do
+              _abs_inc_hops=$((_abs_inc_hops + 1))
+              if [[ $_abs_inc_hops -gt 40 ]]; then
+                rm -f "$tmp"
+                echo "[hawk-libs] desugar failed: symlink loop resolving absolute include: $inc" >&2
+                exit 1
+              fi
+              _abs_inc_target="$(readlink "$_abs_inc_resolved")"
+              if [[ "$_abs_inc_target" == /* ]]; then
+                _abs_inc_resolved="$_abs_inc_target"
+              else
+                _abs_inc_resolved="$(dirname "$_abs_inc_resolved")/$_abs_inc_target"
+              fi
+            done
+            if [[ "$(cd "$(dirname "$_abs_inc_resolved")" && pwd -P)/" == "$src_root/"* ]]; then
+              rm -f "$tmp"
+              echo "[hawk-libs] desugar failed: absolute include points inside project root (use a relative path): $inc" >&2
+              exit 1
+            fi
+            # hard link は readlink で辿れずパス名も外部のままなので、パス比較では検出できない。
+            # ただし staging 中の _seen には後続 sibling がまだ載っておらず、この時点で
+            # 照合すると hard link 元がまだ未訪問の後続 sibling を見逃す。closure 全体が
+            # 確定してからまとめて照合するため、ここではキューに積むだけに留める
+            _abs_ext+=("$inc")
+          fi
+          continue
+        fi
+        # entry への back-edge は gawk が実行時に
+        # "cannot include `X' and use it as a program file" で fatal になるため
+        # desugar 時点で拒否する (entry を経由しない循環は gawk が重複 include を
+        # スキップするので許容)
+        # -ef で symlink/hardlink 経由の entry エイリアスも検出する
+        if [[ "$inc" == "$entry_rel" || "$src_root/$inc" -ef "$src_root/$entry_rel" ]]; then
+          rm -f "$tmp"
+          echo "[hawk-libs] desugar failed: include cycle back to entry: $rel includes $inc" >&2
+          exit 1
+        fi
+        [[ -f "$src_root/$inc" ]] && incs="$incs$inc"$'\n'
+      done < <(gawk 'match($0, /^[[:space:]]*@include[[:space:]]+"([^"]+)"/, m) { print m[1] }' "$tmp") || true
+      if [[ -n "$incs" ]]; then
+        # gawk は '/' を含む @include パスを AWKPATH 探索しないため、
+        # dist 接頭の実パスに書き換える
+        tmp2="$(mktemp "$(dirname "$out")/.hawk-desugar.XXXXXX")"
+        _scratch_arr+=("$tmp2")
+        if ! gawk -v dist="$dist" -v list="$incs" '
+          BEGIN { n = split(list, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") L[a[i]] = 1 }
+          {
+            if (match($0, /^([[:space:]]*@include[[:space:]]+")([^"]+)(".*)$/, m) && (m[2] in L))
+              print m[1] dist "/" m[2] m[3]
+            else
+              print
+          }
+        ' "$tmp" > "$tmp2"; then
+          rm -f "$tmp" "$tmp2"
+          echo "[hawk-libs] desugar failed: include rewrite failed: $in" >&2
+          exit 1
+        fi
+        mv "$tmp2" "$tmp"
+      fi
+      # 子を先に desugar し、closure 全体が成功するまで publish しない。
+      # 途中失敗時に新旧の成果物が dist に混在するのを防ぐ
+      if [[ -n "$incs" ]]; then
+        while IFS= read -r inc; do
+          [[ -n "$inc" ]] && _desugar_one "$inc"
+        done <<< "$incs"
+      fi
+      _pub_tmp+=("$tmp")
+      _pub_out+=("$out")
+      _pub_rel+=("$rel")
+      return 0
+    }
+
+    entry_rel="$(basename "$src")"
+    _desugar_one "$entry_rel"
+    # 絶対パス include の hard link 検査は closure 全体の _seen が確定してから行う
+    # (staging 中に照合すると未訪問の後続 sibling を見逃す)。publish の前に置き、
+    # 検出時は何も publish しない
+    set -f
+    for _abs in "${_abs_ext[@]}"; do
+      for prior in $_seen; do
+        if [[ "$_abs" -ef "$src_root/$prior" ]]; then
+          set +f
+          echo "[hawk-libs] desugar failed: absolute include is the same file as project file: $_abs (same file as $prior)" >&2
+          exit 1
+        fi
+      done
+    done
+    set +f
+    # closure 全体が成功してから一括 publish (深い子から、entry が最後)
+    for ((i = 0; i < ${#_pub_tmp[@]}; i++)); do
+      chmod 644 "${_pub_tmp[$i]}"
+      mv "${_pub_tmp[$i]}" "${_pub_out[$i]}"
+    done
+    # marker は「今回 publish した rel」を既存の記録に追記して保持する。
+    # 空ファイルのままだと最初の成功後にディレクトリ全体を信頼してしまうため、
+    # rel を1行1件記録し、次回以降の上書き可否を rel 単位で判定できるようにする。
+    # 更新も稼働中の hawk-serve と競合しないよう mktemp + mv でアトミックに行う
+    _marker_tmp="$(mktemp "$dist/.hawk-dist.XXXXXX")"
+    _scratch_arr+=("$_marker_tmp")
+    {
+      [[ -f "$dist/.hawk-dist" ]] && cat "$dist/.hawk-dist"
+      for _rel in "${_pub_rel[@]}"; do printf '%s\t%s\n' "$src_root" "$_rel"; done
+    } | sort -u > "$_marker_tmp"
+    mv "$_marker_tmp" "$dist/.hawk-dist"
+    echo "$dist/$entry_rel"
     ;;
   *)
     echo "[hawk-libs] unknown subcommand: $subcmd" >&2

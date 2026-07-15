@@ -60,5 +60,42 @@ else
   FAIL=$((FAIL+1))
 fi
 
+# emit は隔離 dist 内の複数ファイル include を stdout だけで実行できる形に展開する
+emit_multi=$(mktemp -d)
+mkdir -p "$emit_multi/app"
+printf '@include "app/part.awk"\n@include "app/part.awk"\nBEGIN { print app_message() }\n' > "$emit_multi/main.awk"
+printf 'function app_message() { return "multifile-ok" }\n' > "$emit_multi/app/part.awk"
+emit_multi_out=$(HAWK_NO_LIBS=1 "$HAWK" emit "$emit_multi/main.awk" 2>/dev/null)
+printf '%s\n' "$emit_multi_out" > "$emit_multi/emitted.awk"
+if ! printf '%s\n' "$emit_multi_out" | grep -q '@include'; then
+  run_out=$(gawk -f "$emit_multi/emitted.awk" </dev/null)
+  if [[ "$run_out" == "multifile-ok" ]]; then
+    printf "  PASS: emit_multifile_self_contained\n"; PASS=$((PASS+1))
+  else
+    printf "  FAIL: emit_multifile_self_contained (output=%s)\n" "$run_out"; FAIL=$((FAIL+1))
+  fi
+else
+  printf "  FAIL: emit_multifile_self_contained (temporary include remained)\n"; FAIL=$((FAIL+1))
+fi
+rm -rf "$emit_multi"
+
+# check/emit は隔離した一時 dist を使い、cwd の永続 dist を作らない・更新しない
+HAWK_ABS="$(pwd)/bin/hawk"
+VALID_ABS="$(pwd)/$VALID"
+work=$(mktemp -d)
+( cd "$work" && HAWK_NO_LIBS=1 "$HAWK_ABS" check --strict "$VALID_ABS" >/dev/null 2>&1 )
+if [[ ! -e "$work/dist" ]]; then
+  printf "  PASS: check_leaves_no_cwd_dist\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: check_leaves_no_cwd_dist (dist/ created)\n"; FAIL=$((FAIL+1))
+fi
+( cd "$work" && HAWK_NO_LIBS=1 "$HAWK_ABS" emit "$VALID_ABS" >/dev/null 2>&1 )
+if [[ ! -e "$work/dist" ]]; then
+  printf "  PASS: emit_leaves_no_cwd_dist\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: emit_leaves_no_cwd_dist (dist/ created)\n"; FAIL=$((FAIL+1))
+fi
+rm -rf "$work"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

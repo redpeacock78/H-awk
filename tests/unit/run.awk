@@ -151,6 +151,10 @@ BEGIN {
   test_router_query_405_includes_accept_query()
   test_router_query_options()
 
+  test_router_catchall_match()
+  test_router_catchall_with_named_param()
+  test_router_catchall_nontail_is_literal()
+
   test_ctx_load_copies_req()
   test_ctx_save_copies_res_back()
   test_ctx_query_helper()

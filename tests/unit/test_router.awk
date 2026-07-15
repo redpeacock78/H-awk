@@ -170,3 +170,58 @@ function test_router_query_options(   req, res, ok, types) {
   assert_true(index(res["header:allow"], "OPTIONS") > 0, "query: OPTIONS Allow OPTIONS")
   assert_eq(res["header:accept-query"], "application/json", "query: OPTIONS Accept-Query")
 }
+
+function _t_catchall() { ctx::text("rest=" result_val(ctx::param("path"))) }
+
+function test_router_catchall_match(   req, res, ok) {
+  _router_reset()
+  GET("/docs/*path", "_t_catchall")
+
+  delete req; req["method"] = "GET"; req["path"] = "/docs/guide/routing"
+  delete res
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 1, "router: catchall matched")
+  assert_eq(res["body"], "rest=guide/routing", "router: catchall multi-segment param")
+
+  delete req; req["method"] = "GET"; req["path"] = "/docs/a"
+  delete res
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 1, "router: catchall single segment")
+  assert_eq(res["body"], "rest=a", "router: catchall single segment param")
+
+  # 残りパスが空 (1 文字未満) のときはマッチしない
+  delete req; req["method"] = "GET"; req["path"] = "/docs/"
+  delete res
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 0, "router: catchall requires at least 1 char")
+}
+
+function _t_catchall_mixed() { ctx::text("id=" result_val(ctx::param("id")) " rest=" result_val(ctx::param("rest"))) }
+
+function test_router_catchall_with_named_param(   req, res, ok) {
+  _router_reset()
+  GET("/users/:id/files/*rest", "_t_catchall_mixed")
+
+  delete req; req["method"] = "GET"; req["path"] = "/users/7/files/a/b.txt"
+  delete res
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 1, "router: catchall+named matched")
+  assert_eq(res["body"], "id=7 rest=a/b.txt", "router: both params extracted")
+}
+
+function _t_catchall_lit() { ctx::text("literal") }
+
+function test_router_catchall_nontail_is_literal(   req, res, ok) {
+  _router_reset()
+  GET("/a/*b/c", "_t_catchall_lit")
+
+  delete req; req["method"] = "GET"; req["path"] = "/a/*b/c"
+  delete res
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 1, "router: non-tail *seg matches literally")
+
+  delete req; req["method"] = "GET"; req["path"] = "/a/x/c"
+  delete res
+  ok = router_dispatch(req, res)
+  assert_eq(ok, 0, "router: non-tail *seg is not a wildcard")
+}

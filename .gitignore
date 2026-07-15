@@ -29,3 +29,5 @@ libtest_gawk_import.a
 .code-review-graph/
 
 docs/superpowers/
+
+dist/
