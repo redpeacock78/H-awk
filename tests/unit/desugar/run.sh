@@ -423,6 +423,13 @@ ln -s "$stale_target" "$dist/main.awk"
 ( cd "$stale_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar main.awk >/dev/null )
 if [[ -L "$dist/main.awk" && "$(readlink "$dist/main.awk")" == "$dist/current/main.awk" ]]; then ok "stale_stable_symlink_refreshed"; else ng "stale_stable_symlink_refreshed" "target=$(readlink "$dist/main.awk" 2>/dev/null)"; fi
 
+stale_dir="$TMP/stale-directory-target"
+mkdir -p "$stale_dir"
+rm "$dist/main.awk"
+ln -s "$stale_dir" "$dist/main.awk"
+( cd "$stale_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar main.awk >/dev/null )
+if [[ -L "$dist/main.awk" && "$(readlink "$dist/main.awk")" == "$dist/current/main.awk" ]]; then ok "stale_directory_symlink_refreshed"; else ng "stale_directory_symlink_refreshed" "target=$(readlink "$dist/main.awk" 2>/dev/null)"; fi
+
 # --- record と alias が include 間で同名なら index 時点で拒否する ---
 type_collision="$TMP/type-collision"
 mkdir -p "$type_collision"

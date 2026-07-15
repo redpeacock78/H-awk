@@ -81,6 +81,7 @@ rm -rf "$emit_multi"
 
 # check/emit は隔離した一時 dist を使い、cwd の永続 dist を作らない・更新しない
 HAWK_ABS="$(pwd)/bin/hawk"
+HAWK_ROOT="$(pwd)"
 VALID_ABS="$(pwd)/$VALID"
 work=$(mktemp -d)
 ( cd "$work" && HAWK_NO_LIBS=1 "$HAWK_ABS" check --strict "$VALID_ABS" >/dev/null 2>&1 )
@@ -94,6 +95,42 @@ if [[ ! -e "$work/dist" ]]; then
   printf "  PASS: emit_leaves_no_cwd_dist\n"; PASS=$((PASS+1))
 else
   printf "  FAIL: emit_leaves_no_cwd_dist (dist/ created)\n"; FAIL=$((FAIL+1))
+fi
+rm -rf "$work"
+
+# framework 外の cwd でも framework 本体・plugin・native lib を HAWK_LIB から解決する
+work=$(mktemp -d)
+printf 'BEGIN { print "outside-cwd-ok" }\n' > "$work/app.awk"
+serve_out=$(cd "$work" && HAWK_NO_LIBS=1 HAWK_NO_SERVE=1 HAWK_WORKERS=1 "$HAWK_ABS" serve app.awk 2>/dev/null)
+if [[ "$serve_out" == *"outside-cwd-ok"* ]]; then
+  printf "  PASS: serve_outside_hawk_lib\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: serve_outside_hawk_lib (output=%s)\n" "$serve_out"; FAIL=$((FAIL+1))
+fi
+worker_out=$(cd "$work" && HAWK_LIB="$HAWK_ROOT" HAWK_NO_LIBS=1 HAWK_NO_SERVE=1 "$HAWK_ROOT/libexec/hawk-worker" "$work/app.awk" 2>/dev/null)
+if [[ "$worker_out" == *"outside-cwd-ok"* ]]; then
+  printf "  PASS: worker_outside_hawk_lib\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: worker_outside_hawk_lib (output=%s)\n" "$worker_out"; FAIL=$((FAIL+1))
+fi
+
+framework="$work/framework"
+mkdir -p "$framework/plugins/demo" "$framework/libs/net/zig-out/lib"
+printf '# manifest\n' > "$framework/plugins/demo/manifest.awk"
+printf '# plugin\n' > "$framework/plugins/demo/demo.awk"
+case "$(uname -s)" in Darwin) so_ext=dylib ;; *) so_ext=so ;; esac
+touch "$framework/libs/net/zig-out/lib/libhawk_net.$so_ext"
+plugins_out=$(cd "$work" && HAWK_LIB="$framework" "$HAWK_ROOT/libexec/hawk-libs" plugins)
+if [[ "$plugins_out" == *"$framework/plugins/demo/manifest.awk"* && "$plugins_out" == *"$framework/plugins/demo/demo.awk"* ]]; then
+  printf "  PASS: plugins_outside_hawk_lib\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: plugins_outside_hawk_lib (output=%s)\n" "$plugins_out"; FAIL=$((FAIL+1))
+fi
+libs_out=$(cd "$work" && HAWK_LIB="$framework" "$HAWK_ROOT/libexec/hawk-libs" libs)
+if [[ "$libs_out" == *"$framework/libs/net/zig-out/lib/libhawk_net.$so_ext"* && "$libs_out" == *"HAS_NET=1"* ]]; then
+  printf "  PASS: libs_outside_hawk_lib\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: libs_outside_hawk_lib (output=%s)\n" "$libs_out"; FAIL=$((FAIL+1))
 fi
 rm -rf "$work"
 

@@ -9,6 +9,7 @@ LIBS="${HAWK_LIBEXEC}/hawk-libs"
 APP_AWK="${1:?app artifact path required}"
 shift
 PLUGIN_ARGS=("$@")
+[[ "$APP_AWK" == /* ]] || APP_AWK="$(pwd)/$APP_AWK"
 
 if [[ -n "${HAWK_RUN_DIR:-}" && -n "${HAWK_PROC_ID:-}" ]]; then
   safe_pid="$BASHPID"
@@ -22,4 +23,5 @@ fi
 eval "$("$LIBS" libs)"
 
 # shellcheck disable=SC2086
+cd "$HAWK_LIB"
 exec gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_LIB/hawk.awk" "${PLUGIN_ARGS[@]}" -f "$APP_AWK"

@@ -81,6 +81,7 @@ shutdown() {
 trap shutdown INT TERM
 
 APP_AWK="$("$LIBS" desugar "$APP")"
+[[ "$APP_AWK" == /* ]] || APP_AWK="$(pwd)/$APP_AWK"
 
 # --workers N かつ supervisor 利用可能な場合は hawk-supervise に委譲する
 if [[ "$EFFECTIVE_WORKERS" -gt 1 && "$HAS_NET" -eq 1 ]]; then
@@ -102,7 +103,7 @@ fi
 
 for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do
   # shellcheck disable=SC2086
-  LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk "${_plugin_args[@]}" -f "$APP_AWK" &
+  ( cd "$HAWK_LIB" && LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_LIB/hawk.awk" "${_plugin_args[@]}" -f "$APP_AWK" ) &
   WORKER_PIDS+=($!)
 done
 
@@ -124,7 +125,7 @@ while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
         echo "[hawk] worker $pid exited $status, restart in 1s" >&2
         sleep 1
         # shellcheck disable=SC2086
-        LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk "${_plugin_args[@]}" -f "$APP_AWK" &
+        ( cd "$HAWK_LIB" && LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_LIB/hawk.awk" "${_plugin_args[@]}" -f "$APP_AWK" ) &
         new_pids+=($!)
       fi
     fi
