@@ -262,6 +262,17 @@ st=$?
 set -e
 if [[ "$st" -eq 1 && "$err" == *"reserved for the dist marker"* && ! -e "$dist/main.awk" && ! -e "$dist/.hawk-dist" ]]; then ok "marker_namespace_include_rejected"; else ng "marker_namespace_include_rejected" "exit=$st: $err"; fi
 
+reserved_ns="$TMP/reserved-namespace"
+mkdir -p "$reserved_ns/current"
+printf '@include "current/x.awk"\nBEGIN { print "reserved-namespace" }\n' > "$reserved_ns/main.awk"
+printf 'function reserved_x() { return 1 }\n' > "$reserved_ns/current/x.awk"
+dist="$TMP/dist-reserved-namespace"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$reserved_ns/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"reserved output namespace: current/x.awk"* && ! -e "$dist/current" ]]; then ok "reserved_namespace_include_rejected"; else ng "reserved_namespace_include_rejected" "exit=$st: $err"; fi
+
 reserved_entry="$TMP/reserved-entry"
 mkdir -p "$reserved_entry/.hawk-dist"
 printf 'BEGIN { print "reserved-entry" }\n' > "$reserved_entry/.hawk-dist/main.awk"

@@ -317,6 +317,10 @@ case "$subcmd" in
           echo "[hawk-libs] desugar failed: '.hawk-dist' is reserved for the dist marker: $rel" >&2
           exit 1
           ;;
+        current|current/*|.hawk-generations|.hawk-generations/*)
+          echo "[hawk-libs] desugar failed: reserved output namespace: $rel" >&2
+          exit 1
+          ;;
       esac
       # 同一実体 (symlink/hardlink) を別名で include すると、mirror 後は
       # 別 inode になり gawk の重複 include 排除が効かず定義が二重実行される。
