@@ -63,7 +63,7 @@ function v2_strip_str_comment(line,    i, ch, out, instr) {
 }
 
 # DSL 構文を含む行か判定する述語
-# type NAME = ... 宣言をファイル全体から事前収集し、型注釈検出（v2_is_dsl の
+# type NAME = ... 宣言を共有 index とファイル全体から事前収集し、型注釈検出（v2_is_dsl の
 # `: TYPE` 判定）に使う代替パターンを組み立てる（CE）。組込み型集合に無い
 # ユーザー定義エイリアスだけが注釈に使われている関数（`type Status = Int|Str`
 # + `function f(x: Status) {...}`）は、この事前収集なしでは検出できず素の awk
@@ -72,8 +72,11 @@ function v2_strip_str_comment(line,    i, ch, out, instr) {
 # 誤検出リスク: エイリアス名が偶然コメント・文字列中の識別子と一致するケースは
 # 元々の固定型リストと同じ理由で許容する（v2_strip_str_comment 済みの行に対して
 # のみ判定するため文字列内は対象外）。
-function v2_collect_type_aliases(nlines,    i, s, m, names, n) {
+function v2_collect_type_aliases(nlines,    i, s, m, names, n, k) {
   names = ""; n = 0
+  for (k in V2_SHARED_ALIAS) {
+    if (!(k in V2_DSL_ALIAS)) { V2_DSL_ALIAS[k] = 1; names = names (n++ ? "|" : "") k }
+  }
   for (i = 1; i <= nlines; i++) {
     s = v2_strip_str_comment(V2_RAWLINE[i])
     if (match(s, /(^|[^[:alnum:]_])type[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=/, m)) {
@@ -83,14 +86,18 @@ function v2_collect_type_aliases(nlines,    i, s, m, names, n) {
   V2_ALIAS_TYPEANN_RE = names
 }
 
-# 戻り値型注釈（`-> RETTYPE`）を持つユーザー定義関数名をファイル全体から
+# 戻り値型注釈（`-> RETTYPE`）を持つユーザー定義関数名を共有 index とファイル全体から
 # 事前収集する（review EQ）。DSL マーカーを一切持たない関数本体
 # （`function handler() { normalize(123) }`）でも、本体が既知の注釈付き
 # 関数を呼び出しているだけなら v1 は引数型検査を行う。v2 は関数ヘッダに
 # DSL 構文が無いと本体全体を素通し（RAWLINE）扱いにするため、この呼び出し
 # だけが v2_check_calls の CALL 検査を経由せず引数型不一致を見逃していた。
-function v2_collect_annotated_funcs(nlines,    i, s, m, names, n) {
+function v2_collect_annotated_funcs(nlines,    i, s, m, names, n, k, p) {
   names = ""; n = 0
+  for (k in V2_SHARED_SIG) {
+    split(k, p, SUBSEP)
+    if (!(p[1] in V2_DSL_FUNCNAME)) { V2_DSL_FUNCNAME[p[1]] = 1; names = names (n++ ? "|" : "") p[1] }
+  }
   for (i = 1; i <= nlines; i++) {
     s = v2_strip_str_comment(V2_RAWLINE[i])
     # 戻り値注釈 (-> RETTYPE) を持つ関数

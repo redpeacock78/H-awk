@@ -37,6 +37,16 @@ printf 'type User = { name: Str }\nfunction get_name() -> Str { return "shared" 
 printf '@include "types.awk"\nfunction main() -> Response { let u: User = { name: get_name() }; return ctx.res.text(get_name()) }\n' > "$shared/main.awk"
 if HAWK_DIST="$TMP/distshared" "$LIBS" desugar "$shared/main.awk" >/dev/null; then ok "shared_declarations_compile"; else ng "shared_declarations_compile"; fi
 
+shared_sig="$TMP/shared-sig"
+mkdir -p "$shared_sig"
+printf 'function normalize(x: Str) -> Str { return x }\n' > "$shared_sig/lib.awk"
+printf '@include "lib.awk"\nfunction caller() { return normalize(123) }\nBEGIN { caller() }\n' > "$shared_sig/main.awk"
+set +e
+err=$(HAWK_DIST="$TMP/distsharedsig" "$LIBS" desugar "$shared_sig/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -ne 0 && "$err" == *"normalize argument 1 expects Str, got Int"* ]]; then ok "shared_signature_checks_raw_caller"; else ng "shared_signature_checks_raw_caller" "exit=$st: $err"; fi
+
 gen="$TMP/generation"
 HAWK_DIST="$gen" "$LIBS" desugar "$FIX/solo.awk" >/dev/null
 old_gen=$(readlink "$gen/current")
@@ -440,6 +450,10 @@ work="$TMP/work"; mkdir -p "$work"
 cp "$FIX/solo.awk" "$work/main.awk"
 out=$(cd "$work" && "$LIBS_ABS" desugar main.awk)
 if [[ "$out" == "dist/main.awk" && -f "$work/dist/main.awk" ]]; then ok "default_dist_dir"; else ng "default_dist_dir" "$out"; fi
+
+# --- HAWK_DIST の末尾 / は親ディレクトリ検査前に正規化する ---
+dist="$TMP/dist-trailing/"
+if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" >/dev/null && [[ -f "${dist%/}/solo.awk" ]]; then ok "hawk_dist_trailing_slash_normalized"; else ng "hawk_dist_trailing_slash_normalized"; fi
 
 # --- 入力ファイル不在は従来どおり exit 1 ---
 set +e

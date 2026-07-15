@@ -53,6 +53,7 @@ case "$subcmd" in
       exit 1
     fi
     dist="${HAWK_DIST:-dist}"
+    while [[ "$dist" == */ ]]; do dist="${dist%/}"; done
     mkdir -p "$dist"
     # marker の異常 (symlink / 非 regular file / 書込不可) は publish 後の
     # 作成・更新で失敗し「exit 1 なのに成果物は更新済み」になるため、
