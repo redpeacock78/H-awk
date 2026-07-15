@@ -224,11 +224,11 @@ case "$subcmd" in
     # を hard link 経由で見逃す。詳細は下の post-closure 検査を参照)
     _abs_ext=()
 
-    declare -A _index_seen=()
+    _index_seen=" "
     _index_files=()
     _index_one() {
       local rel="$1" inc p
-      [[ -n "${_index_seen[$rel]+x}" ]] && return 0
+      case "$_index_seen" in *" $rel "*) return 0 ;; esac
       case "$rel" in
         ../*|*/../*)
           echo "[hawk-libs] desugar failed: include escapes project root via '..': $rel" >&2
@@ -243,7 +243,7 @@ case "$subcmd" in
           exit 1
           ;;
       esac
-      _index_seen["$rel"]=1
+      _index_seen="$_index_seen$rel "
       p="$src_root/$rel"
       [[ -f "$p" ]] || return 0
       _index_files+=("$p")
