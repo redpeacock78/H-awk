@@ -380,19 +380,26 @@ HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then ok "rerun_over_marker_ok"; else ng "rerun_over_marker_ok" "exit != 0"; fi
 
 # --- 異なる source の同名 basename entry は namespace で分離される ---
-appsA="$TMP/appsA"
-appsB="$TMP/appsB"
-mkdir -p "$appsA" "$appsB"
-printf 'BEGIN { print "from-a" }\n' > "$appsA/main.awk"
-printf 'BEGIN { print "from-b" }\n' > "$appsB/main.awk"
+multi_entry="$TMP/multi-entry"
+mkdir -p "$multi_entry/apps/a" "$multi_entry/apps/b"
+printf 'BEGIN { print "from-a" }\n' > "$multi_entry/apps/a/main.awk"
+printf 'BEGIN { print "from-b" }\n' > "$multi_entry/apps/b/main.awk"
 dist="$TMP/distcs"
-HAWK_DIST="$dist" "$LIBS" desugar "$appsA/main.awk" >/dev/null
-HAWK_DIST="$dist" "$LIBS" desugar "$appsB/main.awk" >/dev/null
-entries=$(find "$dist/.hawk-generations" -type f -name main.awk | wc -l | tr -d ' ')
-if [[ "$entries" -eq 2 ]] && grep -R -q "from-a" "$dist/.hawk-generations" && grep -R -q "from-b" "$dist/.hawk-generations"; then
+( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+first_a="$dist/$(readlink "$dist/current")/apps/a/main.awk"
+( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/b/main.awk >/dev/null )
+entries=$(find -L "$dist/current" -type f -name main.awk | wc -l | tr -d ' ')
+if [[ "$entries" -eq 2 ]] && grep -q "from-a" "$dist/apps/a/main.awk" && grep -q "from-b" "$dist/apps/b/main.awk"; then
   ok "cross_source_same_basename_isolated"
 else
   ng "cross_source_same_basename_isolated" "entries=$entries"
+fi
+run_a=$(gawk -f "$dist/apps/a/main.awk" </dev/null)
+run_b=$(gawk -f "$dist/apps/b/main.awk" </dev/null)
+if [[ "$run_a" == "from-a" && "$run_b" == "from-b" && "$first_a" -ef "$dist/current/apps/a/main.awk" ]]; then
+  ok "multi_entry_namespace_coexist"
+else
+  ng "multi_entry_namespace_coexist" "a=$run_a, b=$run_b"
 fi
 
 # --- marker は publish 済み rel のみ信頼し、同じ dist 配下の無関係な既存ファイルは
@@ -543,6 +550,23 @@ if [[ "$st" -eq 1 && ! -e "$symlink_parent_outside/sub" ]]; then
   ok "symlinked_parent_no_external_mkdir"
 else
   ng "symlinked_parent_no_external_mkdir" "exit=$st, outside_sub=$([[ -e "$symlink_parent_outside/sub" ]] && echo yes || echo no): $err"
+fi
+
+# --- stable namespace の親 symlink は作成前に拒否し、外部へ出力しない ---
+stable_parent_src="$TMP/stable-parent-src"
+stable_parent_dist="$TMP/stable-parent-dist"
+stable_parent_outside="$TMP/stable-parent-outside"
+mkdir -p "$stable_parent_src/app" "$stable_parent_dist" "$stable_parent_outside"
+printf 'BEGIN { print "stable-parent" }\n' > "$stable_parent_src/app/main.awk"
+ln -s "$stable_parent_outside" "$stable_parent_dist/app"
+set +e
+err=$(cd "$stable_parent_src" && HAWK_DIST="$stable_parent_dist" "$LIBS_ABS" desugar app/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && ! -e "$stable_parent_outside/main.awk" && ! -e "$stable_parent_dist/current" ]]; then
+  ok "stable_symlink_parent_escape_rejected"
+else
+  ng "stable_symlink_parent_escape_rejected" "exit=$st, external=$([[ -e "$stable_parent_outside/main.awk" ]] && echo yes || echo no): $err"
 fi
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

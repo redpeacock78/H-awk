@@ -133,20 +133,89 @@ case "$subcmd" in
       echo "[hawk-libs] desugar failed: refusing to overwrite source tree (dist and source trees overlap)" >&2
       exit 1
     fi
-    mkdir -p "$dist/.hawk-generations"
-    stage_root="$(mktemp -d "$dist/.hawk-generations/gen.XXXXXX")"
-    if [[ "$dist" = /* ]]; then runtime_root="$dist/current"; else runtime_root="$dist_phys/current"; fi
-    runtime_ns="$runtime_root"
-    [[ -n "$namespace" ]] && runtime_ns="$runtime_ns/$namespace"
-    _seen=" "
-    # scratch と publish キューは配列で持つ
-    # (空白入りパスが word splitting で別引数に化けるのを防ぐ)
+
     _scratch_arr=()
     _cleanup_scratches() {
       local f
       for f in "${_scratch_arr[@]}"; do rm -f "$f"; done
     }
     trap _cleanup_scratches EXIT
+
+    _prepare_dist_parent() {
+      local parent="$1" rel probe part parent_phys
+      probe="$dist"
+      if [[ "$parent" == "$dist"/* ]]; then
+        rel="${parent#"$dist"/}"
+        while [[ -n "$rel" ]]; do
+          if [[ "$rel" == */* ]]; then
+            part="${rel%%/*}"
+            rel="${rel#*/}"
+          else
+            part="$rel"
+            rel=
+          fi
+          [[ -n "$part" ]] || continue
+          probe="$probe/$part"
+          if [[ -L "$probe" ]]; then
+            echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $probe" >&2
+            exit 1
+          fi
+          [[ -e "$probe" ]] || break
+        done
+      elif [[ "$parent" != "$dist" ]]; then
+        echo "[hawk-libs] desugar failed: output directory escapes dist: $parent" >&2
+        exit 1
+      fi
+      mkdir -p "$parent"
+      parent_phys="$(cd "$parent" && pwd -P)"
+      if [[ "$parent_phys/" != "$dist_phys/"* ]]; then
+        echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $parent_phys" >&2
+        exit 1
+      fi
+    }
+
+    _prepare_dist_parent "$dist/.hawk-generations"
+    stage_root="$(mktemp -d "$dist/.hawk-generations/gen.XXXXXX")"
+    if [[ -e "$dist/current" || -L "$dist/current" ]]; then
+      if [[ ! -L "$dist/current" ]]; then
+        echo "[hawk-libs] desugar failed: $dist/current is not a symlink" >&2
+        exit 1
+      fi
+      previous_rel="$(readlink "$dist/current")"
+      case "$previous_rel" in
+        .hawk-generations/gen.*/*|/*|../*|*/../*|"")
+          echo "[hawk-libs] desugar failed: invalid current generation: $previous_rel" >&2
+          exit 1
+          ;;
+        .hawk-generations/gen.*) ;;
+        *)
+          echo "[hawk-libs] desugar failed: invalid current generation: $previous_rel" >&2
+          exit 1
+          ;;
+      esac
+      previous_root="$dist/$previous_rel"
+      if [[ -L "$previous_root" || ! -d "$previous_root" ]]; then
+        echo "[hawk-libs] desugar failed: current generation not found: $previous_root" >&2
+        exit 1
+      fi
+      previous_list="$(mktemp "$dist/.hawk-carry.XXXXXX")"
+      _scratch_arr+=("$previous_list")
+      if ! find "$previous_root" -type f -print0 > "$previous_list"; then
+        echo "[hawk-libs] desugar failed: cannot list current generation: $previous_root" >&2
+        exit 1
+      fi
+      while IFS= read -r -d '' previous_file; do
+        previous_file_rel="${previous_file#"$previous_root"/}"
+        carried_file="$stage_root/$previous_file_rel"
+        _prepare_dist_parent "$(dirname "$carried_file")"
+        ln "$previous_file" "$carried_file"
+      done < "$previous_list"
+      rm -f "$previous_list"
+    fi
+    if [[ "$dist" = /* ]]; then runtime_root="$dist/current"; else runtime_root="$dist_phys/current"; fi
+    runtime_ns="$runtime_root"
+    [[ -n "$namespace" ]] && runtime_ns="$runtime_ns/$namespace"
+    _seen=" "
     _pub_tmp=()
     _pub_out=()
     _pub_rel=()
@@ -195,7 +264,7 @@ case "$subcmd" in
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
     _desugar_one() {
-      local rel="$1" in out out_parent out_rel probe part tmp inc incs prior
+      local rel="$1" in out out_parent tmp inc incs prior
       case "$_seen" in *" $rel "*) return 0 ;; esac
       case "$rel" in
         ../*|*/../*)
@@ -290,39 +359,8 @@ case "$subcmd" in
           exit 1
         fi
       fi
-      # mkdir -p は既存の symlink を辿るため、先に dist 配下の既存コンポーネントを
-      # 検査する。例えば dist/app -> 外部 の状態で app/sub を作ると、dist 外に
-      # sub/ が作られてから下の実パス検査に到達してしまう。
       out_parent="$(dirname "$out")"
-      probe="$dist"
-      if [[ "$out_parent" == "$dist"/* ]]; then
-        out_rel="${out_parent#"$dist"/}"
-        while [[ -n "$out_rel" ]]; do
-          if [[ "$out_rel" == */* ]]; then
-            part="${out_rel%%/*}"
-            out_rel="${out_rel#*/}"
-          else
-            part="$out_rel"
-            out_rel=
-          fi
-          [[ -n "$part" ]] || continue
-          probe="$probe/$part"
-          if [[ -L "$probe" ]]; then
-            echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $probe" >&2
-            exit 1
-          fi
-          [[ -e "$probe" ]] || break
-        done
-      fi
-      mkdir -p "$out_parent"
-      # dist 配下のディレクトリが外部への symlink に差し替わっていると、mkdir -p はそれを
-      # 素通りし、後続の mv は symlink 先 (dist の外) に publish してしまう。
-      # 出力先の親を実パスまで解決して dist の実パス配下であることを都度確認する
-      out_parent_phys="$(cd "$(dirname "$out")" && pwd -P)"
-      if [[ "$out_parent_phys/" != "$dist_phys/"* ]]; then
-        echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $out_parent_phys" >&2
-        exit 1
-      fi
+      _prepare_dist_parent "$out_parent"
       # 稼働中の hawk-serve が dist の成果物を再ロードしうるため、
       # scratch (mktemp) 上で desugar と書き換えを済ませてから
       # mv でアトミックに配置する。scratch を mktemp にすることで
@@ -497,6 +535,11 @@ case "$subcmd" in
       for _rel in "${_pub_rel[@]}"; do printf '%s\t%s\n' "$src_root" "$_rel"; done
     } | sort -u > "$_marker_tmp"
     mv "$_marker_tmp" "$stage_root/.hawk-dist"
+    for ((i = 0; i < ${#_pub_rel[@]}; i++)); do
+      _rel="${_pub_rel[$i]}"
+      _prepare_dist_parent "$(dirname "$dist/${namespace:+$namespace/}$_rel")"
+      _prepare_dist_parent "$(dirname "$dist/$_rel")"
+    done
     _current_tmp="$(mktemp "$dist/.current.XXXXXX")"
     rm -f "$_current_tmp"
     ln -s "${stage_root#"$dist/"}" "$_current_tmp"
@@ -517,7 +560,6 @@ case "$subcmd" in
       _rel="${_pub_rel[$i]}"
       _stable="$dist/${namespace:+$namespace/}$_rel"
       _compat="$dist/$_rel"
-      mkdir -p "$(dirname "$_stable")" "$(dirname "$_compat")"
       if [[ -e "$_stable" && ! -L "$_stable" ]]; then
         echo "[hawk-libs] desugar failed: stable output is not a symlink: $_stable" >&2
         exit 1
