@@ -262,6 +262,16 @@ st=$?
 set -e
 if [[ "$st" -eq 1 && "$err" == *"reserved for the dist marker"* && ! -e "$dist/main.awk" && ! -e "$dist/.hawk-dist" ]]; then ok "marker_namespace_include_rejected"; else ng "marker_namespace_include_rejected" "exit=$st: $err"; fi
 
+reserved_entry="$TMP/reserved-entry"
+mkdir -p "$reserved_entry/.hawk-dist"
+printf 'BEGIN { print "reserved-entry" }\n' > "$reserved_entry/.hawk-dist/main.awk"
+dist="$TMP/dist-reserved-entry"
+set +e
+err=$(cd "$reserved_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar .hawk-dist/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *".hawk-dist/main.awk"* && ! -e "$dist/current" && ! -e "$dist/.hawk-dist" ]]; then ok "reserved_entry_namespace_rejected"; else ng "reserved_entry_namespace_rejected" "exit=$st: $err"; fi
+
 # --- プロジェクト内を指す絶対パス include は exit 1、外部の絶対パスは素通り ---
 absinc="$TMP/absinc"
 mkdir -p "$absinc"
@@ -388,6 +398,35 @@ if [[ "$before_hash" == "$after_hash" ]]; then ok "dist_over_source_untouched"; 
 dist="$TMP/distrerun"
 HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then ok "rerun_over_marker_ok"; else ng "rerun_over_marker_ok" "exit != 0"; fi
+
+# --- 改ざんされた stable symlink は現行 generation へ戻す ---
+stale_src="$TMP/stale-stable-src"
+mkdir -p "$stale_src"
+cp "$FIX/solo.awk" "$stale_src/main.awk"
+dist="$TMP/dist-stale-stable"
+( cd "$stale_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar main.awk >/dev/null )
+stale_target="$TMP/stale-target.awk"
+printf 'BEGIN { print "stale" }\n' > "$stale_target"
+rm "$dist/main.awk"
+ln -s "$stale_target" "$dist/main.awk"
+( cd "$stale_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar main.awk >/dev/null )
+if [[ -L "$dist/main.awk" && "$(readlink "$dist/main.awk")" == "$dist/current/main.awk" ]]; then ok "stale_stable_symlink_refreshed"; else ng "stale_stable_symlink_refreshed" "target=$(readlink "$dist/main.awk" 2>/dev/null)"; fi
+
+# --- record と alias が include 間で同名なら index 時点で拒否する ---
+type_collision="$TMP/type-collision"
+mkdir -p "$type_collision"
+printf 'type User = { name: Str }\n' > "$type_collision/record.awk"
+printf 'type User = Str\n' > "$type_collision/alias.awk"
+printf '@include "record.awk"\n@include "alias.awk"\nBEGIN { print "collision" }\n' > "$type_collision/main.awk"
+printf '@include "alias.awk"\n@include "record.awk"\nBEGIN { print "collision" }\n' > "$type_collision/reverse.awk"
+dist="$TMP/dist-type-collision"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$type_collision/main.awk" 2>&1 >/dev/null)
+st=$?
+err_reverse=$(HAWK_DIST="$TMP/dist-type-collision-reverse" "$LIBS" desugar "$type_collision/reverse.awk" 2>&1 >/dev/null)
+st_reverse=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"type name is both record and alias: User"* && "$st_reverse" -eq 1 && "$err_reverse" == *"type name is both record and alias: User"* ]]; then ok "alias_record_name_collision_rejected"; else ng "alias_record_name_collision_rejected" "forward=$st: $err / reverse=$st_reverse: $err_reverse"; fi
 
 # --- 異なる source の同名 basename entry は namespace で分離される ---
 multi_entry="$TMP/multi-entry"

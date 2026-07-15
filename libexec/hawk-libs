@@ -119,6 +119,12 @@ case "$subcmd" in
       exit 1
       ;;
     esac
+    case "$entry_key" in
+      .hawk-dist|.hawk-dist/*|.hawk-generations|.hawk-generations/*|current|current/*)
+        echo "[hawk-libs] desugar failed: reserved entry namespace: $entry_key" >&2
+        exit 1
+        ;;
+    esac
     if [[ "$entry_key" == */* ]]; then
       namespace="${entry_key%/*}"
     else
@@ -141,6 +147,33 @@ case "$subcmd" in
       for f in "${_scratch_arr[@]}"; do rm -f "$f"; done
     }
     trap _cleanup_scratches EXIT
+
+    _replace_symlink_atomically() {
+      local tmp="$1" link="$2"
+      if mv -f -h "$tmp" "$link" 2>/dev/null && [[ ! -e "$tmp" && ! -L "$tmp" ]]; then
+        return 0
+      fi
+      if mv -f -T "$tmp" "$link"; then return 0; fi
+      echo "[hawk-libs] desugar failed: no portable symlink replacement command (mv -h or mv -T)" >&2
+      exit 1
+    }
+
+    _refresh_output_link() {
+      local link="$1" target="$2" actual tmp
+      if [[ -e "$link" && ! -L "$link" ]]; then
+        echo "[hawk-libs] desugar failed: stable output is not a symlink: $link" >&2
+        exit 1
+      fi
+      if [[ -L "$link" ]]; then
+        actual="$(readlink "$link")"
+        [[ "$actual" == "$target" ]] && return 0
+      fi
+      tmp="$(mktemp "$(dirname "$link")/.hawk-link.XXXXXX")"
+      _scratch_arr+=("$tmp")
+      rm -f "$tmp"
+      ln -s "$target" "$tmp"
+      _replace_symlink_atomically "$tmp" "$link"
+    }
 
     _prepare_dist_parent() {
       local parent="$1" rel probe part parent_phys
@@ -315,7 +348,7 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $compat_parent_phys" >&2
         exit 1
       fi
-      if [[ -d "$stable" || ( -e "$stable" && ! -L "$stable" ) || -d "$compat" ]]; then
+      if [[ -d "$stable" || ( -e "$stable" && ! -L "$stable" ) || -d "$compat" || ( -e "$compat" && ! -L "$compat" ) ]]; then
         echo "[hawk-libs] desugar failed: output path is not replaceable: $stable" >&2
         exit 1
       fi
@@ -546,14 +579,7 @@ case "$subcmd" in
     ln -s "${stage_root#"$dist/"}" "$_current_tmp"
     # BSD mv の -h と GNU mv の -T は同じ「symlink 自体を置換」だが、片方しかない。
     # 実行時に -h の実移動を確認し、非対応なら -T へ切り替える（Why not: rm+mv は非 atomic）。
-    if mv -f -h "$_current_tmp" "$dist/current" 2>/dev/null && [[ ! -e "$_current_tmp" && ! -L "$_current_tmp" ]]; then
-      :
-    elif mv -f -T "$_current_tmp" "$dist/current"; then
-      :
-    else
-      echo "[hawk-libs] desugar failed: no portable symlink replacement command (mv -h or mv -T)" >&2
-      exit 1
-    fi
+    _replace_symlink_atomically "$_current_tmp" "$dist/current"
     _root_marker_tmp="$(mktemp "$dist/.hawk-dist.XXXXXX")"
     cp "$stage_root/.hawk-dist" "$_root_marker_tmp"
     mv -f "$_root_marker_tmp" "$dist/.hawk-dist"
@@ -561,16 +587,8 @@ case "$subcmd" in
       _rel="${_pub_rel[$i]}"
       _stable="$dist/${namespace:+$namespace/}$_rel"
       _compat="$dist/$_rel"
-      if [[ -e "$_stable" && ! -L "$_stable" ]]; then
-        echo "[hawk-libs] desugar failed: stable output is not a symlink: $_stable" >&2
-        exit 1
-      fi
-      if [[ ! -e "$_stable" && ! -L "$_stable" ]]; then
-        ln -s "$runtime_ns/$_rel" "$_stable"
-      fi
-      if [[ "$_compat" != "$_stable" && ! -e "$_compat" && ! -L "$_compat" ]]; then
-        ln -s "$runtime_ns/$_rel" "$_compat"
-      fi
+      _refresh_output_link "$_stable" "$runtime_ns/$_rel"
+      [[ "$_compat" == "$_stable" ]] || _refresh_output_link "$_compat" "$runtime_ns/$_rel"
     done
     echo "$dist/${namespace:+$namespace/}$entry_rel"
     ;;

@@ -65,11 +65,21 @@ BEGIN {
         exit 1
       }
     }
-    for (k in V2_INDEX_RUN_RECORDS) V2_INDEX_RECORD_NAMES[k] = 1
+    for (k in V2_INDEX_RUN_RECORDS) {
+      if (k in V2_INDEX_ALIAS) {
+        print "[hawk-libs] index failed: type name is both record and alias: " k > "/dev/stderr"
+        exit 1
+      }
+      V2_INDEX_RECORD_NAMES[k] = 1
+    }
     v2_parse()
     v2_collect(1)
     v2_collect_raw_funcs()
     for (k in ALIAS) {
+      if (k in V2_INDEX_RECORD_NAMES) {
+        print "[hawk-libs] index failed: type name is both record and alias: " k > "/dev/stderr"
+        exit 1
+      }
       if ((k in V2_INDEX_ALIAS) && V2_INDEX_ALIAS[k] != ALIAS[k]) {
         print "[hawk-libs] index failed: conflicting type alias definition: " k > "/dev/stderr"
         exit 1
