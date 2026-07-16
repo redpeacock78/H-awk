@@ -422,26 +422,24 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: output path is not replaceable: $compat" >&2
         exit 1
       fi
-      if [[ -e "$compat" || -L "$compat" ]]; then
-        compat_owned=0; compat_other=0; stable_owned=0; stable_other=0
-        if [[ -f "$dist/.hawk-dist" ]]; then
-          while IFS=$'\t' read -r marker_src marker_rel marker_kind; do
-            [[ "$marker_rel" == "$rel" ]] || continue
-            if [[ "$marker_kind" == compat ]]; then
-              if [[ "$marker_src" == "$src_root" ]]; then compat_owned=1; else compat_other=1; fi
-            elif [[ -z "$marker_kind" ]]; then
-              if [[ "$marker_src" == "$src_root" ]]; then stable_owned=1; else stable_other=1; fi
-            fi
-          done < "$dist/.hawk-dist"
-        fi
-        if [[ "$compat_owned" -eq 1 && "$compat_other" -eq 0 ]]; then
-          :
-        elif [[ "$compat_owned" -eq 1 || "$compat_other" -eq 1 || "$stable_other" -eq 1 ]]; then
-          _compat_skip+=("$rel")
-        elif [[ "$stable_owned" -eq 0 ]]; then
-          echo "[hawk-libs] desugar failed: refusing to overwrite existing compatibility output: $compat" >&2
-          exit 1
-        fi
+      compat_owned=0; compat_other=0; stable_owned=0; stable_other=0
+      if [[ -f "$dist/.hawk-dist" ]]; then
+        while IFS=$'\t' read -r marker_src marker_rel marker_kind; do
+          [[ "$marker_rel" == "$rel" ]] || continue
+          if [[ "$marker_kind" == compat ]]; then
+            if [[ "$marker_src" == "$src_root" ]]; then compat_owned=1; else compat_other=1; fi
+          elif [[ -z "$marker_kind" ]]; then
+            if [[ "$marker_src" == "$src_root" ]]; then stable_owned=1; else stable_other=1; fi
+          fi
+        done < "$dist/.hawk-dist"
+      fi
+      if [[ "$compat_owned" -eq 1 && "$compat_other" -eq 0 ]]; then
+        :
+      elif [[ "$compat_owned" -eq 1 || "$compat_other" -eq 1 || "$stable_other" -eq 1 ]]; then
+        _compat_skip+=("$rel")
+      elif [[ ( -e "$compat" || -L "$compat" ) && "$stable_owned" -eq 0 ]]; then
+        echo "[hawk-libs] desugar failed: refusing to overwrite existing compatibility output: $compat" >&2
+        exit 1
       fi
       if [[ -e "$stable" || -L "$stable" ]]; then
         if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$rel" "$dist/.hawk-dist"; then

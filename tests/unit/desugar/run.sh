@@ -534,6 +534,24 @@ else
   ng "multi_entry_namespace_coexist" "a=$run_a, b=$run_b"
 fi
 
+owner_a="$(cd "$multi_entry/apps/a" && pwd -P)"
+owner_b="$(cd "$multi_entry/apps/b" && pwd -P)"
+dist_missing_other="$TMP/dist-compat-missing-other"
+( cd "$multi_entry" && HAWK_DIST="$dist_missing_other" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+rm "$dist_missing_other/main.awk"
+set +e
+( cd "$multi_entry" && HAWK_DIST="$dist_missing_other" "$LIBS_ABS" desugar apps/b/main.awk >/dev/null )
+st=$?
+set -e
+if [[ "$st" -eq 0 && ! -e "$dist_missing_other/main.awk" && ! -L "$dist_missing_other/main.awk" ]] && ! grep -qxF -- "$owner_b"$'\t'main.awk$'\t'compat "$dist_missing_other/.hawk-dist"; then ok "missing_compat_other_source_skips"; else ng "missing_compat_other_source_skips" "exit=$st, compat=$([[ -e "$dist_missing_other/main.awk" || -L "$dist_missing_other/main.awk" ]] && echo yes || echo no)"; fi
+
+dist_missing_self="$TMP/dist-compat-missing-self"
+( cd "$multi_entry" && HAWK_DIST="$dist_missing_self" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+compat_self="$(readlink "$dist_missing_self/main.awk")"
+rm "$dist_missing_self/main.awk"
+( cd "$multi_entry" && HAWK_DIST="$dist_missing_self" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+if [[ -L "$dist_missing_self/main.awk" && "$(readlink "$dist_missing_self/main.awk")" == "$compat_self" ]] && grep -qxF -- "$owner_a"$'\t'main.awk$'\t'compat "$dist_missing_self/.hawk-dist"; then ok "missing_compat_owner_repairs"; else ng "missing_compat_owner_repairs"; fi
+
 # --- marker は publish 済み rel のみ信頼し、同じ dist 配下の無関係な既存ファイルは
 #     引き続き上書き保護される (marker が空ファイルだと最初の成功後に
 #     ディレクトリ全体を信頼してしまう問題の再現) ---
