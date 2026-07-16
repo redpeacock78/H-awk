@@ -40,6 +40,8 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+HAWK_PLUGIN_DIRS="$("$LIBS" plugin-dirs)"
+export HAWK_PLUGIN_DIRS
 mapfile -t _plugin_paths < <("$LIBS" plugins)
 _plugin_args=()
 for p in "${_plugin_paths[@]}"; do

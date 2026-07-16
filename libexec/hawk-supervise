@@ -53,6 +53,8 @@ mv -f "$_runtime_tmp" "$HAWK_RUNTIME_AWK"
 export HAWK_RUNTIME_AWK
 
 eval "$("$LIBS" libs)"
+HAWK_PLUGIN_DIRS="$("$LIBS" plugin-dirs)"
+export HAWK_PLUGIN_DIRS
 mapfile -t _plugin_paths < <("$LIBS" plugins)
 _plugin_args=()
 for p in "${_plugin_paths[@]}"; do

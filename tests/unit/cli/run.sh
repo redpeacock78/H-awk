@@ -100,6 +100,7 @@ rm -rf "$work"
 
 # framework 外の cwd でも framework 本体・plugin・native lib を HAWK_LIB から解決する
 work=$(mktemp -d)
+work="$(cd "$work" && pwd -P)"
 mkdir -p "$work/data"
 printf 'name\noutside-cwd-ok\n' > "$work/data/items.tsv"
 printf 'BEGIN { if (read_tsv("data/items.tsv", rows) == 1) print rows[1, "name"] }\n' > "$work/app.awk"
@@ -128,7 +129,9 @@ else
 fi
 
 framework="$work/framework"
-mkdir -p "$framework/plugins/demo" "$framework/libs/net/zig-out/lib"
+mkdir -p "$framework/plugins/base" "$framework/plugins/demo" "$framework/libs/net/zig-out/lib"
+printf '# manifest\n' > "$framework/plugins/base/manifest.awk"
+printf '# plugin\n' > "$framework/plugins/base/base.awk"
 printf '# manifest\n' > "$framework/plugins/demo/manifest.awk"
 printf '# plugin\n' > "$framework/plugins/demo/demo.awk"
 case "$(uname -s)" in Darwin) so_ext=dylib ;; *) so_ext=so ;; esac
@@ -139,6 +142,49 @@ if [[ "$plugins_out" == *"$framework/plugins/demo/manifest.awk"* && "$plugins_ou
 else
   printf "  FAIL: plugins_outside_hawk_lib (output=%s)\n" "$plugins_out"; FAIL=$((FAIL+1))
 fi
+
+mkdir -p "$work/plugins/logger"
+printf '# manifest\n' > "$work/plugins/logger/manifest.awk"
+printf '# plugin\n' > "$work/plugins/logger/logger.awk"
+mapfile -t plugin_paths < <(cd "$work" && HAWK_LIB="$framework" "$HAWK_ROOT/libexec/hawk-libs" plugins)
+if [[ "${#plugin_paths[@]}" -eq 6 && "${plugin_paths[0]}" == "$framework/plugins/base/manifest.awk" && "${plugin_paths[2]}" == "$framework/plugins/demo/manifest.awk" && "${plugin_paths[4]}" == "$work/plugins/logger/manifest.awk" ]]; then
+  printf "  PASS: plugins_dual_roots\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: plugins_dual_roots (paths=%s)\n" "${plugin_paths[*]}"; FAIL=$((FAIL+1))
+fi
+
+mkdir -p "$work/plugins/demo"
+printf '# app manifest\n' > "$work/plugins/demo/manifest.awk"
+printf '# app plugin\n' > "$work/plugins/demo/demo.awk"
+mapfile -t plugin_paths < <(cd "$work" && HAWK_LIB="$framework" "$HAWK_ROOT/libexec/hawk-libs" plugins)
+if [[ "${#plugin_paths[@]}" -eq 6 && "${plugin_paths[2]}" == "$work/plugins/demo/manifest.awk" && "${plugin_paths[3]}" == "$work/plugins/demo/demo.awk" ]]; then
+  printf "  PASS: plugins_app_shadow\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: plugins_app_shadow (paths=%s)\n" "${plugin_paths[*]}"; FAIL=$((FAIL+1))
+fi
+
+touch "$work/plugins/demo/.disabled"
+mapfile -t plugin_paths < <(cd "$work" && HAWK_LIB="$framework" "$HAWK_ROOT/libexec/hawk-libs" plugins)
+if [[ "${#plugin_paths[@]}" -eq 4 && "${plugin_paths[0]}" == "$framework/plugins/base/manifest.awk" && "${plugin_paths[2]}" == "$work/plugins/logger/manifest.awk" ]]; then
+  printf "  PASS: plugins_disabled_app_shadows\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: plugins_disabled_app_shadows (paths=%s)\n" "${plugin_paths[*]}"; FAIL=$((FAIL+1))
+fi
+
+mapfile -t plugin_paths < <(cd "$work" && HAWK_LIB="$work" "$HAWK_ROOT/libexec/hawk-libs" plugins)
+if [[ "${#plugin_paths[@]}" -eq 2 && "${plugin_paths[0]}" == "$work/plugins/logger/manifest.awk" && "${plugin_paths[1]}" == "$work/plugins/logger/logger.awk" ]]; then
+  printf "  PASS: plugins_same_root_dedup\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: plugins_same_root_dedup (paths=%s)\n" "${plugin_paths[*]}"; FAIL=$((FAIL+1))
+fi
+
+mapfile -t plugin_dirs < <(cd "$work" && HAWK_LIB="$framework" "$HAWK_ROOT/libexec/hawk-libs" plugin-dirs)
+if [[ "${#plugin_dirs[@]}" -eq 2 && "${plugin_dirs[0]}" == "$framework/plugins/base" && "${plugin_dirs[1]}" == "$work/plugins/logger" ]]; then
+  printf "  PASS: plugin_dirs_match_selection\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: plugin_dirs_match_selection (dirs=%s)\n" "${plugin_dirs[*]}"; FAIL=$((FAIL+1))
+fi
+
 libs_out=$(cd "$work" && HAWK_LIB="$framework" "$HAWK_ROOT/libexec/hawk-libs" libs)
 if [[ "$libs_out" == *"$framework/libs/net/zig-out/lib/libhawk_net.$so_ext"* && "$libs_out" == *"HAS_NET=1"* ]]; then
   printf "  PASS: libs_outside_hawk_lib\n"; PASS=$((PASS+1))

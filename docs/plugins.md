@@ -4,6 +4,8 @@
 
 Drop a plugin directory into `plugins/<name>/`. H-awk auto-discovers and loads plugins at startup.
 
+H-awk loads plugins from both `$HAWK_LIB/plugins` (the framework) and `./plugins` (the app working directory). If both contain the same plugin name, the app plugin wins; an app-side `.disabled` also shadows and disables the framework plugin of that name.
+
 ```awk
 # plugins/logger/manifest.awk
 function plugin_logger_manifest(meta) {

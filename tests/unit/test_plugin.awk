@@ -111,19 +111,29 @@ function _test_plugin_discover_unknown_function_guard(   cmd, line, output, rc) 
 function test_plugin_discover_hawk_lib_root(   cmd, line, output) {
   cmd = "tmp=$(mktemp -d); " \
         "framework=\"$tmp/framework\"; app=\"$tmp/app\"; " \
-        "mkdir -p \"$framework/plugins/demo\" \"$app/plugins/demo\" \"$app/plugins/ignored\"; " \
-        "touch \"$app/plugins/demo/.disabled\"; " \
+        "mkdir -p \"$framework/plugins/demo\" \"$app/plugins/local\"; " \
         "printf 'function plugin_demo_manifest(meta) { meta[\"version\"] = \"1.2.3\" }\\n' > \"$framework/plugins/demo/manifest.awk\"; " \
+        "printf 'function plugin_local_manifest(meta) { meta[\"version\"] = \"4.5.6\" }\\n' > \"$app/plugins/local/manifest.awk\"; " \
+        "dirs=$(printf '%s\\n%s' \"$framework/plugins/demo\" \"$app/plugins/local\"); " \
+        "(cd \"$app\" && HAWK_LIB=\"$framework\" HAWK_PLUGIN_DIRS=\"$dirs\" gawk " \
+        "-f \"" ENVIRON["PWD"] "/core/util.awk\" " \
+        "-f \"" ENVIRON["PWD"] "/core/plugin.awk\" " \
+        "-f \"$framework/plugins/demo/manifest.awk\" " \
+        "-f \"$app/plugins/local/manifest.awk\" " \
+        "-e 'BEGIN { plugin_discover(); print \"ENV_FW:\" PLUGINS[\"demo\", \"version\"]; print \"ENV_APP:\" PLUGINS[\"local\", \"version\"]; exit 0 }') 2>&1; " \
         "(cd \"$app\" && HAWK_LIB=\"$framework\" gawk " \
         "-f \"" ENVIRON["PWD"] "/core/util.awk\" " \
         "-f \"" ENVIRON["PWD"] "/core/plugin.awk\" " \
         "-f \"$framework/plugins/demo/manifest.awk\" " \
-        "-e 'BEGIN { plugin_discover(); print \"VERSION:\" PLUGINS[\"demo\", \"version\"]; print \"IGNORED:\" ((\"ignored\", \"version\") in PLUGINS); exit 0 }') 2>&1; " \
+        "-f \"$app/plugins/local/manifest.awk\" " \
+        "-e 'BEGIN { plugin_discover(); print \"FALLBACK_FW:\" PLUGINS[\"demo\", \"version\"]; print \"FALLBACK_APP:\" ((\"local\", \"version\") in PLUGINS); exit 0 }') 2>&1; " \
         "rm -rf \"$tmp\""
   output = ""
   while ((cmd | getline line) > 0) output = output line "\n"
   close(cmd)
 
-  assert_true(index(output, "VERSION:1.2.3\n") > 0, "plugin: discover uses HAWK_LIB root")
-  assert_true(index(output, "IGNORED:0\n") > 0, "plugin: discover ignores cwd plugins")
+  assert_true(index(output, "ENV_FW:1.2.3\n") > 0, "plugin: discover env includes framework root")
+  assert_true(index(output, "ENV_APP:4.5.6\n") > 0, "plugin: discover env includes app root")
+  assert_true(index(output, "FALLBACK_FW:1.2.3\n") > 0, "plugin: discover fallback uses HAWK_LIB root")
+  assert_true(index(output, "FALLBACK_APP:0\n") > 0, "plugin: discover fallback ignores cwd plugins")
 }

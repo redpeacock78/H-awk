@@ -4,6 +4,8 @@
 
 `plugins/<name>/` にプラグインディレクトリを配置すると、H-awk が起動時に自動発見してロードします。
 
+H-awk は `$HAWK_LIB/plugins`（framework 側）と `./plugins`（アプリの作業ディレクトリ）の両方からプラグインをロードします。同名プラグインが両方にある場合はアプリ側が優先され、アプリ側に `.disabled` があれば同名の framework 側プラグインも無効になります。
+
 ```awk
 # plugins/logger/manifest.awk
 function plugin_logger_manifest(meta) {

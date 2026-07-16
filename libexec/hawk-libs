@@ -5,17 +5,43 @@ HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
 subcmd="${1:-}"
 shift
 
+_plugin_dirs() {
+  local app_root fw_root d name same_root=0
+  app_root="$(pwd -P)/plugins"
+  fw_root="$(cd "$HAWK_LIB" && pwd -P)/plugins"
+  if [[ "$fw_root" == "$app_root" ]] || { [[ -d "$fw_root" && -d "$app_root" ]] && [[ "$fw_root" -ef "$app_root" ]]; }; then
+    same_root=1
+  fi
+  if [[ "$same_root" -eq 0 ]]; then
+    for d in "$fw_root"/*/; do
+      [[ -d "$d" ]] || continue
+      d="${d%/}"
+      name="${d##*/}"
+      [[ -d "$app_root/$name" ]] && continue
+      [[ -f "$d/.disabled" ]] && continue
+      printf '%s\n' "$d"
+    done
+  fi
+  for d in "$app_root"/*/; do
+    [[ -d "$d" ]] || continue
+    d="${d%/}"
+    [[ -f "$d/.disabled" ]] && continue
+    printf '%s\n' "$d"
+  done
+}
+
 case "$subcmd" in
   plugins)
-    for d in "$HAWK_LIB"/plugins/*/; do
-      [[ -d "$d" ]] || continue
-      [[ -f "${d}.disabled" ]] && continue
-      name=$(basename "$d")
-      manifest="${d}manifest.awk"
-      impl="${d}${name}.awk"
+    while IFS= read -r d; do
+      name="${d##*/}"
+      manifest="$d/manifest.awk"
+      impl="$d/$name.awk"
       [[ -f "$manifest" ]] && printf '%s\n' "$manifest"
       [[ -f "$impl" ]]     && printf '%s\n' "$impl"
-    done
+    done < <(_plugin_dirs)
+    ;;
+  plugin-dirs)
+    _plugin_dirs
     ;;
   libs)
     libs_args=""
