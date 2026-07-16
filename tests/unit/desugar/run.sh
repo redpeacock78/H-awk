@@ -441,6 +441,17 @@ st=$?
 set -e
 if [[ "$st" -eq 0 && -L "$legacy_compat_dist/main.awk" && -L "$legacy_compat_dist/apps/a/main.awk" && "$(gawk -f "$legacy_compat_dist/main.awk" </dev/null)" == "new-compat" ]]; then ok "legacy_compat_regular_migrated"; else ng "legacy_compat_regular_migrated" "exit=$st: $err"; fi
 
+legacy_dir="$TMP/legacy-dir"
+mkdir -p "$legacy_dir/dist/main.awk"
+printf 'BEGIN { print "directory-guard" }\n' > "$legacy_dir/main.awk"
+legacy_dir_src="$(cd "$legacy_dir" && pwd -P)"
+printf '%s\tmain.awk\n' "$legacy_dir_src" > "$legacy_dir/dist/.hawk-dist"
+set +e
+err=$(cd "$legacy_dir" && HAWK_DIST=dist "$LIBS_ABS" desugar main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && -d "$legacy_dir/dist/main.awk" && ! -e "$legacy_dir/dist/current" && ! -L "$legacy_dir/dist/current" ]]; then ok "marker_owned_directory_rejected_early"; else ng "marker_owned_directory_rejected_early" "exit=$st, current=$([[ -e "$legacy_dir/dist/current" || -L "$legacy_dir/dist/current" ]] && echo yes || echo no): $err"; fi
+
 # --- marker のある dist への再実行 (上書き) は成功する ---
 dist="$TMP/distrerun"
 HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
