@@ -47,6 +47,15 @@ st=$?
 set -e
 if [[ "$st" -ne 0 && "$err" == *"normalize argument 1 expects Str, got Int"* ]]; then ok "shared_signature_checks_raw_caller"; else ng "shared_signature_checks_raw_caller" "exit=$st: $err"; fi
 
+lex_state="$TMP/lex-state"
+mkdir -p "$lex_state"
+printf 'function dsl_body() {\n  let x: Int = 1\n  return x\n}\n' > "$lex_state/a.awk"
+printf 'function raw(a, b) {\n  return a + b\n}\n' > "$lex_state/b.awk"
+printf '@include "a.awk"\n@include "b.awk"\nfunction caller() { return raw(1, 2) }\nBEGIN { print caller() }\n' > "$lex_state/main.awk"
+lex_index="$TMP/lex-index.awk"
+gawk -v V2_INDEX_LIST="$lex_state/a.awk"$'\034'"$lex_state/b.awk" -v V2_INDEX_OUT="$lex_index" -f dsl/index.awk
+if HAWK_DIST="$TMP/distlexstate" "$LIBS" desugar "$lex_state/main.awk" >/dev/null && ! grep -qF 'V2_SHARED_SIG["raw"' "$lex_index"; then ok "index_lex_state_isolated_per_file"; else ng "index_lex_state_isolated_per_file" "raw function was indexed as DSL"; fi
+
 gen="$TMP/generation"
 HAWK_DIST="$gen" "$LIBS" desugar "$FIX/solo.awk" >/dev/null
 old_gen=$(readlink "$gen/current")

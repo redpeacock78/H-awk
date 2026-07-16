@@ -242,6 +242,11 @@ function v2_mark_unannotated_func(nlines,    i, j, k, depth, stripped, tmp, n_op
 #   トークン化する（BQ）。{ を含む行を処理したら解除する。
 function v2_lex(src,    line, lineno, in_when, in_block, nlines, tok_start, k, \
                  pending_brace, header_stripped, force_line) {
+  delete TOK
+  delete PASS
+  delete V2_RAWLINE
+  delete V2_LINE_TEXT
+  delete V2_FORCE_DSL
   V2_NLINES = 0
   TOK["n"]  = 0
   in_when   = 0

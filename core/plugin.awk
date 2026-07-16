@@ -17,15 +17,17 @@
 # config_keys を満たさなかった場合 PLUGIN_REGISTER_ERROR=1 を立てる
 # (起動時 main loop が exit 1 で判定する)
 
-function plugin_discover(   cmd, pname, func_name, meta) {
-  cmd = "ls plugins 2>/dev/null"
+function plugin_discover(   cmd, pname, func_name, meta, root, disabled) {
+  root = (ENVIRON["HAWK_LIB"] != "" ? ENVIRON["HAWK_LIB"] : ".") "/plugins"
+  cmd = "ls " _shellquote(root) " 2>/dev/null"
   while ((cmd | getline pname) > 0) {
     if (pname == "" || pname ~ /^\./) continue
-    if ((getline _ < ("plugins/" pname "/.disabled")) >= 0) {
-      close("plugins/" pname "/.disabled")
+    disabled = root "/" pname "/.disabled"
+    if ((getline _ < disabled) >= 0) {
+      close(disabled)
       continue
     }
-    close("plugins/" pname "/.disabled")
+    close(disabled)
 
     func_name = "plugin_" pname "_manifest"
     delete meta

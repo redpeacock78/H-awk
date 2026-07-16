@@ -92,7 +92,7 @@ function _test_plugin_discover_unknown_function_guard(   cmd, line, output, rc) 
   cmd = "tmp=$(mktemp -d); " \
         "mkdir -p \"$tmp/plugins/missing\"; " \
         "err=\"$tmp/err\"; " \
-        "(cd \"$tmp\" && gawk -f \"" ENVIRON["PWD"] "/core/plugin.awk\" -e 'BEGIN { plugin_discover(); exit 0 }') 2>\"$err\"; " \
+        "(cd \"$tmp\" && gawk -f \"" ENVIRON["PWD"] "/core/util.awk\" -f \"" ENVIRON["PWD"] "/core/plugin.awk\" -e 'BEGIN { plugin_discover(); exit 0 }') 2>\"$err\"; " \
         "rc=$?; " \
         "printf 'RC:%s\\n' \"$rc\"; " \
         "cat \"$err\"; " \
@@ -106,4 +106,24 @@ function _test_plugin_discover_unknown_function_guard(   cmd, line, output, rc) 
   assert_true(index(output, "RC:0\n") > 0, "plugin: unknown manifest function does not crash")
   assert_true(index(output, "plugin: function not found: plugin_missing_manifest") > 0,
               "plugin: unknown manifest function logs stderr")
+}
+
+function test_plugin_discover_hawk_lib_root(   cmd, line, output) {
+  cmd = "tmp=$(mktemp -d); " \
+        "framework=\"$tmp/framework\"; app=\"$tmp/app\"; " \
+        "mkdir -p \"$framework/plugins/demo\" \"$app/plugins/demo\" \"$app/plugins/ignored\"; " \
+        "touch \"$app/plugins/demo/.disabled\"; " \
+        "printf 'function plugin_demo_manifest(meta) { meta[\"version\"] = \"1.2.3\" }\\n' > \"$framework/plugins/demo/manifest.awk\"; " \
+        "(cd \"$app\" && HAWK_LIB=\"$framework\" gawk " \
+        "-f \"" ENVIRON["PWD"] "/core/util.awk\" " \
+        "-f \"" ENVIRON["PWD"] "/core/plugin.awk\" " \
+        "-f \"$framework/plugins/demo/manifest.awk\" " \
+        "-e 'BEGIN { plugin_discover(); print \"VERSION:\" PLUGINS[\"demo\", \"version\"]; print \"IGNORED:\" ((\"ignored\", \"version\") in PLUGINS); exit 0 }') 2>&1; " \
+        "rm -rf \"$tmp\""
+  output = ""
+  while ((cmd | getline line) > 0) output = output line "\n"
+  close(cmd)
+
+  assert_true(index(output, "VERSION:1.2.3\n") > 0, "plugin: discover uses HAWK_LIB root")
+  assert_true(index(output, "IGNORED:0\n") > 0, "plugin: discover ignores cwd plugins")
 }
