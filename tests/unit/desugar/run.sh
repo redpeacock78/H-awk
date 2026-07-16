@@ -534,6 +534,28 @@ else
   ng "multi_entry_namespace_coexist" "a=$run_a, b=$run_b"
 fi
 
+dist_namespace_owner="$TMP/dist-namespace-owner"
+( cd "$multi_entry" && HAWK_DIST="$dist_namespace_owner" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+if ( cd "$multi_entry" && HAWK_DIST="$dist_namespace_owner" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null ); then
+  ok "namespaced_same_cwd_rerun"
+else
+  ng "namespaced_same_cwd_rerun"
+fi
+mkdir -p "$dist_namespace_owner/a"
+unrelated_namespace_target="$TMP/unrelated-namespace-target.awk"
+printf 'BEGIN { print "unrelated" }\n' > "$unrelated_namespace_target"
+ln -s "$unrelated_namespace_target" "$dist_namespace_owner/a/main.awk"
+unrelated_namespace_link="$(readlink "$dist_namespace_owner/a/main.awk")"
+set +e
+err=$(cd "$multi_entry/apps" && HAWK_DIST="$dist_namespace_owner" "$LIBS_ABS" desugar a/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite existing namespaced output"* && -L "$dist_namespace_owner/a/main.awk" && "$(readlink "$dist_namespace_owner/a/main.awk")" == "$unrelated_namespace_link" ]]; then
+  ok "cross_cwd_namespace_marker_isolated"
+else
+  ng "cross_cwd_namespace_marker_isolated" "exit=$st: $err"
+fi
+
 owner_a="$(cd "$multi_entry/apps/a" && pwd -P)"
 owner_b="$(cd "$multi_entry/apps/b" && pwd -P)"
 dist_missing_other="$TMP/dist-compat-missing-other"

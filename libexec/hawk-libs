@@ -351,7 +351,7 @@ case "$subcmd" in
     # rel: src_root からの相対パス。desugar して dist/rel に出力し、
     # src_root 相対で実在する @include を dist 接頭に書き換えて再帰する。
     _desugar_one() {
-      local rel="$1" in out out_parent tmp inc incs prior marker_src marker_rel marker_kind
+      local rel="$1" in out out_parent tmp inc incs prior marker_src marker_rel marker_kind stable_rel
       local compat_owned compat_other stable_owned stable_other
       case "$_seen" in *" $rel "*) return 0 ;; esac
       case "$rel" in
@@ -394,8 +394,9 @@ case "$subcmd" in
       set +f
       _seen="$_seen$rel "
       in="$src_root/$rel"
-      out="$stage_root/${namespace:+$namespace/}$rel"
-      stable="$dist/${namespace:+$namespace/}$rel"
+      stable_rel="${namespace:+$namespace/}$rel"
+      out="$stage_root/$stable_rel"
+      stable="$dist/$stable_rel"
       compat="$dist/$rel"
       compat_parent="$(dirname "$compat")"
       while [[ ! -e "$compat_parent" && ! -L "$compat_parent" && "$compat_parent" != "." && "$compat_parent" != "/" ]]; do
@@ -410,7 +411,7 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: output path is not replaceable: $stable" >&2
         exit 1
       fi
-      if [[ -e "$stable" && ! -L "$stable" ]] && ! _marker_owns_output "$src_root" "$rel"; then
+      if [[ -e "$stable" && ! -L "$stable" ]] && ! _marker_owns_output "$src_root" "$stable_rel"; then
         echo "[hawk-libs] desugar failed: output path is not replaceable: $stable" >&2
         exit 1
       fi
@@ -442,7 +443,7 @@ case "$subcmd" in
         exit 1
       fi
       if [[ -e "$stable" || -L "$stable" ]]; then
-        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$rel" "$dist/.hawk-dist"; then
+        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$stable_rel" "$dist/.hawk-dist"; then
           echo "[hawk-libs] desugar failed: refusing to overwrite existing namespaced output: $stable" >&2
           exit 1
         fi
@@ -471,7 +472,7 @@ case "$subcmd" in
         # 後勝ちの desugar が前の source の成果物を無警告で上書きしてしまう。
         # dist パス自体の一意化は dist レイアウト規約の再設計 (#119) 側の課題であり、
         # ここでは異なる source からの同名 rel 上書きを拒否するだけに留める
-        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$rel" "$dist/.hawk-dist"; then
+        if [[ ! -f "$dist/.hawk-dist" ]] || ! grep -qxF -- "$src_root"$'\t'"$stable_rel" "$dist/.hawk-dist"; then
           echo "[hawk-libs] desugar failed: refusing to overwrite existing file in non-dist directory: $out (remove it or the whole directory if it is a stale dist)" >&2
           exit 1
         fi
@@ -650,7 +651,7 @@ case "$subcmd" in
     _scratch_arr+=("$_marker_tmp")
     {
       [[ -f "$dist/.hawk-dist" ]] && cat "$dist/.hawk-dist"
-      for _rel in "${_pub_rel[@]}"; do printf '%s\t%s\n' "$src_root" "$_rel"; done
+      for _rel in "${_pub_rel[@]}"; do printf '%s\t%s\n' "$src_root" "${namespace:+$namespace/}$_rel"; done
       if [[ -n "$namespace" ]]; then
         for _rel in "${_pub_rel[@]}"; do
           _compat_is_skipped "$_rel" || printf '%s\t%s\tcompat\n' "$src_root" "$_rel"
@@ -674,9 +675,10 @@ case "$subcmd" in
     mv -f "$_root_marker_tmp" "$dist/.hawk-dist"
     for ((i = 0; i < ${#_pub_rel[@]}; i++)); do
       _rel="${_pub_rel[$i]}"
-      _stable="$dist/${namespace:+$namespace/}$_rel"
+      _stable_rel="${namespace:+$namespace/}$_rel"
+      _stable="$dist/$_stable_rel"
       _compat="$dist/$_rel"
-      _refresh_output_link "$_stable" "$runtime_ns/$_rel" "$src_root" "$_rel" ""
+      _refresh_output_link "$_stable" "$runtime_ns/$_rel" "$src_root" "$_stable_rel" ""
       [[ "$_compat" == "$_stable" ]] || _compat_is_skipped "$_rel" || _refresh_output_link "$_compat" "$runtime_ns/$_rel" "$src_root" "$_rel" compat
     done
     echo "$dist/${namespace:+$namespace/}$entry_rel"
