@@ -112,6 +112,15 @@ case "$subcmd" in
     src_root="$(cd "$(dirname "$src")" && pwd -P)"
     dist_phys="$(cd "$dist" && pwd -P)"
     cwd_phys="$(pwd -P)"
+    _marker_owns_output() {
+      local owner_src="$1" rel="$2" kind="${3:-}" marker="$dist/.hawk-dist"
+      [[ -f "$marker" ]] || return 1
+      if [[ "$kind" == compat ]]; then
+        grep -qxF -- "$owner_src"$'\t'"$rel"$'\t'compat "$marker"
+      else
+        grep -qxF -- "$owner_src"$'\t'"$rel" "$marker"
+      fi
+    }
     case "$src" in
       /*)
         src_abs="$src"
@@ -161,7 +170,13 @@ case "$subcmd" in
     _dist_has_source=0
     if [[ "$dist_phys/" == "$src_root/"* ]]; then
       while IFS= read -r _existing; do
-        [[ "$_existing" == "$dist/.hawk-dist" || "$_existing" == "$dist/.hawk-generations/"* ]] || { _dist_has_source=1; break; }
+        [[ "$_existing" == "$dist/.hawk-dist" || "$_existing" == "$dist/.hawk-generations/"* ]] && continue
+        _existing_rel="${_existing#"$dist"/}"
+        if _marker_owns_output "$src_root" "$_existing_rel" || _marker_owns_output "$src_root" "$_existing_rel" compat; then
+          continue
+        fi
+        _dist_has_source=1
+        break
       done < <(find "$dist" -type f -print)
     fi
     if [[ "$src_abs" == "$dist_phys" || "$src_abs" == "$dist_phys/"* || $_dist_has_source -eq 1 ]]; then
@@ -187,8 +202,8 @@ case "$subcmd" in
     }
 
     _refresh_output_link() {
-      local link="$1" target="$2" actual tmp
-      if [[ -e "$link" && ! -L "$link" ]]; then
+      local link="$1" target="$2" owner_src="$3" rel="$4" kind="${5:-}" actual tmp
+      if [[ -e "$link" && ! -L "$link" ]] && ! _marker_owns_output "$owner_src" "$rel" "$kind"; then
         echo "[hawk-libs] desugar failed: stable output is not a symlink: $link" >&2
         exit 1
       fi
@@ -387,8 +402,12 @@ case "$subcmd" in
         echo "[hawk-libs] desugar failed: output directory escapes dist via symlink: $compat_parent_phys" >&2
         exit 1
       fi
-      if [[ ( -e "$stable" && ! -L "$stable" ) || ( -e "$compat" && ! -L "$compat" ) ]]; then
+      if [[ -e "$stable" && ! -L "$stable" ]] && ! _marker_owns_output "$src_root" "$rel"; then
         echo "[hawk-libs] desugar failed: output path is not replaceable: $stable" >&2
+        exit 1
+      fi
+      if [[ "$compat" != "$stable" && -e "$compat" && ! -L "$compat" ]] && ! _marker_owns_output "$src_root" "$rel" compat; then
+        echo "[hawk-libs] desugar failed: output path is not replaceable: $compat" >&2
         exit 1
       fi
       if [[ -e "$compat" || -L "$compat" ]]; then
@@ -647,8 +666,8 @@ case "$subcmd" in
       _rel="${_pub_rel[$i]}"
       _stable="$dist/${namespace:+$namespace/}$_rel"
       _compat="$dist/$_rel"
-      _refresh_output_link "$_stable" "$runtime_ns/$_rel"
-      [[ "$_compat" == "$_stable" ]] || _compat_is_skipped "$_rel" || _refresh_output_link "$_compat" "$runtime_ns/$_rel"
+      _refresh_output_link "$_stable" "$runtime_ns/$_rel" "$src_root" "$_rel" ""
+      [[ "$_compat" == "$_stable" ]] || _compat_is_skipped "$_rel" || _refresh_output_link "$_compat" "$runtime_ns/$_rel" "$src_root" "$_rel" compat
     done
     echo "$dist/${namespace:+$namespace/}$entry_rel"
     ;;

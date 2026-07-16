@@ -410,9 +410,36 @@ set +e
 err=$(HAWK_DIST="$srctree/sub" "$LIBS" desugar "$srctree/main.awk" 2>&1 >/dev/null)
 st=$?
 set -e
-if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* ]]; then ok "dist_over_source_rejected"; else ng "dist_over_source_rejected" "exit=$st: $err"; fi
+if [[ "$st" -eq 1 && "$err" == *"dist and source trees overlap"* ]]; then ok "dist_over_source_rejected"; else ng "dist_over_source_rejected" "exit=$st: $err"; fi
 after_hash=$(cksum < "$srctree/sub/main.awk")
 if [[ "$before_hash" == "$after_hash" ]]; then ok "dist_over_source_untouched"; else ng "dist_over_source_untouched" "source file was modified"; fi
+
+# --- marker 所有の旧 flat regular file は generation symlink へ移行する ---
+legacy_stable="$TMP/legacy-stable"
+mkdir -p "$legacy_stable/dist"
+printf 'BEGIN { print "new-stable" }\n' > "$legacy_stable/main.awk"
+printf 'BEGIN { print "old-stable" }\n' > "$legacy_stable/dist/main.awk"
+legacy_stable_src="$(cd "$legacy_stable" && pwd -P)"
+printf '%s\tmain.awk\n' "$legacy_stable_src" > "$legacy_stable/dist/.hawk-dist"
+set +e
+err=$(cd "$legacy_stable" && HAWK_DIST=dist "$LIBS_ABS" desugar main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 0 && -L "$legacy_stable/dist/main.awk" && "$(gawk -f "$legacy_stable/dist/main.awk" </dev/null)" == "new-stable" ]]; then ok "legacy_stable_regular_migrated"; else ng "legacy_stable_regular_migrated" "exit=$st: $err"; fi
+
+legacy_compat="$TMP/legacy-compat"
+legacy_compat_src="$legacy_compat/apps/a"
+legacy_compat_dist="$legacy_compat_src/dist"
+mkdir -p "$legacy_compat_src" "$legacy_compat_dist"
+printf 'BEGIN { print "new-compat" }\n' > "$legacy_compat_src/main.awk"
+printf 'BEGIN { print "old-compat" }\n' > "$legacy_compat_dist/main.awk"
+legacy_compat_src_phys="$(cd "$legacy_compat_src" && pwd -P)"
+printf '%s\tmain.awk\tcompat\n' "$legacy_compat_src_phys" > "$legacy_compat_dist/.hawk-dist"
+set +e
+err=$(cd "$legacy_compat" && HAWK_DIST="$legacy_compat_dist" "$LIBS_ABS" desugar apps/a/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 0 && -L "$legacy_compat_dist/main.awk" && -L "$legacy_compat_dist/apps/a/main.awk" && "$(gawk -f "$legacy_compat_dist/main.awk" </dev/null)" == "new-compat" ]]; then ok "legacy_compat_regular_migrated"; else ng "legacy_compat_regular_migrated" "exit=$st: $err"; fi
 
 # --- marker のある dist への再実行 (上書き) は成功する ---
 dist="$TMP/distrerun"
