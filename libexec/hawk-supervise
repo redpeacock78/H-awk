@@ -10,7 +10,7 @@ fi
 set -e
 
 HAWK_LIBEXEC="${HAWK_LIBEXEC:-$(cd "$(dirname "$0")" && pwd)}"
-HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
+export HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
 LIBS="${HAWK_LIBEXEC}/hawk-libs"
 
 APP_AWK="${1:?app artifact path required}"

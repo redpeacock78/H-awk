@@ -115,6 +115,17 @@ if [[ "$worker_out" == *"outside-cwd-ok"* ]]; then
 else
   printf "  FAIL: worker_outside_hawk_lib (output=%s)\n" "$worker_out"; FAIL=$((FAIL+1))
 fi
+printf 'BEGIN { print ENVIRON["HAWK_LIB"] }\n' > "$work/env.awk"
+worker_env=$(cd "$work" && unset HAWK_LIB && HAWK_NO_LIBS=1 HAWK_NO_SERVE=1 "$HAWK_ROOT/libexec/hawk-worker" "$work/env.awk" 2>/dev/null)
+all_exported=1
+for entry in hawk-serve hawk-worker hawk-supervise hawk-check hawk-emit; do
+  grep -q '^export HAWK_LIB=' "$HAWK_ROOT/libexec/$entry" || all_exported=0
+done
+if [[ "$worker_env" == "$HAWK_ROOT" && "$all_exported" -eq 1 ]]; then
+  printf "  PASS: direct_entrypoints_export_hawk_lib\n"; PASS=$((PASS+1))
+else
+  printf "  FAIL: direct_entrypoints_export_hawk_lib (worker_env=%s, all_exported=%s)\n" "$worker_env" "$all_exported"; FAIL=$((FAIL+1))
+fi
 
 framework="$work/framework"
 mkdir -p "$framework/plugins/demo" "$framework/libs/net/zig-out/lib"
