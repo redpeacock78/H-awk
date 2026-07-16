@@ -470,6 +470,9 @@ dist="$TMP/distcs"
 first_a="$dist/$(readlink "$dist/current")/apps/a/main.awk"
 compat_a="$(readlink "$dist/main.awk")"
 ( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/b/main.awk >/dev/null )
+compat_after_b="$(readlink "$dist/main.awk")"
+( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/b/main.awk >/dev/null )
+if [[ "$compat_after_b" == "$compat_a" && "$(readlink "$dist/main.awk")" == "$compat_a" ]]; then ok "cross_source_compat_owner_persists_on_rerun"; else ng "cross_source_compat_owner_persists_on_rerun"; fi
 entries=$(find -L "$dist/current" -type f -name main.awk | wc -l | tr -d ' ')
 if [[ "$entries" -eq 2 && "$(readlink "$dist/main.awk")" == "$compat_a" ]] && grep -q "from-a" "$dist/apps/a/main.awk" && grep -q "from-b" "$dist/apps/b/main.awk"; then
   ok "cross_source_same_basename_isolated"
