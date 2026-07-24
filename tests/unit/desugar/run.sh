@@ -22,14 +22,46 @@ trap 'rm -rf "$TMP"' EXIT
 # --- 再帰 desugar + @include 書き換え + 実行 ---
 dist="$TMP/dist1"
 out=$(HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk")
-if [[ "$out" == "$dist/main.awk" ]]; then ok "entry_path_echoed"; else ng "entry_path_echoed" "$out"; fi
+if [[ "$out" == "$dist/tests/unit/desugar/fixtures/proj/main.awk" ]]; then ok "entry_path_echoed"; else ng "entry_path_echoed" "$out"; fi
 if [[ -f "$dist/app/page.awk" ]]; then ok "included_file_mirrored"; else ng "included_file_mirrored"; fi
 if [[ -f "$dist/app/sub/util.awk" ]]; then ok "nested_include_mirrored"; else ng "nested_include_mirrored"; fi
-if grep -qF "@include \"$dist/app/page.awk\"" "$dist/main.awk"; then ok "include_rewritten"; else ng "include_rewritten"; fi
-if grep -qF "@include \"$dist/app/sub/util.awk\"" "$dist/app/page.awk"; then ok "nested_include_rewritten"; else ng "nested_include_rewritten"; fi
+if grep -qF "@include \"$dist/current/" "$dist/main.awk" && grep -qF "app/page.awk\"" "$dist/main.awk"; then ok "include_rewritten"; else ng "include_rewritten"; fi
+if grep -qF "@include \"$dist/current/" "$dist/app/page.awk" && grep -qF "app/sub/util.awk\"" "$dist/app/page.awk"; then ok "nested_include_rewritten"; else ng "nested_include_rewritten"; fi
 if ! grep -q "let " "$dist/app/page.awk"; then ok "included_file_desugared"; else ng "included_file_desugared"; fi
 run_out=$(gawk -f "$dist/main.awk" </dev/null)
 if [[ "$run_out" == "hello from page" ]]; then ok "desugared_tree_runs"; else ng "desugared_tree_runs" "$run_out"; fi
+
+shared="$TMP/shared"
+mkdir -p "$shared"
+printf 'type User = { name: Str }\nfunction get_name() -> Str { return "shared" }\n' > "$shared/types.awk"
+printf '@include "types.awk"\nfunction main() -> Response { let u: User = { name: get_name() }; return ctx.res.text(get_name()) }\n' > "$shared/main.awk"
+if HAWK_DIST="$TMP/distshared" "$LIBS" desugar "$shared/main.awk" >/dev/null; then ok "shared_declarations_compile"; else ng "shared_declarations_compile"; fi
+
+shared_sig="$TMP/shared-sig"
+mkdir -p "$shared_sig"
+printf 'function normalize(x: Str) -> Str { return x }\n' > "$shared_sig/lib.awk"
+printf '@include "lib.awk"\nfunction caller() { return normalize(123) }\nBEGIN { caller() }\n' > "$shared_sig/main.awk"
+set +e
+err=$(HAWK_DIST="$TMP/distsharedsig" "$LIBS" desugar "$shared_sig/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -ne 0 && "$err" == *"normalize argument 1 expects Str, got Int"* ]]; then ok "shared_signature_checks_raw_caller"; else ng "shared_signature_checks_raw_caller" "exit=$st: $err"; fi
+
+lex_state="$TMP/lex-state"
+mkdir -p "$lex_state"
+printf 'function dsl_body() {\n  let x: Int = 1\n  return x\n}\n' > "$lex_state/a.awk"
+printf 'function raw(a, b) {\n  return a + b\n}\n' > "$lex_state/b.awk"
+printf '@include "a.awk"\n@include "b.awk"\nfunction caller() { return raw(1, 2) }\nBEGIN { print caller() }\n' > "$lex_state/main.awk"
+lex_index="$TMP/lex-index.awk"
+gawk -v V2_INDEX_LIST="$lex_state/a.awk"$'\034'"$lex_state/b.awk" -v V2_INDEX_OUT="$lex_index" -f dsl/index.awk
+if HAWK_DIST="$TMP/distlexstate" "$LIBS" desugar "$lex_state/main.awk" >/dev/null && ! grep -qF 'V2_SHARED_SIG["raw"' "$lex_index"; then ok "index_lex_state_isolated_per_file"; else ng "index_lex_state_isolated_per_file" "raw function was indexed as DSL"; fi
+
+gen="$TMP/generation"
+HAWK_DIST="$gen" "$LIBS" desugar "$FIX/solo.awk" >/dev/null
+old_gen=$(readlink "$gen/current")
+HAWK_DIST="$gen" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
+new_gen=$(readlink "$gen/current")
+if [[ "$old_gen" != "$new_gen" && $(find -L "$gen/current" -type f -name main.awk | wc -l | tr -d ' ') -eq 1 && $(find "$gen/$old_gen" -type f -name solo.awk | wc -l | tr -d ' ') -eq 1 ]]; then ok "generation_switch_is_atomic"; else ng "generation_switch_is_atomic"; fi
 
 # --- entry に戻る循環は exit 1 (gawk が実行時 fatal になるため desugar 時点で拒否) ---
 dist="$TMP/dist2"
@@ -71,7 +103,7 @@ fi
 # --- "./x.awk" 形式の include は正規化されて dist に書き換わる ---
 dist="$TMP/distds"
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/dotslash/main.awk" >/dev/null; then
-  if grep -qF "@include \"$dist/x.awk\"" "$dist/main.awk"; then ok "dotslash_include_normalized"; else ng "dotslash_include_normalized"; fi
+  if grep -qF "@include \"$dist/current/" "$dist/main.awk" && grep -qF "x.awk\"" "$dist/main.awk"; then ok "dotslash_include_normalized"; else ng "dotslash_include_normalized"; fi
   run_out=$(gawk -f "$dist/main.awk" </dev/null)
   if [[ "$run_out" == "dotslash-x" ]]; then ok "dotslash_tree_runs"; else ng "dotslash_tree_runs" "$run_out"; fi
 else
@@ -239,6 +271,27 @@ st=$?
 set -e
 if [[ "$st" -eq 1 && "$err" == *"reserved for the dist marker"* && ! -e "$dist/main.awk" && ! -e "$dist/.hawk-dist" ]]; then ok "marker_namespace_include_rejected"; else ng "marker_namespace_include_rejected" "exit=$st: $err"; fi
 
+reserved_ns="$TMP/reserved-namespace"
+mkdir -p "$reserved_ns/current"
+printf '@include "current/x.awk"\nBEGIN { print "reserved-namespace" }\n' > "$reserved_ns/main.awk"
+printf 'function reserved_x() { return 1 }\n' > "$reserved_ns/current/x.awk"
+dist="$TMP/dist-reserved-namespace"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$reserved_ns/main.awk" 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"reserved output namespace: current/x.awk"* && ! -e "$dist/current" ]]; then ok "reserved_namespace_include_rejected"; else ng "reserved_namespace_include_rejected" "exit=$st: $err"; fi
+
+reserved_entry="$TMP/reserved-entry"
+mkdir -p "$reserved_entry/.hawk-dist"
+printf 'BEGIN { print "reserved-entry" }\n' > "$reserved_entry/.hawk-dist/main.awk"
+dist="$TMP/dist-reserved-entry"
+set +e
+err=$(cd "$reserved_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar .hawk-dist/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *".hawk-dist/main.awk"* && ! -e "$dist/current" && ! -e "$dist/.hawk-dist" ]]; then ok "reserved_entry_namespace_rejected"; else ng "reserved_entry_namespace_rejected" "exit=$st: $err"; fi
+
 # --- プロジェクト内を指す絶対パス include は exit 1、外部の絶対パスは素通り ---
 absinc="$TMP/absinc"
 mkdir -p "$absinc"
@@ -357,35 +410,183 @@ set +e
 err=$(HAWK_DIST="$srctree/sub" "$LIBS" desugar "$srctree/main.awk" 2>&1 >/dev/null)
 st=$?
 set -e
-if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* ]]; then ok "dist_over_source_rejected"; else ng "dist_over_source_rejected" "exit=$st: $err"; fi
+if [[ "$st" -eq 1 && "$err" == *"dist and source trees overlap"* ]]; then ok "dist_over_source_rejected"; else ng "dist_over_source_rejected" "exit=$st: $err"; fi
 after_hash=$(cksum < "$srctree/sub/main.awk")
 if [[ "$before_hash" == "$after_hash" ]]; then ok "dist_over_source_untouched"; else ng "dist_over_source_untouched" "source file was modified"; fi
+
+# --- marker 所有の旧 flat regular file は generation symlink へ移行する ---
+legacy_stable="$TMP/legacy-stable"
+mkdir -p "$legacy_stable/dist"
+printf 'BEGIN { print "new-stable" }\n' > "$legacy_stable/main.awk"
+printf 'BEGIN { print "old-stable" }\n' > "$legacy_stable/dist/main.awk"
+legacy_stable_src="$(cd "$legacy_stable" && pwd -P)"
+printf '%s\tmain.awk\n' "$legacy_stable_src" > "$legacy_stable/dist/.hawk-dist"
+set +e
+err=$(cd "$legacy_stable" && HAWK_DIST=dist "$LIBS_ABS" desugar main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 0 && -L "$legacy_stable/dist/main.awk" && "$(gawk -f "$legacy_stable/dist/main.awk" </dev/null)" == "new-stable" ]]; then ok "legacy_stable_regular_migrated"; else ng "legacy_stable_regular_migrated" "exit=$st: $err"; fi
+
+legacy_compat="$TMP/legacy-compat"
+legacy_compat_src="$legacy_compat/apps/a"
+legacy_compat_dist="$legacy_compat_src/dist"
+mkdir -p "$legacy_compat_src" "$legacy_compat_dist"
+printf 'BEGIN { print "new-compat" }\n' > "$legacy_compat_src/main.awk"
+printf 'BEGIN { print "old-compat" }\n' > "$legacy_compat_dist/main.awk"
+legacy_compat_src_phys="$(cd "$legacy_compat_src" && pwd -P)"
+printf '%s\tmain.awk\tcompat\n' "$legacy_compat_src_phys" > "$legacy_compat_dist/.hawk-dist"
+set +e
+err=$(cd "$legacy_compat" && HAWK_DIST="$legacy_compat_dist" "$LIBS_ABS" desugar apps/a/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 0 && -L "$legacy_compat_dist/main.awk" && -L "$legacy_compat_dist/apps/a/main.awk" && "$(gawk -f "$legacy_compat_dist/main.awk" </dev/null)" == "new-compat" ]]; then ok "legacy_compat_regular_migrated"; else ng "legacy_compat_regular_migrated" "exit=$st: $err"; fi
+
+legacy_flat="$TMP/legacy-flat-two-column"
+legacy_flat_src="$legacy_flat/apps/a"
+legacy_flat_dist="$legacy_flat/dist"
+mkdir -p "$legacy_flat_src" "$legacy_flat_dist"
+printf 'BEGIN { print "new-flat" }\n' > "$legacy_flat_src/main.awk"
+printf 'BEGIN { print "old-flat" }\n' > "$legacy_flat_dist/main.awk"
+legacy_flat_src_phys="$(cd "$legacy_flat_src" && pwd -P)"
+printf '%s\tmain.awk\n' "$legacy_flat_src_phys" > "$legacy_flat_dist/.hawk-dist"
+set +e
+err=$(cd "$legacy_flat" && HAWK_DIST=dist "$LIBS_ABS" desugar apps/a/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 0 && -L "$legacy_flat_dist/main.awk" && -L "$legacy_flat_dist/apps/a/main.awk" && "$(gawk -f "$legacy_flat_dist/main.awk" </dev/null)" == "new-flat" ]] && grep -qxF -- "$legacy_flat_src_phys"$'\t'main.awk$'\t'compat "$legacy_flat_dist/.hawk-dist"; then ok "legacy_flat_two_column_compat_migrated"; else ng "legacy_flat_two_column_compat_migrated" "exit=$st: $err"; fi
+
+legacy_dir="$TMP/legacy-dir"
+mkdir -p "$legacy_dir/dist/main.awk"
+printf 'BEGIN { print "directory-guard" }\n' > "$legacy_dir/main.awk"
+legacy_dir_src="$(cd "$legacy_dir" && pwd -P)"
+printf '%s\tmain.awk\n' "$legacy_dir_src" > "$legacy_dir/dist/.hawk-dist"
+set +e
+err=$(cd "$legacy_dir" && HAWK_DIST=dist "$LIBS_ABS" desugar main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && -d "$legacy_dir/dist/main.awk" && ! -e "$legacy_dir/dist/current" && ! -L "$legacy_dir/dist/current" ]]; then ok "marker_owned_directory_rejected_early"; else ng "marker_owned_directory_rejected_early" "exit=$st, current=$([[ -e "$legacy_dir/dist/current" || -L "$legacy_dir/dist/current" ]] && echo yes || echo no): $err"; fi
 
 # --- marker のある dist への再実行 (上書き) は成功する ---
 dist="$TMP/distrerun"
 HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null
 if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/proj/main.awk" >/dev/null; then ok "rerun_over_marker_ok"; else ng "rerun_over_marker_ok" "exit != 0"; fi
 
-# --- 異なる source の同名 basename entry (dist/main.awk が衝突) は marker に別 source
-#     として上書き拒否され、先に publish した成果物が生き残る ---
-appsA="$TMP/appsA"
-appsB="$TMP/appsB"
-mkdir -p "$appsA" "$appsB"
-printf 'BEGIN { print "from-a" }\n' > "$appsA/main.awk"
-printf 'BEGIN { print "from-b" }\n' > "$appsB/main.awk"
-dist="$TMP/distcs"
-HAWK_DIST="$dist" "$LIBS" desugar "$appsA/main.awk" >/dev/null
-before_hash=$(cksum < "$dist/main.awk")
+# --- marker 未登録の compat symlink は上書きしない ---
+compat_src="$TMP/unowned-compat-src"
+dist="$TMP/unowned-compat-dist"
+mkdir -p "$compat_src/apps/a" "$dist"
+printf 'BEGIN { print "compat" }\n' > "$compat_src/apps/a/main.awk"
+compat_target="$TMP/unowned-compat-target"
+printf 'user file\n' > "$compat_target"
+ln -s "$compat_target" "$dist/main.awk"
 set +e
-err=$(HAWK_DIST="$dist" "$LIBS" desugar "$appsB/main.awk" 2>&1 >/dev/null)
+err=$(cd "$compat_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/a/main.awk 2>&1 >/dev/null)
 st=$?
 set -e
-after_hash=$(cksum < "$dist/main.awk")
-if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* && "$before_hash" == "$after_hash" ]]; then
-  ok "cross_source_same_basename_rejected"
+if [[ "$st" -eq 1 && -L "$dist/main.awk" && "$(readlink "$dist/main.awk")" == "$compat_target" && ! -e "$dist/current" ]]; then ok "unowned_compat_symlink_rejected"; else ng "unowned_compat_symlink_rejected" "exit=$st, target=$(readlink "$dist/main.awk" 2>/dev/null): $err"; fi
+
+# --- 改ざんされた stable symlink は現行 generation へ戻す ---
+stale_src="$TMP/stale-stable-src"
+mkdir -p "$stale_src"
+cp "$FIX/solo.awk" "$stale_src/main.awk"
+dist="$TMP/dist-stale-stable"
+( cd "$stale_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar main.awk >/dev/null )
+stale_target="$TMP/stale-target.awk"
+printf 'BEGIN { print "stale" }\n' > "$stale_target"
+rm "$dist/main.awk"
+ln -s "$stale_target" "$dist/main.awk"
+( cd "$stale_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar main.awk >/dev/null )
+if [[ -L "$dist/main.awk" && "$(readlink "$dist/main.awk")" == "$dist/current/main.awk" ]]; then ok "stale_stable_symlink_refreshed"; else ng "stale_stable_symlink_refreshed" "target=$(readlink "$dist/main.awk" 2>/dev/null)"; fi
+
+stale_dir="$TMP/stale-directory-target"
+mkdir -p "$stale_dir"
+rm "$dist/main.awk"
+ln -s "$stale_dir" "$dist/main.awk"
+( cd "$stale_src" && HAWK_DIST="$dist" "$LIBS_ABS" desugar main.awk >/dev/null )
+if [[ -L "$dist/main.awk" && "$(readlink "$dist/main.awk")" == "$dist/current/main.awk" ]]; then ok "stale_directory_symlink_refreshed"; else ng "stale_directory_symlink_refreshed" "target=$(readlink "$dist/main.awk" 2>/dev/null)"; fi
+
+# --- record と alias が include 間で同名なら index 時点で拒否する ---
+type_collision="$TMP/type-collision"
+mkdir -p "$type_collision"
+printf 'type User = { name: Str }\n' > "$type_collision/record.awk"
+printf 'type User = Str\n' > "$type_collision/alias.awk"
+printf '@include "record.awk"\n@include "alias.awk"\nBEGIN { print "collision" }\n' > "$type_collision/main.awk"
+printf '@include "alias.awk"\n@include "record.awk"\nBEGIN { print "collision" }\n' > "$type_collision/reverse.awk"
+dist="$TMP/dist-type-collision"
+set +e
+err=$(HAWK_DIST="$dist" "$LIBS" desugar "$type_collision/main.awk" 2>&1 >/dev/null)
+st=$?
+err_reverse=$(HAWK_DIST="$TMP/dist-type-collision-reverse" "$LIBS" desugar "$type_collision/reverse.awk" 2>&1 >/dev/null)
+st_reverse=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"type name is both record and alias: User"* && "$st_reverse" -eq 1 && "$err_reverse" == *"type name is both record and alias: User"* ]]; then ok "alias_record_name_collision_rejected"; else ng "alias_record_name_collision_rejected" "forward=$st: $err / reverse=$st_reverse: $err_reverse"; fi
+
+# --- 異なる source の同名 basename entry は namespace で分離される ---
+multi_entry="$TMP/multi-entry"
+mkdir -p "$multi_entry/apps/a" "$multi_entry/apps/b"
+printf 'BEGIN { print "from-a" }\n' > "$multi_entry/apps/a/main.awk"
+printf 'BEGIN { print "from-b" }\n' > "$multi_entry/apps/b/main.awk"
+dist="$TMP/distcs"
+( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+first_a="$dist/$(readlink "$dist/current")/apps/a/main.awk"
+compat_a="$(readlink "$dist/main.awk")"
+( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/b/main.awk >/dev/null )
+compat_after_b="$(readlink "$dist/main.awk")"
+( cd "$multi_entry" && HAWK_DIST="$dist" "$LIBS_ABS" desugar apps/b/main.awk >/dev/null )
+if [[ "$compat_after_b" == "$compat_a" && "$(readlink "$dist/main.awk")" == "$compat_a" ]]; then ok "cross_source_compat_owner_persists_on_rerun"; else ng "cross_source_compat_owner_persists_on_rerun"; fi
+entries=$(find -L "$dist/current" -type f -name main.awk | wc -l | tr -d ' ')
+if [[ "$entries" -eq 2 && "$(readlink "$dist/main.awk")" == "$compat_a" ]] && grep -q "from-a" "$dist/apps/a/main.awk" && grep -q "from-b" "$dist/apps/b/main.awk"; then
+  ok "cross_source_same_basename_isolated"
 else
-  ng "cross_source_same_basename_rejected" "exit=$st: $err"
+  ng "cross_source_same_basename_isolated" "entries=$entries"
 fi
+run_a=$(gawk -f "$dist/apps/a/main.awk" </dev/null)
+run_b=$(gawk -f "$dist/apps/b/main.awk" </dev/null)
+if [[ "$run_a" == "from-a" && "$run_b" == "from-b" && "$first_a" -ef "$dist/current/apps/a/main.awk" ]]; then
+  ok "multi_entry_namespace_coexist"
+else
+  ng "multi_entry_namespace_coexist" "a=$run_a, b=$run_b"
+fi
+
+dist_namespace_owner="$TMP/dist-namespace-owner"
+( cd "$multi_entry" && HAWK_DIST="$dist_namespace_owner" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+if ( cd "$multi_entry" && HAWK_DIST="$dist_namespace_owner" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null ); then
+  ok "namespaced_same_cwd_rerun"
+else
+  ng "namespaced_same_cwd_rerun"
+fi
+mkdir -p "$dist_namespace_owner/a"
+unrelated_namespace_target="$TMP/unrelated-namespace-target.awk"
+printf 'BEGIN { print "unrelated" }\n' > "$unrelated_namespace_target"
+ln -s "$unrelated_namespace_target" "$dist_namespace_owner/a/main.awk"
+unrelated_namespace_link="$(readlink "$dist_namespace_owner/a/main.awk")"
+set +e
+err=$(cd "$multi_entry/apps" && HAWK_DIST="$dist_namespace_owner" "$LIBS_ABS" desugar a/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite existing namespaced output"* && -L "$dist_namespace_owner/a/main.awk" && "$(readlink "$dist_namespace_owner/a/main.awk")" == "$unrelated_namespace_link" ]]; then
+  ok "cross_cwd_namespace_marker_isolated"
+else
+  ng "cross_cwd_namespace_marker_isolated" "exit=$st: $err"
+fi
+
+owner_a="$(cd "$multi_entry/apps/a" && pwd -P)"
+owner_b="$(cd "$multi_entry/apps/b" && pwd -P)"
+dist_missing_other="$TMP/dist-compat-missing-other"
+( cd "$multi_entry" && HAWK_DIST="$dist_missing_other" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+rm "$dist_missing_other/main.awk"
+set +e
+( cd "$multi_entry" && HAWK_DIST="$dist_missing_other" "$LIBS_ABS" desugar apps/b/main.awk >/dev/null )
+st=$?
+set -e
+if [[ "$st" -eq 0 && ! -e "$dist_missing_other/main.awk" && ! -L "$dist_missing_other/main.awk" ]] && ! grep -qxF -- "$owner_b"$'\t'main.awk$'\t'compat "$dist_missing_other/.hawk-dist"; then ok "missing_compat_other_source_skips"; else ng "missing_compat_other_source_skips" "exit=$st, compat=$([[ -e "$dist_missing_other/main.awk" || -L "$dist_missing_other/main.awk" ]] && echo yes || echo no)"; fi
+
+dist_missing_self="$TMP/dist-compat-missing-self"
+( cd "$multi_entry" && HAWK_DIST="$dist_missing_self" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+compat_self="$(readlink "$dist_missing_self/main.awk")"
+rm "$dist_missing_self/main.awk"
+( cd "$multi_entry" && HAWK_DIST="$dist_missing_self" "$LIBS_ABS" desugar apps/a/main.awk >/dev/null )
+if [[ -L "$dist_missing_self/main.awk" && "$(readlink "$dist_missing_self/main.awk")" == "$compat_self" ]] && grep -qxF -- "$owner_a"$'\t'main.awk$'\t'compat "$dist_missing_self/.hawk-dist"; then ok "missing_compat_owner_repairs"; else ng "missing_compat_owner_repairs"; fi
 
 # --- marker は publish 済み rel のみ信頼し、同じ dist 配下の無関係な既存ファイルは
 #     引き続き上書き保護される (marker が空ファイルだと最初の成功後に
@@ -393,17 +594,10 @@ fi
 srcsub2="$TMP/srcsub2"
 mkdir -p "$srcsub2/sub"
 cp "$FIX/solo.awk" "$srcsub2/main.awk"
-HAWK_DIST="$srcsub2/sub" "$LIBS" desugar "$srcsub2/main.awk" >/dev/null
-printf 'BEGIN { print "other-source" }\n' > "$srcsub2/sub/other.awk"
-before_hash=$(cksum < "$srcsub2/sub/other.awk")
-cp "$FIX/solo.awk" "$srcsub2/other.awk"
-set +e
-err=$(HAWK_DIST="$srcsub2/sub" "$LIBS" desugar "$srcsub2/other.awk" 2>&1 >/dev/null)
-st=$?
-set -e
-if [[ "$st" -eq 1 && "$err" == *"refusing to overwrite"* ]]; then ok "marker_does_not_bless_unrelated_files"; else ng "marker_does_not_bless_unrelated_files" "exit=$st: $err"; fi
-after_hash=$(cksum < "$srcsub2/sub/other.awk")
-if [[ "$before_hash" == "$after_hash" ]]; then ok "marker_does_not_bless_unrelated_files_untouched"; else ng "marker_does_not_bless_unrelated_files_untouched" "source file was modified"; fi
+before_hash=$(cksum < "$srcsub2/main.awk")
+if HAWK_DIST="$srcsub2/sub" "$LIBS" desugar "$srcsub2/main.awk" >/dev/null; then ok "source_tree_dist_published"; else ng "source_tree_dist_published"; fi
+after_hash=$(cksum < "$srcsub2/main.awk")
+if [[ "$before_hash" == "$after_hash" && $(find -L "$srcsub2/sub/current" -type f -name main.awk | wc -l | tr -d ' ') -eq 1 ]]; then ok "source_tree_dist_source_untouched"; else ng "source_tree_dist_source_untouched"; fi
 
 # --- include 名に glob 文字が含まれても、_seen の未クォート展開で
 #     カレントディレクトリの同名ファイルと誤って alias 判定されない ---
@@ -432,6 +626,10 @@ work="$TMP/work"; mkdir -p "$work"
 cp "$FIX/solo.awk" "$work/main.awk"
 out=$(cd "$work" && "$LIBS_ABS" desugar main.awk)
 if [[ "$out" == "dist/main.awk" && -f "$work/dist/main.awk" ]]; then ok "default_dist_dir"; else ng "default_dist_dir" "$out"; fi
+
+# --- HAWK_DIST の末尾 / は親ディレクトリ検査前に正規化する ---
+dist="$TMP/dist-trailing/"
+if HAWK_DIST="$dist" "$LIBS" desugar "$FIX/solo.awk" >/dev/null && [[ -f "${dist%/}/solo.awk" ]]; then ok "hawk_dist_trailing_slash_normalized"; else ng "hawk_dist_trailing_slash_normalized"; fi
 
 # --- 入力ファイル不在は従来どおり exit 1 ---
 set +e
@@ -542,6 +740,23 @@ if [[ "$st" -eq 1 && ! -e "$symlink_parent_outside/sub" ]]; then
   ok "symlinked_parent_no_external_mkdir"
 else
   ng "symlinked_parent_no_external_mkdir" "exit=$st, outside_sub=$([[ -e "$symlink_parent_outside/sub" ]] && echo yes || echo no): $err"
+fi
+
+# --- stable namespace の親 symlink は作成前に拒否し、外部へ出力しない ---
+stable_parent_src="$TMP/stable-parent-src"
+stable_parent_dist="$TMP/stable-parent-dist"
+stable_parent_outside="$TMP/stable-parent-outside"
+mkdir -p "$stable_parent_src/app" "$stable_parent_dist" "$stable_parent_outside"
+printf 'BEGIN { print "stable-parent" }\n' > "$stable_parent_src/app/main.awk"
+ln -s "$stable_parent_outside" "$stable_parent_dist/app"
+set +e
+err=$(cd "$stable_parent_src" && HAWK_DIST="$stable_parent_dist" "$LIBS_ABS" desugar app/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 1 && ! -e "$stable_parent_outside/main.awk" && ! -e "$stable_parent_dist/current" ]]; then
+  ok "stable_symlink_parent_escape_rejected"
+else
+  ng "stable_symlink_parent_escape_rejected" "exit=$st, external=$([[ -e "$stable_parent_outside/main.awk" ]] && echo yes || echo no): $err"
 fi
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

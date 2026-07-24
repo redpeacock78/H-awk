@@ -198,6 +198,7 @@ BEGIN {
   test_plugin_call_hooks_normal()
   test_plugin_call_hooks_abort()
   test_plugin_missing_config()
+  test_plugin_discover_hawk_lib_root()
 
   test_libs_binary_length()
   test_libs_binary_read_text()

@@ -8,7 +8,7 @@ fi
 
 set -e
 
-HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
+export HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
 HAWK_LIBEXEC="${HAWK_LIBEXEC:-$(cd "$(dirname "$0")" && pwd)}"
 LIBS="${HAWK_LIBEXEC}/hawk-libs"
 
@@ -40,6 +40,8 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+HAWK_PLUGIN_DIRS="$("$LIBS" plugin-dirs)"
+export HAWK_PLUGIN_DIRS
 mapfile -t _plugin_paths < <("$LIBS" plugins)
 _plugin_args=()
 for p in "${_plugin_paths[@]}"; do
@@ -81,6 +83,7 @@ shutdown() {
 trap shutdown INT TERM
 
 APP_AWK="$("$LIBS" desugar "$APP")"
+[[ "$APP_AWK" == /* ]] || APP_AWK="$(pwd)/$APP_AWK"
 
 # --workers N かつ supervisor 利用可能な場合は hawk-supervise に委譲する
 if [[ "$EFFECTIVE_WORKERS" -gt 1 && "$HAS_NET" -eq 1 ]]; then
@@ -100,9 +103,13 @@ if [[ "$EFFECTIVE_WORKERS" -gt 1 && "$HAS_NET" -eq 1 ]]; then
   exit 0
 fi
 
+RUNTIME_AWK="$(mktemp "${TMPDIR:-/tmp}/hawk-runtime.XXXXXX")"
+trap 'rm -f "$RUNTIME_AWK"' EXIT
+"$LIBS" runtime-awk > "$RUNTIME_AWK"
+
 for (( i=0; i<EFFECTIVE_WORKERS; i++ )); do
   # shellcheck disable=SC2086
-  LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk "${_plugin_args[@]}" -f "$APP_AWK" &
+  LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f "$RUNTIME_AWK" "${_plugin_args[@]}" -f "$APP_AWK" &
   WORKER_PIDS+=($!)
 done
 
@@ -124,7 +131,7 @@ while [[ ${#WORKER_PIDS[@]} -gt 0 ]]; do
         echo "[hawk] worker $pid exited $status, restart in 1s" >&2
         sleep 1
         # shellcheck disable=SC2086
-        LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f hawk.awk "${_plugin_args[@]}" -f "$APP_AWK" &
+        LC_ALL=C gawk -b $LIBS_ARGS $LIBS_VARS -f "$RUNTIME_AWK" "${_plugin_args[@]}" -f "$APP_AWK" &
         new_pids+=($!)
       fi
     fi

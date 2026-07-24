@@ -14,6 +14,7 @@
 BEGIN {
   V2_SRC = (ARGC > 1) ? ARGV[1] : "/dev/stdin"
   V2_ERRORS = 0
+  v2_merge_shared_pre_rpn()
   v2_lex(V2_SRC)
   if (V2_DUMP == "lex")   { v2_dump_lex();   exit(V2_ERRORS ? 1 : 0) }
   v2_rpn()
@@ -25,6 +26,17 @@ BEGIN {
   if (V2_ERRORS) exit 1
   v2_emit()
   exit(V2_ERRORS ? 1 : 0)
+}
+
+function v2_merge_shared_pre_rpn(    k, p) {
+  for (k in V2_SHARED_ALIAS) ALIAS[k] = V2_SHARED_ALIAS[k]
+  for (k in V2_SHARED_SIG) SIG[k] = V2_SHARED_SIG[k]
+  for (k in V2_SHARED_RECORD_TYPE) V2_RECORD_TYPE[k] = 1
+  for (k in V2_SHARED_RECORD_FIELDS) {
+    split(k, p, SUBSEP)
+    V2_RECORD_FIELDS[p[1], p[2]] = V2_SHARED_RECORD_FIELDS[k]
+  }
+  for (k in V2_SHARED_RAW_FUNC) V2_RAW_FUNC[k] = 1
 }
 
 function v2_dump_lex(   i) { for (i = 1; i <= TOK["n"]; i++) printf "%d\t%s\t%d\t%d\t%s\n", i, TOK[i,"kind"], TOK[i,"line"], TOK[i,"col"], TOK[i,"text"] }

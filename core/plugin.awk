@@ -17,15 +17,30 @@
 # config_keys を満たさなかった場合 PLUGIN_REGISTER_ERROR=1 を立てる
 # (起動時 main loop が exit 1 で判定する)
 
-function plugin_discover(   cmd, pname, func_name, meta) {
-  cmd = "ls plugins 2>/dev/null"
-  while ((cmd | getline pname) > 0) {
+function plugin_discover(   cmd, pname, func_name, meta, root, disabled, dirs, n, i, dir) {
+  if (ENVIRON["HAWK_PLUGIN_DIRS"] != "") {
+    n = split(ENVIRON["HAWK_PLUGIN_DIRS"], dirs, "\n")
+  } else {
+    root = (ENVIRON["HAWK_LIB"] != "" ? ENVIRON["HAWK_LIB"] : ".") "/plugins"
+    cmd = "ls " _shellquote(root) " 2>/dev/null"
+    while ((cmd | getline pname) > 0) {
+      if (pname == "" || pname ~ /^\./) continue
+      dirs[++n] = root "/" pname
+    }
+    close(cmd)
+  }
+  for (i = 1; i <= n; i++) {
+    dir = dirs[i]
+    sub(/\/+$/, "", dir)
+    pname = dir
+    sub(/^.*\//, "", pname)
     if (pname == "" || pname ~ /^\./) continue
-    if ((getline _ < ("plugins/" pname "/.disabled")) >= 0) {
-      close("plugins/" pname "/.disabled")
+    disabled = dir "/.disabled"
+    if ((getline _ < disabled) >= 0) {
+      close(disabled)
       continue
     }
-    close("plugins/" pname "/.disabled")
+    close(disabled)
 
     func_name = "plugin_" pname "_manifest"
     delete meta
@@ -36,7 +51,6 @@ function plugin_discover(   cmd, pname, func_name, meta) {
     @func_name(meta)
     plugin_register(pname, meta)
   }
-  close(cmd)
 }
 
 function plugin_register(pname, meta,    keys, n, j, hooks, m, hook_name, k) {

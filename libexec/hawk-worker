@@ -3,12 +3,13 @@
 # libexec/hawk-worker -- supervised worker ラッパー
 
 HAWK_LIBEXEC="${HAWK_LIBEXEC:-$(cd "$(dirname "$0")" && pwd)}"
-HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
+export HAWK_LIB="${HAWK_LIB:-$(cd "$(dirname "$0")/.." && pwd)}"
 LIBS="${HAWK_LIBEXEC}/hawk-libs"
 
 APP_AWK="${1:?app artifact path required}"
 shift
 PLUGIN_ARGS=("$@")
+[[ "$APP_AWK" == /* ]] || APP_AWK="$(pwd)/$APP_AWK"
 
 if [[ -n "${HAWK_RUN_DIR:-}" && -n "${HAWK_PROC_ID:-}" ]]; then
   safe_pid="$BASHPID"
@@ -21,5 +22,14 @@ fi
 
 eval "$("$LIBS" libs)"
 
+if [[ "${HAWK_SUPERVISED:-}" == 1 ]]; then
+  if [[ ! -f "${HAWK_RUNTIME_AWK:-}" ]]; then
+    echo "[hawk-worker] supervised runtime bundle not found: ${HAWK_RUNTIME_AWK:-<unset>}" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC2086
+  exec gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_RUNTIME_AWK" "${PLUGIN_ARGS[@]}" -f "$APP_AWK"
+fi
+
 # shellcheck disable=SC2086
-exec gawk -b $LIBS_ARGS $LIBS_VARS -f "$HAWK_LIB/hawk.awk" "${PLUGIN_ARGS[@]}" -f "$APP_AWK"
+exec gawk -b $LIBS_ARGS $LIBS_VARS -f <("$LIBS" runtime-awk) "${PLUGIN_ARGS[@]}" -f "$APP_AWK"
