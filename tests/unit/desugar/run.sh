@@ -441,6 +441,20 @@ st=$?
 set -e
 if [[ "$st" -eq 0 && -L "$legacy_compat_dist/main.awk" && -L "$legacy_compat_dist/apps/a/main.awk" && "$(gawk -f "$legacy_compat_dist/main.awk" </dev/null)" == "new-compat" ]]; then ok "legacy_compat_regular_migrated"; else ng "legacy_compat_regular_migrated" "exit=$st: $err"; fi
 
+legacy_flat="$TMP/legacy-flat-two-column"
+legacy_flat_src="$legacy_flat/apps/a"
+legacy_flat_dist="$legacy_flat/dist"
+mkdir -p "$legacy_flat_src" "$legacy_flat_dist"
+printf 'BEGIN { print "new-flat" }\n' > "$legacy_flat_src/main.awk"
+printf 'BEGIN { print "old-flat" }\n' > "$legacy_flat_dist/main.awk"
+legacy_flat_src_phys="$(cd "$legacy_flat_src" && pwd -P)"
+printf '%s\tmain.awk\n' "$legacy_flat_src_phys" > "$legacy_flat_dist/.hawk-dist"
+set +e
+err=$(cd "$legacy_flat" && HAWK_DIST=dist "$LIBS_ABS" desugar apps/a/main.awk 2>&1 >/dev/null)
+st=$?
+set -e
+if [[ "$st" -eq 0 && -L "$legacy_flat_dist/main.awk" && -L "$legacy_flat_dist/apps/a/main.awk" && "$(gawk -f "$legacy_flat_dist/main.awk" </dev/null)" == "new-flat" ]] && grep -qxF -- "$legacy_flat_src_phys"$'\t'main.awk$'\t'compat "$legacy_flat_dist/.hawk-dist"; then ok "legacy_flat_two_column_compat_migrated"; else ng "legacy_flat_two_column_compat_migrated" "exit=$st: $err"; fi
+
 legacy_dir="$TMP/legacy-dir"
 mkdir -p "$legacy_dir/dist/main.awk"
 printf 'BEGIN { print "directory-guard" }\n' > "$legacy_dir/main.awk"

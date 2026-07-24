@@ -142,7 +142,10 @@ case "$subcmd" in
       local owner_src="$1" rel="$2" kind="${3:-}" marker="$dist/.hawk-dist"
       [[ -f "$marker" ]] || return 1
       if [[ "$kind" == compat ]]; then
-        grep -qxF -- "$owner_src"$'\t'"$rel"$'\t'compat "$marker"
+        # 旧2列行は同じ src_root が flat dist/<rel> を publish した所有記録。
+        # namespaced stable は ns/rel なので bare rel に一致せず、empty namespace は
+        # stable == compat の同一パス。他 src_root も行全体の完全一致で除外される。
+        grep -qxF -- "$owner_src"$'\t'"$rel"$'\t'compat "$marker" || grep -qxF -- "$owner_src"$'\t'"$rel" "$marker"
       else
         grep -qxF -- "$owner_src"$'\t'"$rel" "$marker"
       fi
